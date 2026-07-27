@@ -14,7 +14,15 @@ test('demo fixture is explicitly fictional and independent for every session', (
   const second = createDemoWorkspace();
   assert.equal(first.demoMetadata.fictional, true);
   assert.match(first.demoMetadata.notice, /fictional/i);
+  assert.equal(first.demoMetadata.fixtureVersion, 'priorena-demo-v2');
+  assert.equal(first.demoMetadata.walkthrough.length, 3);
   assert.deepEqual(Object.keys(first.projects), ['Northstar Launch']);
+  assert.equal(first.projects['Northstar Launch'].stories.length, 5);
+  assert.equal(first.projects['Northstar Launch'].transcripts[0].extractedFindings.length, 6);
+  assert.deepEqual(
+    [...new Set(first.projects['Northstar Launch'].transcripts[0].extractedFindings.map(finding => finding.category))].sort(),
+    ['action', 'blocker', 'decision', 'dependency', 'progress_update', 'risk']
+  );
   first.projects['Northstar Launch'].stories[0].summary = 'Changed temporarily';
   assert.equal(second.projects['Northstar Launch'].stories[0].summary, 'Complete launch-readiness review');
   assert.doesNotMatch(JSON.stringify(first), /REALORG|INTERNALORG|jira\.internal|confluence\.internal/i);

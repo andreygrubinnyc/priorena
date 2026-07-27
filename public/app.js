@@ -335,6 +335,8 @@ async function fetchDemoConfig() {
       demoSession = await sessionResponse.json();
       demoFeedback = 'Your temporary demo session was restored.';
       setDemoExperienceActive(true);
+    } else if (sessionResponse.status === 401 || sessionResponse.status === 404) {
+      await createDemoSession('A fictional starter project was loaded automatically.');
     }
   } catch (error) {
     demoAvailable = false;
@@ -353,6 +355,7 @@ function renderDemoShell() {
   const workspace = demoSession.workspace || {};
   const metadata = workspace.demoMetadata || {};
   const projectEntries = Object.entries(workspace.projects || {});
+  const walkthrough = Array.isArray(metadata.walkthrough) ? metadata.walkthrough.slice(0, 4) : [];
   const stories = projectEntries.flatMap(([projectName, project]) => (project.stories || []).map(story => ({ ...story, projectName })));
   const evidence = projectEntries.flatMap(([projectName, project]) => (project.transcripts || []).flatMap(source =>
     (source.extractedFindings || []).map(finding => ({ ...finding, projectName, sourceTitle: source.title, sourceKind: source.sourceKind }))
@@ -378,8 +381,17 @@ function renderDemoShell() {
       <div><span>Inactive-session expiry</span><strong>${escapeHtml(formatDemoExpiry(demoSession.idleExpiresAt))}</strong></div>
       <div><span>Absolute expiry</span><strong>${escapeHtml(formatDemoExpiry(demoSession.absoluteExpiresAt))}</strong></div>
     </div>
+    ${walkthrough.length ? `
+      <section class="demo-walkthrough" aria-labelledby="demo-walkthrough-title">
+        <div>
+          <div class="eyebrow">START HERE</div>
+          <h3 id="demo-walkthrough-title">Explore the fictional sample</h3>
+        </div>
+        <ol>${walkthrough.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
+      </section>
+    ` : ''}
     <div class="demo-section-heading">
-      <div><div class="eyebrow">READ-ONLY PREVIEW</div><h3>Fictional workspace</h3></div>
+      <div><div class="eyebrow">GUIDED SAMPLE</div><h3>Fictional workspace</h3></div>
       <span>${stories.length} work item${stories.length === 1 ? '' : 's'} · ${acceptedEvidence.length} accepted evidence record${acceptedEvidence.length === 1 ? '' : 's'}</span>
     </div>
     <div class="demo-grid">

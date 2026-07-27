@@ -44,7 +44,7 @@ cp .env.example .env
 npm start
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then choose **Try Demo**.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Demo Mode automatically opens a fictional **Northstar Launch** starter project with five work items, six accepted evidence records, three milestones, and a short guided walkthrough. You can temporarily update work items, add and review sanitized evidence, and reset the sample.
 
 The demo is independently fictional and temporary. Each local browser session receives an isolated in-memory workspace. Demo state is erased on reset, exit, expiry, or server restart and never enters the normal persistence path.
 

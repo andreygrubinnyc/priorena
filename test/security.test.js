@@ -245,6 +245,8 @@ test('generated controls contain no executable inline handlers', () => {
   assert.match(source, /reviewDemoEvidence/);
   assert.match(source, /SANITIZED TEXT ONLY · REVIEW FIRST/);
   assert.match(source, /\/api\/demo\/session\/evidence\/review/);
+  assert.match(source, /A fictional starter project was loaded automatically/);
+  assert.match(source, /START HERE/);
   assert.doesNotMatch(source, /\beval\s*\(|new Function\s*\(/);
   assert.match(source, /DECLARATIVE_ACTIONS/);
   assert.match(source, /js-copy-text/);
