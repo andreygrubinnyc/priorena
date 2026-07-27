@@ -1,0 +1,14 @@
+{
+  "name": "priorena",
+  "version": "0.1.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "express": "^4.18.4"
+  }
+}

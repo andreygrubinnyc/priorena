@@ -1,0 +1,14 @@
+# Local runtime state and secrets
+.env
+.priorena-data/
+pilot-data.json
+uploads/
+
+# Dependencies and generated output
+node_modules/
+coverage/
+dist/
+
+# Logs and OS noise
+*.log
+.DS_Store
