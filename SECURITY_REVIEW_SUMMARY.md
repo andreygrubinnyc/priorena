@@ -15,6 +15,8 @@ This sanitized public edition was prepared from a fixed snapshot of the authorit
 - The release inventory excludes private persistence, uploads, `.env`, dependency installs, operational screenshots, and handoff material.
 - The fictional Demo Mode was verified at a 1280×720 browser viewport.
 
+The later fictional-demo usability update on 2026-07-27 changed only the synthetic fixture, browser-side automatic demo entry, walkthrough presentation, tests, documentation, and showcase images. It passed the complete 46-test suite, JavaScript syntax checks, browser verification, and targeted private-marker and secret scans. It did not change server routes, persistence, provider behavior, or the loopback-only network boundary.
+
 ## Security boundary
 
 The result applies to the reviewed source snapshot and the documented single-user, loopback-only deployment model. Priorena has no authentication because it must not be exposed beyond `127.0.0.1`.

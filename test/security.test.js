@@ -227,6 +227,7 @@ test('demo API creates isolated temporary sessions without exposing the session 
 test('generated controls contain no executable inline handlers', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const stylesSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   const packageMetadata = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   assert.doesNotMatch(source, /\son(?:click|change|input|dragover|dragleave|drop)=/);
@@ -235,8 +236,33 @@ test('generated controls contain no executable inline handlers', () => {
   assert.match(indexSource, /id="demo-shell"/);
   assert.match(source, /function fetchDemoConfig\(\)/);
   assert.match(source, /function setDemoExperienceActive\(active\)/);
-  assert.match(source, /mainNav\.inert = active/);
+  assert.match(source, /function activateDemoTab\(tab\)/);
+  assert.match(source, /if \(demoSession\) \{\s*activateDemoTab\(tab\);\s*return;/);
+  assert.match(source, /mainNav\.inert = false/);
   assert.match(source, /projectSelector\.inert = active/);
+  assert.match(source, /viewArea\?\.classList\.toggle\('hidden', active\)/);
+  assert.match(source, /function renderDemoOverview\(data\)/);
+  assert.match(source, /function renderDemoWork\(data\)/);
+  assert.match(source, /function renderDemoFollowUp\(data\)/);
+  assert.match(source, /function renderDemoMilestones\(data\)/);
+  assert.match(source, /function renderDemoCapture\(data\)/);
+  assert.match(source, /function renderDemoCommunicate\(data, teamsOnly = false\)/);
+  assert.match(source, /function renderDemoSettings\(data\)/);
+  assert.match(source, /function renderDemoHelp\(\)/);
+  assert.match(source, /function demoTryThis\(instruction, interaction = 'Read-only example'\)/);
+  assert.match(source, /Suggested demo workflow/);
+  assert.match(source, /helpButton\?\.classList\.remove\('hidden'\)/);
+  assert.match(source, /helpButton\.textContent = 'Demo guide'/);
+  assert.match(source, /<details class="card help-section help-disclosure"/);
+  assert.match(stylesSource, /\.help-disclosure summary/);
+  assert.match(stylesSource, /\.demo-flow-guide/);
+  assert.match(source, /async function initializeApp\(\) \{\s*await fetchDemoConfig\(\);\s*if \(!demoSession\) await fetchProjects\(\);/);
+  const demoRenderers = source.slice(source.indexOf('function demoViewModel()'), source.indexOf('function setDemoExperienceActive(active)'));
+  assert.doesNotMatch(demoRenderers, /\bfetch\s*\(/);
+  const demoRuntime = source.slice(source.indexOf('async function fetchDemoConfig()'), source.indexOf('async function fetchMeta()'));
+  const demoFetchPaths = [...demoRuntime.matchAll(/\bfetch\('([^']+)'/g)].map(match => match[1]);
+  assert.ok(demoFetchPaths.length >= 7);
+  assert.equal(demoFetchPaths.every(value => value.startsWith('/api/demo/')), true);
   assert.match(source, /FICTIONAL · TEMPORARY/);
   assert.match(source, /no private workspace access/);
   assert.match(source, /saveDemoWorkItem/);
@@ -245,6 +271,10 @@ test('generated controls contain no executable inline handlers', () => {
   assert.match(source, /reviewDemoEvidence/);
   assert.match(source, /SANITIZED TEXT ONLY · REVIEW FIRST/);
   assert.match(source, /\/api\/demo\/session\/evidence\/review/);
+  assert.match(source, /A fictional starter project was loaded automatically/);
+  assert.match(source, /START HERE/);
+  assert.match(source, /Demo versus normal workspace/);
+  assert.match(source, /What Priorena does not do/);
   assert.doesNotMatch(source, /\beval\s*\(|new Function\s*\(/);
   assert.match(source, /DECLARATIVE_ACTIONS/);
   assert.match(source, /js-copy-text/);
@@ -331,6 +361,23 @@ test('generated controls contain no executable inline handlers', () => {
   const allowed = new Set([...actionBlock[1].matchAll(/'([A-Za-z_$][\w$]*)'/g)].map(match => match[1]));
   const used = [...source.matchAll(/data-on(?:click|change|input|dragover|dragleave|drop)=["'](?:if\(this\.value\))?([A-Za-z_$][\w$]*)\(/g)].map(match => match[1]);
   assert.deepEqual([...new Set(used.filter(name => !allowed.has(name)))], []);
+});
+
+test('public source and documentation are English-only', () => {
+  const files = [
+    'README.md',
+    'SECURITY.md',
+    'PRIVACY.md',
+    'SECURITY_REVIEW_SUMMARY.md',
+    'EXTERNAL_FEED_SCHEMA.md',
+    'demo/demo-fixture.js',
+    'public/app.js',
+    'public/index.html'
+  ];
+  files.forEach(file => {
+    const content = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+    assert.doesNotMatch(content, /[\u0400-\u04ff]/, `${file} should contain English-language text only`);
+  });
 });
 
 test('workspace backup uses the Priorena download name', async () => {
