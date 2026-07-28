@@ -40,7 +40,8 @@ const DEMO_SCREEN_META = {
   reports: { title: 'Communicate', scope: 'fictional demo · consistent outputs' },
   briefings: { title: 'Communicate', scope: 'fictional demo · consistent outputs' },
   teams: { title: 'Teams Draft', scope: 'fictional demo · channel preview' },
-  manage: { title: 'Settings', scope: 'fictional demo · read-only boundary' }
+  manage: { title: 'Settings', scope: 'fictional demo · read-only boundary' },
+  help: { title: 'Demo Guide', scope: 'fictional demo · quick tour and safety' }
 };
 const DEMO_TABS = new Set(Object.keys(DEMO_SCREEN_META));
 
@@ -403,6 +404,10 @@ function demoViewLead(eyebrow, title, description, detail = '') {
   return `<div class="demo-view-lead"><div><div class="eyebrow">${escapeHtml(eyebrow)}</div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p></div>${detail ? `<span>${escapeHtml(detail)}</span>` : ''}</div>`;
 }
 
+function demoTryThis(instruction, interaction = 'Read-only example') {
+  return `<div class="demo-try-this"><span>${escapeHtml(interaction)}</span><p><strong>What to try:</strong> ${escapeHtml(instruction)}</p></div>`;
+}
+
 function renderDemoOverview(data) {
   const walkthrough = Array.isArray(data.metadata.walkthrough) ? data.metadata.walkthrough.slice(0, 4) : [];
   const blocked = data.stories.filter(story => story.status === 'Blocked');
@@ -410,6 +415,7 @@ function renderDemoOverview(data) {
   const attention = data.stories.filter(story => story.status === 'Blocked' || story.dependencies);
   return `
     ${demoViewLead('TODAY · FICTIONAL SAMPLE', 'Northstar Launch command center', 'A safe overview of delivery status, reviewed evidence, upcoming milestones, and the work that needs attention.', `${data.stories.length} work items · ${data.acceptedEvidence.length} reviewed signals`)}
+    ${demoTryThis('Scan the attention items, then follow the suggested workflow into Work, Capture, and Communicate.', 'Guided overview')}
     ${walkthrough.length ? `<section class="demo-walkthrough" aria-labelledby="demo-walkthrough-title"><div><div class="eyebrow">START HERE</div><h3 id="demo-walkthrough-title">Explore the fictional sample</h3></div><ol>${walkthrough.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol></section>` : ''}
     ${data.metadata.navigationNotice ? `<div class="note demo-navigation-note"><strong>Safe navigation:</strong> ${escapeHtml(data.metadata.navigationNotice)}</div>` : ''}
     <div class="demo-stat-grid">
@@ -437,6 +443,7 @@ function renderDemoOverview(data) {
 function renderDemoWork(data) {
   return `
     ${demoViewLead('WORK · TEMPORARY EDITS', 'Fictional delivery scope', 'Inspect ownership and status, then make a temporary session-only change. Resetting or exiting erases every edit.', `${data.stories.length} work items`)}
+    ${demoTryThis('Change one fictional status or assignee, select Apply temporarily, and confirm the update appears elsewhere in the demo.', 'Interactive · temporary')}
     <section class="card demo-card">
       ${data.stories.map(story => `
         <article class="demo-list-item">
@@ -458,6 +465,7 @@ function renderDemoFollowUp(data) {
   const queue = data.stories.filter(story => story.status !== 'Done');
   return `
     ${demoViewLead('FOLLOW-UP · FICTIONAL QUEUE', 'Attention and ownership', 'A read-only sample of the PM follow-up queue. Use Work to try temporary status or assignee changes.', `${queue.length} open items`)}
+    ${demoTryThis('Identify which open item needs the next PM conversation, then return to Work to try a temporary change.')}
     <div class="demo-followup-grid">${queue.map(story => `
       <article class="card demo-followup-card">
         <div><strong>${escapeHtml(story.jiraId)}</strong><span class="status-pill">${escapeHtml(story.status)}</span></div>
@@ -470,6 +478,7 @@ function renderDemoFollowUp(data) {
 function renderDemoMilestones(data) {
   return `
     ${demoViewLead('MILESTONES · FICTIONAL DATES', 'Launch decision path', 'These dates exist only to demonstrate how Priorena connects delivery scope to upcoming checkpoints.', `${data.milestones.length} milestones`)}
+    ${demoTryThis('Follow the fictional checkpoint sequence and note which work must be resolved before the launch decision.')}
     <section class="card demo-timeline-card">
       ${data.milestones.map((item, index) => `<article class="demo-timeline-item"><div class="demo-timeline-index">${index + 1}</div><div><span>${escapeHtml(demoDate(item.date))} · ${escapeHtml(item.status || 'Upcoming')}</span><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.notes || '')}</p></div></article>`).join('')}
     </section>`;
@@ -478,6 +487,7 @@ function renderDemoMilestones(data) {
 function renderDemoCapture(data) {
   return `
     ${demoViewLead('CAPTURE · REVIEW FIRST', 'Evidence intake and review', 'Only fictional or already-sanitized text is accepted. Submissions remain pending until you explicitly accept or reject them.', `${data.acceptedEvidence.length} accepted · ${data.userEvidence.filter(item => item.reviewStatus === 'pending').length} pending`)}
+    ${demoTryThis('Add a short fictional finding, confirm it enters pending review, and explicitly accept or reject it.', 'Interactive · review first')}
     <div class="demo-grid">
       <section class="card demo-card">
         <h3>Accepted evidence</h3>
@@ -511,6 +521,7 @@ function renderDemoPortfolio(data) {
   const project = data.projectEntries[0]?.[1] || {};
   return `
     ${demoViewLead('PORTFOLIO · ONE FICTIONAL WORKSPACE', 'PM workspace overview', 'The public demo deliberately uses one bounded delivery scope so reviewers can understand the Project-to-Jira-Epic model without operational data.')}
+    ${demoTryThis('Review how one PM workspace contains one fictional Jira Epic delivery scope.')}
     <section class="card demo-portfolio-card"><div><div class="eyebrow">PM WORKSPACE</div><h2>${escapeHtml(projectName)}</h2><p>${escapeHtml(project.description || '')}</p></div><div class="demo-portfolio-metrics"><div><strong>${data.stories.length}</strong><span>work items</span></div><div><strong>${data.acceptedEvidence.length}</strong><span>accepted evidence</span></div><div><strong>${data.milestones.length}</strong><span>milestones</span></div></div></section>
     <div class="note"><strong>Product model:</strong> a PM workspace is the local container; a user-facing Project represents one Jira Epic delivery scope. This fictional sample does not connect to Jira.</div>`;
 }
@@ -521,6 +532,7 @@ function renderDemoCommunicate(data, teamsOnly = false) {
   const teamsCard = `<section class="card demo-channel-card"><div class="section-heading"><h3>Teams-ready draft</h3><span class="micro">fictional · not sent</span></div><p><strong>${escapeHtml(preview.headline || '')}</strong></p><ul>${teams.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></section>`;
   return `
     ${demoViewLead(teamsOnly ? 'TEAMS DRAFT · NOT SENT' : 'COMMUNICATE · SAME FACT SET', teamsOnly ? 'Fictional Teams update' : 'Channel-ready briefing preview', 'These drafts are deterministic examples. Nothing is copied, sent, published, or marked communicated automatically.', escapeHtml(preview.overallStatus || 'Review'))}
+    ${demoTryThis(teamsOnly ? 'Compare this Teams-ready wording with the broader Communicate preview.' : 'Compare Teams, email, and Confluence wording and confirm they use the same facts.', 'Drafts read-only · manual note temporary')}
     ${teamsOnly ? teamsCard : `<div class="demo-channel-grid">${teamsCard}<section class="card demo-channel-card"><div class="section-heading"><h3>Leadership email</h3><span class="micro">fictional · not sent</span></div><p class="demo-email-subject">${escapeHtml(preview.emailSubject || '')}</p><p>${escapeHtml(preview.emailOpening || '')}</p></section><section class="card demo-channel-card"><div class="section-heading"><h3>Confluence summary</h3><span class="micro">fictional · not published</span></div><p>${escapeHtml(preview.confluenceSummary || '')}</p><div class="demo-fact-strip"><span>${data.stories.length} work items</span><span>${data.acceptedEvidence.length} accepted findings</span><span>${data.milestones.length} milestones</span></div></section></div>`}
     <section class="card demo-manual-card"><div><div class="eyebrow">TEMPORARY MANUAL INPUT</div><h3>Add bounded leadership context</h3><p>This text remains separate from source evidence and is erased with the demo session.</p></div><textarea id="demo-manual-context" maxlength="2000" placeholder="Add fictional leadership framing or context…">${escapeHtml(demoSession.manualContext || '')}</textarea><button class="button" data-onclick="saveDemoManualContext()" ${demoBusy ? 'disabled' : ''}>Save temporarily</button></section>`;
 }
@@ -529,11 +541,59 @@ function renderDemoSettings(data) {
   const sprintOptions = Array.isArray(data.workspace.settings?.sprintOptions) ? data.workspace.settings.sprintOptions : [];
   return `
     ${demoViewLead('SETTINGS · READ ONLY', 'Demo safety boundary', 'Settings are presented for orientation only. Demo Mode cannot change normal workspace configuration, persistence, or provider credentials.')}
+    ${demoTryThis('Review the runtime, cleanup, and disabled-feature boundaries that keep the public demo isolated.')}
     <div class="demo-settings-grid">
       <section class="card"><div class="eyebrow">RUNTIME</div><h3>Local and isolated</h3><dl><div><dt>Network</dt><dd>127.0.0.1 only</dd></div><div><dt>Persistence</dt><dd>In-memory demo session</dd></div><div><dt>AI provider</dt><dd>Not used in Demo Mode</dd></div><div><dt>Private workspace</dt><dd>No access</dd></div></dl></section>
       <section class="card"><div class="eyebrow">SESSION</div><h3>Automatic cleanup</h3><dl><div><dt>Idle expiry</dt><dd>${escapeHtml(formatDemoExpiry(demoSession.idleExpiresAt))}</dd></div><div><dt>Absolute expiry</dt><dd>${escapeHtml(formatDemoExpiry(demoSession.absoluteExpiresAt))}</dd></div><div><dt>Reset</dt><dd>Restores the fictional fixture</dd></div><div><dt>Exit</dt><dd>Erases demo-only changes</dd></div></dl></section>
       <section class="card"><div class="eyebrow">SAMPLE CONFIGURATION</div><h3>Fictional workspace defaults</h3><dl><div><dt>Comment freshness</dt><dd>${escapeHtml(String(data.workspace.settings?.commentStaleDays || 7))} days</dd></div><div><dt>Sprints</dt><dd>${escapeHtml(sprintOptions.join(', ') || 'None')}</dd></div><div><dt>Fixture</dt><dd>${escapeHtml(data.metadata.fixtureVersion || 'demo')}</dd></div></dl></section>
       <section class="card"><div class="eyebrow">BOUNDARY</div><h3>What remains disabled</h3><ul class="demo-check-list"><li>Normal persistence APIs and workspace data</li><li>Provider-backed AI drafting</li><li>File and screenshot upload</li><li>Automatic Jira, Teams, email, or Confluence publication</li></ul></section>
+    </div>`;
+}
+
+function renderDemoHelp() {
+  return `
+    ${demoViewLead('DEMO GUIDE · START HERE', 'A four-step tour of Priorena', 'Use this guide at any time. The demo is fictional, temporary, isolated, and separate from the normal workspace.')}
+    ${demoTryThis('Follow Today → Work → Capture → Communicate, then use Reset demo if you want to restore the starting state.', 'Guide')}
+    <div class="demo-help-grid">
+      <section class="card demo-help-card">
+        <div class="eyebrow">QUICK TOUR</div><h3>Recommended workflow</h3>
+        <ol class="demo-help-steps">
+          <li><button data-onclick="activateTab('overview')"><strong>Today</strong><span>Understand status and attention signals.</span></button></li>
+          <li><button data-onclick="activateTab('stories')"><strong>Work</strong><span>Try a temporary status or owner change.</span></button></li>
+          <li><button data-onclick="activateTab('transcripts')"><strong>Capture</strong><span>Add fictional evidence and review it.</span></button></li>
+          <li><button data-onclick="activateTab('reports')"><strong>Communicate</strong><span>Compare drafts built from the same facts.</span></button></li>
+        </ol>
+      </section>
+      <section class="card demo-help-card">
+        <div class="eyebrow">DEMO SAFETY</div><h3>What is—and is not—live</h3>
+        <ul class="demo-check-list">
+          <li>All names, projects, work items, evidence, and dates are fictional.</li>
+          <li>Temporary edits use only the isolated in-memory demo session.</li>
+          <li>Nothing connects to Jira, sends a message, uploads a file, or invokes an AI provider.</li>
+          <li>The normal workspace and its persistence APIs remain inaccessible until you exit.</li>
+        </ul>
+      </section>
+      <section class="card demo-help-card">
+        <div class="eyebrow">PAGE GUIDE</div><h3>Where to look</h3>
+        <dl class="demo-page-guide">
+          <div><dt>Today</dt><dd>Delivery overview and suggested starting point</dd></div>
+          <div><dt>Work</dt><dd>Temporary status and assignee interaction</dd></div>
+          <div><dt>Follow-Up / Milestones / Portfolio</dt><dd>Read-only planning examples</dd></div>
+          <div><dt>Capture</dt><dd>Bounded, review-first fictional evidence</dd></div>
+          <div><dt>Communicate / Teams Draft</dt><dd>Deterministic drafts that are never sent</dd></div>
+          <div><dt>Settings</dt><dd>Read-only explanation of the safety boundary</dd></div>
+        </dl>
+      </section>
+      <section class="card demo-help-card">
+        <div class="eyebrow">RESET, EXIT, TROUBLESHOOT</div><h3>Know what happens next</h3>
+        <ul class="demo-check-list">
+          <li><strong>Reset demo</strong> erases your temporary changes and restores the original fictional fixture.</li>
+          <li><strong>Exit Demo</strong> erases demo-only changes and returns to a separate normal workspace, which may be empty.</li>
+          <li>If the sample does not appear, confirm <strong>PRIORENA_DEMO_MODE=1</strong> and restart the local server.</li>
+          <li>If the page cannot connect, confirm the terminal is still running and open <strong>http://127.0.0.1:3000</strong>.</li>
+        </ul>
+        <div class="demo-help-actions"><button class="button secondary" data-onclick="resetDemoSession()">Reset demo</button><button class="button" data-onclick="activateTab('overview')">Return to Today</button></div>
+      </section>
     </div>`;
 }
 
@@ -546,6 +606,7 @@ function renderDemoView(data) {
   if (demoCurrentTab === 'reports' || demoCurrentTab === 'briefings') return renderDemoCommunicate(data);
   if (demoCurrentTab === 'teams') return renderDemoCommunicate(data, true);
   if (demoCurrentTab === 'manage') return renderDemoSettings(data);
+  if (demoCurrentTab === 'help') return renderDemoHelp();
   return renderDemoOverview(data);
 }
 
@@ -560,6 +621,7 @@ function renderDemoShell() {
     ${demoFeedback ? `<div class="notice success">${escapeHtml(demoFeedback)}</div>` : ''}
     ${demoError ? `<div class="notice warning">${escapeHtml(demoError)}</div>` : ''}
     <div class="demo-session-strip"><span>IN-MEMORY SESSION</span><strong>No private workspace access</strong><span>Idle expiry ${escapeHtml(formatDemoExpiry(demoSession.idleExpiresAt))}</span></div>
+    <nav class="demo-flow-guide" aria-label="Suggested demo workflow"><span>Suggested flow</span><button data-onclick="activateTab('overview')" ${demoCurrentTab === 'overview' ? 'aria-current="step"' : ''}>1 Today</button><span>→</span><button data-onclick="activateTab('stories')" ${demoCurrentTab === 'stories' ? 'aria-current="step"' : ''}>2 Work</button><span>→</span><button data-onclick="activateTab('transcripts')" ${demoCurrentTab === 'transcripts' ? 'aria-current="step"' : ''}>3 Capture</button><span>→</span><button data-onclick="activateTab('reports')" ${demoCurrentTab === 'reports' ? 'aria-current="step"' : ''}>4 Communicate</button><button class="demo-flow-help" data-onclick="activateTab('help')" ${demoCurrentTab === 'help' ? 'aria-current="page"' : ''}>Demo guide</button></nav>
     ${renderDemoView(data)}`;
 }
 
@@ -568,7 +630,7 @@ function setDemoExperienceActive(active) {
   demoShell?.classList.toggle('hidden', !active);
   viewArea?.classList.toggle('hidden', active);
   quickCaptureButton?.classList.toggle('hidden', active);
-  helpButton?.classList.toggle('hidden', active);
+  helpButton?.classList.remove('hidden');
   if (mainNav) mainNav.inert = false;
   if (projectSelector) projectSelector.inert = active;
   if (demoModeButton) demoModeButton.textContent = active ? 'Exit Demo' : 'Try Demo';
@@ -577,11 +639,23 @@ function setDemoExperienceActive(active) {
     if (brandSub) brandSub.textContent = 'FICTIONAL · TEMPORARY';
     if (footerRole) footerRole.textContent = 'Isolated demo session';
     if (aiModeEl) aiModeEl.textContent = 'no private workspace access';
+    if (helpButton) {
+      helpButton.textContent = 'Demo guide';
+      helpButton.title = 'Open the Demo Guide';
+      helpButton.setAttribute('aria-label', 'Open the Demo Guide');
+      helpButton.classList.add('demo-guide-button');
+    }
     renderProjectSelector();
     activateDemoTab(demoCurrentTab);
   } else {
     if (brandSub) brandSub.textContent = 'LOCAL · SINGLE-USER';
     if (footerRole) footerRole.textContent = 'PM delivery intelligence';
+    if (helpButton) {
+      helpButton.textContent = '?';
+      helpButton.title = 'Help';
+      helpButton.setAttribute('aria-label', 'Help');
+      helpButton.classList.remove('demo-guide-button');
+    }
     renderProjectSelector();
     updateHeader();
     fetchProjects();
@@ -1273,17 +1347,17 @@ function renderHelpPanel(needsProject) {
     </div>
     ${needsProject ? `<div class="note warn" style="margin-bottom:14px;">Start by creating a project in Settings. Then add work items, capture a DSU or meeting note, and return to Today for the daily queue.</div>` : ''}
     <div class="help-grid">
-      <section class="card help-section">
-        <div class="section-heading"><h4>First-time setup</h4><span class="micro">start here</span></div>
+      <details class="card help-section help-disclosure" open>
+        <summary><span>First-time setup</span><span class="micro">start here</span></summary>
         <ol class="help-list">
           <li>Run <strong>npm install</strong>, copy <strong>.env.example</strong> to <strong>.env</strong>, and run <strong>npm start</strong>.</li>
           <li>Open <strong>http://127.0.0.1:3000</strong> and keep the terminal running. Use <strong>Ctrl+C</strong> to stop the server.</li>
           <li>With <strong>PRIORENA_DEMO_MODE=1</strong>, the fictional Northstar Launch sample opens automatically.</li>
           <li>Restart the server after changing server code or <strong>.env</strong>.</li>
         </ol>
-      </section>
-      <section class="card help-section">
-        <div class="section-heading"><h4>Demo versus normal workspace</h4><span class="micro">separate boundaries</span></div>
+      </details>
+      <details class="card help-section help-disclosure" open>
+        <summary><span>Demo versus normal workspace</span><span class="micro">separate boundaries</span></summary>
         <ul class="help-list">
           <li><strong>Demo Mode</strong> provides safe demo-only views for Today, Work, Follow-Up, Milestones, Capture, Portfolio, Communicate, Teams Draft, and Settings.</li>
           <li>Every demo view reads the same fictional in-memory session. Normal persistence-backed screens and provider integrations stay inaccessible.</li>
@@ -1291,20 +1365,20 @@ function renderHelpPanel(needsProject) {
           <li><strong>Exit Demo</strong> returns to the separate normal workspace, which starts empty and receives no demo data.</li>
           <li>To use the full application, create a PM workspace in Settings, add a Project for one Jira Epic, and add only authorized local material.</li>
         </ul>
-      </section>
+      </details>
     </div>
     <div class="help-grid">
-      <section class="card help-section">
-        <div class="section-heading"><h4>Daily flow</h4><span class="micro">use this order</span></div>
+      <details class="card help-section help-disclosure">
+        <summary><span>Daily flow</span><span class="micro">use this order</span></summary>
         <ol class="help-list">
           <li><strong>Today:</strong> review the blocked, follow-up, and quiet-thread signals.</li>
           <li><strong>Work:</strong> confirm ownership, sprint, Jira comment, and milestone linkage on the items needing action.</li>
           <li><strong>Capture:</strong> save a factual meeting note or DSU when new evidence appears.</li>
           <li><strong>Communicate:</strong> prepare a briefing from reviewed changes and context, or use the legacy status-summary and Teams-draft tools.</li>
         </ol>
-      </section>
-      <section class="card help-section">
-        <div class="section-heading"><h4>Navigation</h4><span class="micro">five destinations</span></div>
+      </details>
+      <details class="card help-section help-disclosure">
+        <summary><span>Navigation</span><span class="micro">five destinations</span></summary>
         <ul class="help-list">
           <li><strong>Today</strong> is the selected project's immediate attention view. Use Portfolio here for the all-project rollup.</li>
           <li><strong>Work</strong> contains work items, the cross-project Follow-Up queue, and milestones.</li>
@@ -1312,11 +1386,11 @@ function renderHelpPanel(needsProject) {
           <li><strong>Communicate</strong> contains Briefings, the status summary, and Teams draft. Only Mark communicated advances a briefing baseline.</li>
           <li><strong>Settings</strong> manages projects, workspace rules, records, exports, and advanced prompt controls.</li>
         </ul>
-      </section>
+      </details>
     </div>
     <div class="help-grid">
-      <section class="card help-section">
-        <div class="section-heading"><h4>Build a normal workspace</h4><span class="micro">recommended order</span></div>
+      <details class="card help-section help-disclosure">
+        <summary><span>Build a normal workspace</span><span class="micro">recommended order</span></summary>
         <ol class="help-list">
           <li>Create the PM workspace and its Project in <strong>Settings</strong>.</li>
           <li>Add work items manually or preview a bounded Jira CSV import under <strong>Work</strong>.</li>
@@ -1324,20 +1398,20 @@ function renderHelpPanel(needsProject) {
           <li>Review delivery attention signals in <strong>Today</strong> and <strong>Follow-Up</strong>.</li>
           <li>Prepare and finalize a briefing in <strong>Communicate</strong>; only an explicit Mark communicated action advances its baseline.</li>
         </ol>
-      </section>
-      <section class="card help-section">
-        <div class="section-heading"><h4>What Priorena does not do</h4><span class="micro">important limits</span></div>
+      </details>
+      <details class="card help-section help-disclosure">
+        <summary><span>What Priorena does not do</span><span class="micro">important limits</span></summary>
         <ul class="help-list">
           <li>It does not connect to Jira, Teams, email, or Confluence automatically.</li>
           <li>It does not publish messages, change authoritative work items, or mark a briefing communicated without an explicit action.</li>
           <li>It does not accept original screenshots; external screenshot processing must return the strict sanitized feed described under Capture.</li>
           <li>It is not approved for LAN access, tunnels, hosted deployment, shared use, or multiple users.</li>
         </ul>
-      </section>
+      </details>
     </div>
     <div class="help-grid">
-      <section class="card help-section">
-        <div class="section-heading"><h4>Why work is flagged</h4><span class="micro">operating rules</span></div>
+      <details class="card help-section help-disclosure">
+        <summary><span>Why work is flagged</span><span class="micro">operating rules</span></summary>
         <ul class="help-list">
           <li><strong>Blocked</strong> comes from a work item's status label and rises first in queues.</li>
           <li><strong>Needs follow-up</strong> means a tracked, open item has not been marked as contacted.</li>
@@ -1345,9 +1419,9 @@ function renderHelpPanel(needsProject) {
           <li><strong>Coverage gaps</strong> flag missing assignee, sprint, comment/note, or milestone context. They are evidence gaps, not proof that delivery is failing.</li>
           <li><strong>Delivery progress</strong> is a weighted planning signal: done work counts fully, active/in-progress work counts halfway.</li>
         </ul>
-      </section>
-      <section class="card help-section">
-        <div class="section-heading"><h4>Evidence flow</h4><span class="micro">what feeds what</span></div>
+      </details>
+      <details class="card help-section help-disclosure">
+        <summary><span>Evidence flow</span><span class="micro">what feeds what</span></summary>
         <ol class="help-list">
           <li>A structured meeting note is stored as local evidence. It does not change work-item status on its own.</li>
           <li><strong>DSU, Sprint Planning, and Backlog Refinement</strong> create pending findings for review. Only accepted DSU progress findings create work-item updates.</li>
@@ -1355,28 +1429,28 @@ function renderHelpPanel(needsProject) {
           <li>Extracted updates feed Today, work-item context, status summaries, and Teams drafts.</li>
           <li>Delete a source and its derived extracted updates are removed too, so the evidence trail stays honest.</li>
         </ol>
-      </section>
+      </details>
     </div>
     <div class="help-grid">
-      <section class="card help-section">
-        <div class="section-heading"><h4>AI and review</h4><span class="micro">optional assistance</span></div>
+      <details class="card help-section help-disclosure">
+        <summary><span>AI and review</span><span class="micro">optional assistance</span></summary>
         <p><strong>${escapeHtml(aiMode)}.</strong> Ceremony extraction is deterministic and local. AI is optional only for status-summary and Teams drafting; templates remain available without a key.</p>
         <p>Always review generated text and the source badge before copying it. AI never silently changes a Jira work item, sends a Teams message, or becomes the source of truth.</p>
-      </section>
-      <section class="card help-section">
-        <div class="section-heading"><h4>Local data and privacy</h4><span class="micro">what leaves this machine</span></div>
+      </details>
+      <details class="card help-section help-disclosure">
+        <summary><span>Local data and privacy</span><span class="micro">what leaves this machine</span></summary>
         <p>Projects, work items, milestones, meeting notes, and uploads are stored locally in this workspace. The app is bound to your computer's loopback address and is not shared on the network.</p>
         <p>Only when you explicitly request an AI status or Teams draft is relevant project text sent to the configured provider. External-feed import never receives or stores screenshots; you control any separate ChatGPT upload and must follow your organization's data policy.</p>
-      </section>
+      </details>
     </div>
-    <div class="card help-section help-templates-card">
-      <div class="section-heading"><h4>Templates and records</h4><span class="micro">consistency without extra process</span></div>
+    <details class="card help-section help-templates-card help-disclosure">
+      <summary><span>Templates and records</span><span class="micro">consistency without extra process</span></summary>
       <p>Start new work items from the Delivery, Requirement, or Defect/Blocker template to prefill useful acceptance criteria. Templates are starting points, not generated facts: review and adapt them before saving.</p>
       <p>Use <strong>Import CSV</strong> in Work to preview a Jira export before adding it. Existing and repeated Jira keys are skipped, and imported items are not tracked for follow-up until you choose to track them.</p>
       <p>For externally transcribed screenshots, use <strong>Capture → Import ChatGPT feed</strong>. Copy the strict prompt, process screenshots only in an approved ChatGPT workspace, and bring back only the generated JSON or Markdown feed.</p>
       <button class="button button-small secondary js-copy-text" data-copy-key="${registerCopyPayload(EXTERNAL_FEED_PROMPT)}">Copy external-feed prompt</button>
       <p><strong>Workspace Data</strong> in Settings is a local records browser. It lets you filter, edit, delete, and export saved work items, milestones, transcripts, and meeting notes. It does not connect to Jira or send data anywhere.</p>
-    </div>
+    </details>
   `;
 }
 
@@ -5816,7 +5890,7 @@ function activateDemoTab(tab) {
   demoCurrentTab = DEMO_TABS.has(tab) ? tab : 'overview';
   const primaryTab = ({ portfolio: 'overview', tracking: 'stories', timeline: 'stories', briefings: 'reports', teams: 'reports' })[demoCurrentTab] || demoCurrentTab;
   navButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === primaryTab));
-  helpButton?.classList.remove('active');
+  helpButton?.classList.toggle('active', demoCurrentTab === 'help');
   const meta = DEMO_SCREEN_META[demoCurrentTab] || DEMO_SCREEN_META.overview;
   mainTitle.textContent = meta.title;
   mainSubtitle.textContent = meta.scope;

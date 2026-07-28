@@ -59,6 +59,17 @@ Because `.env.example` enables Demo Mode, the browser automatically opens a fict
 5. Compare the fictional Teams, email, and Confluence drafts under **Communicate**.
 6. Review the read-only demo boundary under **Settings**, or choose **Reset demo** to restore the original sample.
 
+Use **Demo guide** in the header from any demo page for the quick tour, page guide, safety boundary, reset/exit behavior, and troubleshooting.
+
+| Demo page | What it demonstrates | Behavior |
+| --- | --- | --- |
+| Today | Delivery status and attention signals | Guided, read-only overview |
+| Work | Ownership and operating status | Temporary status and assignee edits |
+| Follow-Up, Milestones, Portfolio | Planning and delivery context | Read-only examples |
+| Capture | Bounded evidence intake and explicit review | Temporary fictional text only |
+| Communicate, Teams Draft | Consistent channel-ready wording | Drafts are read-only and never sent |
+| Settings | Runtime and isolation controls | Read-only explanation |
+
 Demo Mode provides safe demo-only views for Today, Work, Follow-Up, Milestones, Capture, Portfolio, Communicate, Teams Draft, and Settings. Every page reads the same fictional in-memory session. The normal persistence-backed screens, provider integrations, uploads, and private workspace remain inaccessible while Demo Mode is active.
 
 Choose **Exit Demo** to return to the separate normal workspace. It starts empty and does not inherit the fictional demo data. To use it, create a PM workspace in Settings and then add or import your own authorized local data.
@@ -85,6 +96,12 @@ Priorena does not connect to Jira, Teams, email, or Confluence automatically. It
 - If Demo Mode does not appear, confirm `.env` contains `PRIORENA_DEMO_MODE=1`, then restart the server.
 - If you exited the demo and see empty pages, that is expected: the normal workspace has separate local storage and receives no demo data.
 - If port `3000` is already in use, stop the other local server or start Priorena with a different `PORT` value.
+
+### Help and orientation
+
+- **Demo guide** remains available throughout Demo Mode and focuses on the fictional showcase.
+- The normal workspace **Help** screen covers first-time setup, navigation, daily flow, evidence review, AI boundaries, privacy, templates, records, and troubleshooting.
+- Detailed normal-workspace topics are collapsed by default so users can open only the guidance they need.
 
 ## Screenshots
 
