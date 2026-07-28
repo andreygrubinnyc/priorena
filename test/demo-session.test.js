@@ -15,7 +15,10 @@ test('demo fixture is explicitly fictional and independent for every session', (
   assert.equal(first.demoMetadata.fictional, true);
   assert.match(first.demoMetadata.notice, /fictional/i);
   assert.equal(first.demoMetadata.fixtureVersion, 'priorena-demo-v2');
-  assert.equal(first.demoMetadata.walkthrough.length, 3);
+  assert.equal(first.demoMetadata.walkthrough.length, 4);
+  assert.match(first.demoMetadata.navigationNotice, /safe demo-only views/i);
+  assert.equal(first.demoMetadata.communicationPreview.teams.length, 4);
+  assert.match(first.demoMetadata.communicationPreview.emailSubject, /fictional/i);
   assert.deepEqual(Object.keys(first.projects), ['Northstar Launch']);
   assert.equal(first.projects['Northstar Launch'].stories.length, 5);
   assert.equal(first.projects['Northstar Launch'].transcripts[0].extractedFindings.length, 6);

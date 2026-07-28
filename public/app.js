@@ -30,6 +30,19 @@ const { ITEM_TYPES, itemTypeOrUnknown } = window.PmWorkItemTypes;
 const CAPTURE_SOURCE_TYPES = ['DSU', 'Sprint Planning', 'Backlog Refinement', 'Story Snapshot', 'Developer Conversation', 'Other External Evidence', 'Meeting', '1:1', 'Interview', 'Call', 'Notes', 'Other'];
 const DEMO_STATUS_VALUES = ['Not started', 'Planned', 'In progress', 'Blocked', 'Done'];
 const DEMO_EVIDENCE_CATEGORIES = ['progress_update', 'blocker', 'dependency', 'risk', 'decision', 'action', 'question', 'other'];
+const DEMO_SCREEN_META = {
+  overview: { title: 'Today', scope: 'fictional demo · delivery attention' },
+  stories: { title: 'Work', scope: 'fictional demo · work items' },
+  tracking: { title: 'Follow-Up', scope: 'fictional demo · attention queue' },
+  timeline: { title: 'Milestones', scope: 'fictional demo · delivery dates' },
+  transcripts: { title: 'Capture', scope: 'fictional demo · review-first evidence' },
+  portfolio: { title: 'Portfolio', scope: 'fictional demo · one PM workspace' },
+  reports: { title: 'Communicate', scope: 'fictional demo · consistent outputs' },
+  briefings: { title: 'Communicate', scope: 'fictional demo · consistent outputs' },
+  teams: { title: 'Teams Draft', scope: 'fictional demo · channel preview' },
+  manage: { title: 'Settings', scope: 'fictional demo · read-only boundary' }
+};
+const DEMO_TABS = new Set(Object.keys(DEMO_SCREEN_META));
 
 // Header title + scope shown per screen.
 const SCREEN_META = {
@@ -54,6 +67,7 @@ let demoSession = null;
 let demoBusy = false;
 let demoFeedback = '';
 let demoError = '';
+let demoCurrentTab = 'overview';
 
 let selectedProject = null;
 let projects = {};
@@ -350,159 +364,203 @@ function formatDemoExpiry(value) {
   return Number.isNaN(parsed.getTime()) ? 'Unavailable' : parsed.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-function renderDemoShell() {
-  if (!demoShell || !demoSession) return;
-  const workspace = demoSession.workspace || {};
+function demoViewModel() {
+  const workspace = demoSession?.workspace || {};
   const metadata = workspace.demoMetadata || {};
   const projectEntries = Object.entries(workspace.projects || {});
-  const walkthrough = Array.isArray(metadata.walkthrough) ? metadata.walkthrough.slice(0, 4) : [];
-  const stories = projectEntries.flatMap(([projectName, project]) => (project.stories || []).map(story => ({ ...story, projectName })));
+  const stories = projectEntries.flatMap(([projectName, project]) =>
+    (project.stories || []).map(story => ({ ...story, projectName }))
+  );
   const evidence = projectEntries.flatMap(([projectName, project]) => (project.transcripts || []).flatMap(source =>
-    (source.extractedFindings || []).map(finding => ({ ...finding, projectName, sourceTitle: source.title, sourceKind: source.sourceKind }))
+    (source.extractedFindings || []).map(finding => ({
+      ...finding,
+      projectName,
+      sourceTitle: source.title,
+      sourceKind: source.sourceKind
+    }))
   ));
-  const acceptedEvidence = evidence.filter(finding => finding.reviewStatus === 'accepted');
-  const userEvidence = evidence.filter(finding => finding.sourceKind === 'demo-sanitized-manual');
+  const milestones = projectEntries.flatMap(([projectName, project]) =>
+    (project.timeline || []).map(milestone => ({ ...milestone, projectName }))
+  );
+  return {
+    workspace,
+    metadata,
+    projectEntries,
+    stories,
+    milestones,
+    evidence,
+    acceptedEvidence: evidence.filter(finding => finding.reviewStatus === 'accepted'),
+    userEvidence: evidence.filter(finding => finding.sourceKind === 'demo-sanitized-manual')
+  };
+}
 
-  demoShell.innerHTML = `
-    <div class="demo-banner">
-      <div>
-        <div class="eyebrow">FICTIONAL · TEMPORARY · ISOLATED</div>
-        <h2>Explore Priorena without using real project data</h2>
-        <p>${escapeHtml(metadata.notice || 'Everything shown here is fictional and exists only in this temporary demo session.')}</p>
-      </div>
-      <div class="demo-banner-actions">
-        <button class="button secondary" data-onclick="resetDemoSession()" ${demoBusy ? 'disabled' : ''}>Reset demo</button>
-        <button class="button" data-onclick="toggleDemoSession()" ${demoBusy ? 'disabled' : ''}>Exit demo</button>
-      </div>
-    </div>
-    ${demoFeedback ? `<div class="notice success">${escapeHtml(demoFeedback)}</div>` : ''}
-    ${demoError ? `<div class="notice warning">${escapeHtml(demoError)}</div>` : ''}
-    <div class="demo-lifetime">
-      <div><span>Inactive-session expiry</span><strong>${escapeHtml(formatDemoExpiry(demoSession.idleExpiresAt))}</strong></div>
-      <div><span>Absolute expiry</span><strong>${escapeHtml(formatDemoExpiry(demoSession.absoluteExpiresAt))}</strong></div>
-    </div>
-    ${walkthrough.length ? `
-      <section class="demo-walkthrough" aria-labelledby="demo-walkthrough-title">
-        <div>
-          <div class="eyebrow">START HERE</div>
-          <h3 id="demo-walkthrough-title">Explore the fictional sample</h3>
-        </div>
-        <ol>${walkthrough.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
-      </section>
-    ` : ''}
-    <div class="demo-section-heading">
-      <div><div class="eyebrow">GUIDED SAMPLE</div><h3>Fictional workspace</h3></div>
-      <span>${stories.length} work item${stories.length === 1 ? '' : 's'} · ${acceptedEvidence.length} accepted evidence record${acceptedEvidence.length === 1 ? '' : 's'}</span>
+function demoDate(value) {
+  const parsed = new Date(`${value || ''}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? 'Date unavailable' : parsed.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function demoViewLead(eyebrow, title, description, detail = '') {
+  return `<div class="demo-view-lead"><div><div class="eyebrow">${escapeHtml(eyebrow)}</div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p></div>${detail ? `<span>${escapeHtml(detail)}</span>` : ''}</div>`;
+}
+
+function renderDemoOverview(data) {
+  const walkthrough = Array.isArray(data.metadata.walkthrough) ? data.metadata.walkthrough.slice(0, 4) : [];
+  const blocked = data.stories.filter(story => story.status === 'Blocked');
+  const done = data.stories.filter(story => story.status === 'Done');
+  const attention = data.stories.filter(story => story.status === 'Blocked' || story.dependencies);
+  return `
+    ${demoViewLead('TODAY · FICTIONAL SAMPLE', 'Northstar Launch command center', 'A safe overview of delivery status, reviewed evidence, upcoming milestones, and the work that needs attention.', `${data.stories.length} work items · ${data.acceptedEvidence.length} reviewed signals`)}
+    ${walkthrough.length ? `<section class="demo-walkthrough" aria-labelledby="demo-walkthrough-title"><div><div class="eyebrow">START HERE</div><h3 id="demo-walkthrough-title">Explore the fictional sample</h3></div><ol>${walkthrough.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol></section>` : ''}
+    ${data.metadata.navigationNotice ? `<div class="note demo-navigation-note"><strong>Safe navigation:</strong> ${escapeHtml(data.metadata.navigationNotice)}</div>` : ''}
+    <div class="demo-stat-grid">
+      <button class="demo-stat-card" data-onclick="activateTab('stories')"><span>Work items</span><strong>${data.stories.length}</strong><small>${done.length} done · ${blocked.length} blocked</small></button>
+      <button class="demo-stat-card" data-onclick="activateTab('transcripts')"><span>Accepted evidence</span><strong>${data.acceptedEvidence.length}</strong><small>reviewed before use</small></button>
+      <button class="demo-stat-card" data-onclick="activateTab('timeline')"><span>Milestones</span><strong>${data.milestones.length}</strong><small>fictional dates</small></button>
+      <button class="demo-stat-card" data-onclick="activateTab('reports')"><span>Overall status</span><strong class="demo-stat-text">${escapeHtml(data.metadata.communicationPreview?.overallStatus || 'Review')}</strong><small>same facts across outputs</small></button>
     </div>
     <div class="demo-grid">
       <section class="card demo-card">
-        <h3>Work items</h3>
-        ${stories.map(story => `
-          <article class="demo-list-item">
-            <div><strong>${escapeHtml(story.jiraId)}</strong><span class="status-pill">${escapeHtml(story.status)}</span></div>
-            <h4>${escapeHtml(story.summary)}</h4>
-            <p>${escapeHtml(story.projectName)} · ${escapeHtml(story.itemType)} · ${escapeHtml(story.assignee || story.owner || 'Unassigned')} · ${escapeHtml(story.sprint || 'No sprint')}</p>
-            <div class="demo-edit-grid" data-demo-project="${escapeHtml(story.projectName)}" data-demo-story-id="${escapeHtml(story.id)}">
-              <label>Status
-                <select data-demo-status aria-label="Temporary status for ${escapeHtml(story.jiraId)}">
-                  ${DEMO_STATUS_VALUES.map(status => `<option value="${escapeHtml(status)}" ${status === story.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
-                </select>
-              </label>
-              <label>Assignee
-                <input data-demo-assignee maxlength="80" value="${escapeHtml(story.assignee || story.owner || '')}" aria-label="Temporary assignee for ${escapeHtml(story.jiraId)}" />
-              </label>
-              <button class="button button-small" data-onclick="saveDemoWorkItem(${escapeHtml(JSON.stringify(story.projectName))}, ${escapeHtml(JSON.stringify(story.id))})">Apply temporarily</button>
-              <span class="demo-row-error" data-demo-row-error role="status"></span>
-            </div>
-          </article>
-        `).join('') || '<p>No fictional work items are available.</p>'}
+        <div class="section-heading"><h3>Needs attention</h3><button class="button button-small secondary" data-onclick="activateTab('tracking')">Open Follow-Up</button></div>
+        ${attention.map(story => `<article class="demo-list-item"><div><strong>${escapeHtml(story.jiraId)}</strong><span class="status-pill">${escapeHtml(story.status)}</span></div><h4>${escapeHtml(story.summary)}</h4><p>${escapeHtml(story.dependencies || 'Review the current owner and next action.')}</p></article>`).join('') || '<p>No fictional attention items.</p>'}
       </section>
       <section class="card demo-card">
+        <div class="section-heading"><h3>Latest reviewed evidence</h3><button class="button button-small secondary" data-onclick="activateTab('transcripts')">Open Capture</button></div>
+        ${data.acceptedEvidence.slice(0, 4).map(finding => `<article class="demo-list-item"><div><strong>${escapeHtml(finding.jiraId || 'Unlinked')}</strong><span class="status-pill accepted">Accepted</span></div><h4>${escapeHtml(String(finding.category || 'other').replaceAll('_', ' '))}</h4><p>${escapeHtml(finding.summary || finding.exactExcerpt)}</p></article>`).join('')}
+      </section>
+    </div>
+    <section class="card demo-milestone-preview">
+      <div class="section-heading"><h3>Upcoming milestones</h3><button class="button button-small secondary" data-onclick="activateTab('timeline')">Open Milestones</button></div>
+      <div class="demo-milestone-row">${data.milestones.map(item => `<div><span>${escapeHtml(demoDate(item.date))}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status || 'Upcoming')}</small></div>`).join('')}</div>
+    </section>`;
+}
+
+function renderDemoWork(data) {
+  return `
+    ${demoViewLead('WORK · TEMPORARY EDITS', 'Fictional delivery scope', 'Inspect ownership and status, then make a temporary session-only change. Resetting or exiting erases every edit.', `${data.stories.length} work items`)}
+    <section class="card demo-card">
+      ${data.stories.map(story => `
+        <article class="demo-list-item">
+          <div><strong>${escapeHtml(story.jiraId)}</strong><span class="status-pill">${escapeHtml(story.status)}</span></div>
+          <h4>${escapeHtml(story.summary)}</h4>
+          <p>${escapeHtml(story.projectName)} · ${escapeHtml(story.itemType)} · ${escapeHtml(story.assignee || story.owner || 'Unassigned')} · ${escapeHtml(story.sprint || 'No sprint')}</p>
+          ${story.dependencies ? `<p class="demo-dependency"><strong>Dependency:</strong> ${escapeHtml(story.dependencies)}</p>` : ''}
+          <div class="demo-edit-grid" data-demo-project="${escapeHtml(story.projectName)}" data-demo-story-id="${escapeHtml(story.id)}">
+            <label>Status<select data-demo-status aria-label="Temporary status for ${escapeHtml(story.jiraId)}">${DEMO_STATUS_VALUES.map(status => `<option value="${escapeHtml(status)}" ${status === story.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></label>
+            <label>Assignee<input data-demo-assignee maxlength="80" value="${escapeHtml(story.assignee || story.owner || '')}" aria-label="Temporary assignee for ${escapeHtml(story.jiraId)}" /></label>
+            <button class="button button-small" data-onclick="saveDemoWorkItem(${escapeHtml(JSON.stringify(story.projectName))}, ${escapeHtml(JSON.stringify(story.id))})">Apply temporarily</button>
+            <span class="demo-row-error" data-demo-row-error role="status"></span>
+          </div>
+        </article>`).join('') || '<p>No fictional work items are available.</p>'}
+    </section>`;
+}
+
+function renderDemoFollowUp(data) {
+  const queue = data.stories.filter(story => story.status !== 'Done');
+  return `
+    ${demoViewLead('FOLLOW-UP · FICTIONAL QUEUE', 'Attention and ownership', 'A read-only sample of the PM follow-up queue. Use Work to try temporary status or assignee changes.', `${queue.length} open items`)}
+    <div class="demo-followup-grid">${queue.map(story => `
+      <article class="card demo-followup-card">
+        <div><strong>${escapeHtml(story.jiraId)}</strong><span class="status-pill">${escapeHtml(story.status)}</span></div>
+        <h3>${escapeHtml(story.summary)}</h3>
+        <p><strong>Owner:</strong> ${escapeHtml(story.assignee || story.owner || 'Unassigned')}</p>
+        <p><strong>Next PM check:</strong> ${escapeHtml(story.dependencies || 'Confirm progress and the next visible update.')}</p>
+      </article>`).join('')}</div>`;
+}
+
+function renderDemoMilestones(data) {
+  return `
+    ${demoViewLead('MILESTONES · FICTIONAL DATES', 'Launch decision path', 'These dates exist only to demonstrate how Priorena connects delivery scope to upcoming checkpoints.', `${data.milestones.length} milestones`)}
+    <section class="card demo-timeline-card">
+      ${data.milestones.map((item, index) => `<article class="demo-timeline-item"><div class="demo-timeline-index">${index + 1}</div><div><span>${escapeHtml(demoDate(item.date))} · ${escapeHtml(item.status || 'Upcoming')}</span><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.notes || '')}</p></div></article>`).join('')}
+    </section>`;
+}
+
+function renderDemoCapture(data) {
+  return `
+    ${demoViewLead('CAPTURE · REVIEW FIRST', 'Evidence intake and review', 'Only fictional or already-sanitized text is accepted. Submissions remain pending until you explicitly accept or reject them.', `${data.acceptedEvidence.length} accepted · ${data.userEvidence.filter(item => item.reviewStatus === 'pending').length} pending`)}
+    <div class="demo-grid">
+      <section class="card demo-card">
         <h3>Accepted evidence</h3>
-        ${acceptedEvidence.map(finding => `
-          <article class="demo-list-item">
-            <div><strong>${escapeHtml(finding.jiraId || 'Unlinked')}</strong><span class="status-pill accepted">Accepted</span></div>
-            <h4>${escapeHtml(String(finding.category || 'other').replaceAll('_', ' '))}</h4>
-            <blockquote>${escapeHtml(finding.exactExcerpt)}</blockquote>
-            <p>${escapeHtml(finding.sourceTitle)}</p>
-          </article>
-        `).join('') || '<p>No fictional evidence is available.</p>'}
+        ${data.acceptedEvidence.map(finding => `<article class="demo-list-item"><div><strong>${escapeHtml(finding.jiraId || 'Unlinked')}</strong><span class="status-pill accepted">Accepted</span></div><h4>${escapeHtml(String(finding.category || 'other').replaceAll('_', ' '))}</h4><blockquote>${escapeHtml(finding.exactExcerpt)}</blockquote><p>${escapeHtml(finding.sourceTitle)}</p></article>`).join('') || '<p>No fictional evidence is available.</p>'}
+      </section>
+      <section class="card demo-card">
+        <div class="eyebrow">PROVENANCE</div><h3>Why this evidence is trusted</h3>
+        <ul class="demo-check-list"><li>Every finding has an exact excerpt and work-item key.</li><li>Accepted and pending states remain distinct.</li><li>New demo input is bounded and rejected if it resembles a URL, email address, credential, or secret.</li><li>No file or original screenshot is accepted here.</li></ul>
       </section>
     </div>
     <section class="card demo-evidence-card">
-      <div class="demo-evidence-intro">
-        <div>
-          <div class="eyebrow">SANITIZED TEXT ONLY · REVIEW FIRST</div>
-          <h3>Try temporary evidence intake</h3>
-          <p>Enter fictional or already-sanitized text. URLs, email addresses, secret-like values, unsupported fields, and more than 25 submissions are rejected. No file or screenshot is accepted here.</p>
-        </div>
-        <span>${userEvidence.filter(finding => finding.reviewStatus === 'pending').length} pending</span>
-      </div>
+      <div class="demo-evidence-intro"><div><div class="eyebrow">SANITIZED TEXT ONLY · REVIEW FIRST</div><h3>Try temporary evidence intake</h3><p>Enter fictional or already-sanitized text. The record stays only in this isolated session.</p></div><span>${data.userEvidence.filter(finding => finding.reviewStatus === 'pending').length} pending</span></div>
       <div class="demo-evidence-form">
-        <label>Project
-          <select id="demo-evidence-project">
-            ${projectEntries.map(([projectName]) => `<option value="${escapeHtml(projectName)}">${escapeHtml(projectName)}</option>`).join('')}
-          </select>
-        </label>
-        <label>Work item
-          <select id="demo-evidence-jira">
-            ${stories.map(story => `<option value="${escapeHtml(story.jiraId)}">${escapeHtml(story.jiraId)} — ${escapeHtml(story.summary)}</option>`).join('')}
-          </select>
-        </label>
-        <label>Category
-          <select id="demo-evidence-category">
-            ${DEMO_EVIDENCE_CATEGORIES.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category.replaceAll('_', ' '))}</option>`).join('')}
-          </select>
-        </label>
-        <label class="demo-evidence-wide">Source title
-          <input id="demo-evidence-source-title" maxlength="120" placeholder="Fictional launch-readiness note" />
-        </label>
-        <label class="demo-evidence-wide">Short finding summary
-          <input id="demo-evidence-summary" maxlength="240" placeholder="What should the reviewer understand?" />
-        </label>
-        <label class="demo-evidence-wide">Exact excerpt
-          <textarea id="demo-evidence-excerpt" maxlength="1000" placeholder="Paste only fictional or sanitized evidence text."></textarea>
-        </label>
-        <label class="demo-evidence-attestation">
-          <input id="demo-evidence-attested" type="checkbox" />
-          I confirm this text is fictional or sanitized and contains no private information, URLs, email addresses, credentials, or secrets.
-        </label>
-        <div class="demo-evidence-submit">
-          <button class="button" data-onclick="submitDemoEvidence()">Add as pending evidence</button>
-          <span id="demo-evidence-error" class="demo-row-error" role="status"></span>
-        </div>
+        <label>Project<select id="demo-evidence-project">${data.projectEntries.map(([projectName]) => `<option value="${escapeHtml(projectName)}">${escapeHtml(projectName)}</option>`).join('')}</select></label>
+        <label>Work item<select id="demo-evidence-jira">${data.stories.map(story => `<option value="${escapeHtml(story.jiraId)}">${escapeHtml(story.jiraId)} — ${escapeHtml(story.summary)}</option>`).join('')}</select></label>
+        <label>Category<select id="demo-evidence-category">${DEMO_EVIDENCE_CATEGORIES.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category.replaceAll('_', ' '))}</option>`).join('')}</select></label>
+        <label class="demo-evidence-wide">Source title<input id="demo-evidence-source-title" maxlength="120" placeholder="Fictional launch-readiness note" /></label>
+        <label class="demo-evidence-wide">Short finding summary<input id="demo-evidence-summary" maxlength="240" placeholder="What should the reviewer understand?" /></label>
+        <label class="demo-evidence-wide">Exact excerpt<textarea id="demo-evidence-excerpt" maxlength="1000" placeholder="Paste only fictional or sanitized evidence text."></textarea></label>
+        <label class="demo-evidence-attestation"><input id="demo-evidence-attested" type="checkbox" />I confirm this text is fictional or sanitized and contains no private information, URLs, email addresses, credentials, or secrets.</label>
+        <div class="demo-evidence-submit"><button class="button" data-onclick="submitDemoEvidence()">Add as pending evidence</button><span id="demo-evidence-error" class="demo-row-error" role="status"></span></div>
       </div>
-      <div class="demo-review-list">
-        <h4>Temporary evidence review</h4>
-        ${userEvidence.map(finding => `
-          <article class="demo-review-item">
-            <div>
-              <strong>${escapeHtml(finding.jiraId)} · ${escapeHtml(String(finding.category).replaceAll('_', ' '))}</strong>
-              <span class="status-pill ${escapeHtml(finding.reviewStatus)}">${escapeHtml(finding.reviewStatus)}</span>
-            </div>
-            <p>${escapeHtml(finding.summary)}</p>
-            <blockquote>${escapeHtml(finding.exactExcerpt)}</blockquote>
-            <small>${escapeHtml(finding.sourceTitle)}</small>
-            ${finding.reviewStatus === 'pending' ? `
-              <div class="demo-review-actions">
-                <button class="button button-small" data-onclick="reviewDemoEvidence(${escapeHtml(JSON.stringify(finding.projectName))}, ${escapeHtml(JSON.stringify(finding.id))}, 'accepted')">Accept</button>
-                <button class="button button-small danger" data-onclick="reviewDemoEvidence(${escapeHtml(JSON.stringify(finding.projectName))}, ${escapeHtml(JSON.stringify(finding.id))}, 'rejected')">Reject</button>
-              </div>
-            ` : ''}
-          </article>
-        `).join('') || '<p>No temporary evidence has been submitted.</p>'}
+      <div class="demo-review-list"><h4>Temporary evidence review</h4>
+        ${data.userEvidence.map(finding => `<article class="demo-review-item"><div><strong>${escapeHtml(finding.jiraId)} · ${escapeHtml(String(finding.category).replaceAll('_', ' '))}</strong><span class="status-pill ${escapeHtml(finding.reviewStatus)}">${escapeHtml(finding.reviewStatus)}</span></div><p>${escapeHtml(finding.summary)}</p><blockquote>${escapeHtml(finding.exactExcerpt)}</blockquote><small>${escapeHtml(finding.sourceTitle)}</small>${finding.reviewStatus === 'pending' ? `<div class="demo-review-actions"><button class="button button-small" data-onclick="reviewDemoEvidence(${escapeHtml(JSON.stringify(finding.projectName))}, ${escapeHtml(JSON.stringify(finding.id))}, 'accepted')">Accept</button><button class="button button-small danger" data-onclick="reviewDemoEvidence(${escapeHtml(JSON.stringify(finding.projectName))}, ${escapeHtml(JSON.stringify(finding.id))}, 'rejected')">Reject</button></div>` : ''}</article>`).join('') || '<p>No temporary evidence has been submitted.</p>'}
       </div>
-    </section>
-    <section class="card demo-manual-card">
-      <div>
-        <div class="eyebrow">TEMPORARY MANUAL INPUT</div>
-        <h3>Try adding bounded context</h3>
-        <p>This text stays only in this isolated session and is erased when the session expires, is reset, or you exit.</p>
-      </div>
-      <textarea id="demo-manual-context" maxlength="2000" placeholder="Add fictional leadership framing or context…">${escapeHtml(demoSession.manualContext || '')}</textarea>
-      <button class="button" data-onclick="saveDemoManualContext()" ${demoBusy ? 'disabled' : ''}>Save temporary context</button>
-    </section>
-  `;
+    </section>`;
+}
+
+function renderDemoPortfolio(data) {
+  const projectName = data.projectEntries[0]?.[0] || 'Fictional workspace';
+  const project = data.projectEntries[0]?.[1] || {};
+  return `
+    ${demoViewLead('PORTFOLIO · ONE FICTIONAL WORKSPACE', 'PM workspace overview', 'The public demo deliberately uses one bounded delivery scope so reviewers can understand the Project-to-Jira-Epic model without operational data.')}
+    <section class="card demo-portfolio-card"><div><div class="eyebrow">PM WORKSPACE</div><h2>${escapeHtml(projectName)}</h2><p>${escapeHtml(project.description || '')}</p></div><div class="demo-portfolio-metrics"><div><strong>${data.stories.length}</strong><span>work items</span></div><div><strong>${data.acceptedEvidence.length}</strong><span>accepted evidence</span></div><div><strong>${data.milestones.length}</strong><span>milestones</span></div></div></section>
+    <div class="note"><strong>Product model:</strong> a PM workspace is the local container; a user-facing Project represents one Jira Epic delivery scope. This fictional sample does not connect to Jira.</div>`;
+}
+
+function renderDemoCommunicate(data, teamsOnly = false) {
+  const preview = data.metadata.communicationPreview || {};
+  const teams = Array.isArray(preview.teams) ? preview.teams : [];
+  const teamsCard = `<section class="card demo-channel-card"><div class="section-heading"><h3>Teams-ready draft</h3><span class="micro">fictional · not sent</span></div><p><strong>${escapeHtml(preview.headline || '')}</strong></p><ul>${teams.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></section>`;
+  return `
+    ${demoViewLead(teamsOnly ? 'TEAMS DRAFT · NOT SENT' : 'COMMUNICATE · SAME FACT SET', teamsOnly ? 'Fictional Teams update' : 'Channel-ready briefing preview', 'These drafts are deterministic examples. Nothing is copied, sent, published, or marked communicated automatically.', escapeHtml(preview.overallStatus || 'Review'))}
+    ${teamsOnly ? teamsCard : `<div class="demo-channel-grid">${teamsCard}<section class="card demo-channel-card"><div class="section-heading"><h3>Leadership email</h3><span class="micro">fictional · not sent</span></div><p class="demo-email-subject">${escapeHtml(preview.emailSubject || '')}</p><p>${escapeHtml(preview.emailOpening || '')}</p></section><section class="card demo-channel-card"><div class="section-heading"><h3>Confluence summary</h3><span class="micro">fictional · not published</span></div><p>${escapeHtml(preview.confluenceSummary || '')}</p><div class="demo-fact-strip"><span>${data.stories.length} work items</span><span>${data.acceptedEvidence.length} accepted findings</span><span>${data.milestones.length} milestones</span></div></section></div>`}
+    <section class="card demo-manual-card"><div><div class="eyebrow">TEMPORARY MANUAL INPUT</div><h3>Add bounded leadership context</h3><p>This text remains separate from source evidence and is erased with the demo session.</p></div><textarea id="demo-manual-context" maxlength="2000" placeholder="Add fictional leadership framing or context…">${escapeHtml(demoSession.manualContext || '')}</textarea><button class="button" data-onclick="saveDemoManualContext()" ${demoBusy ? 'disabled' : ''}>Save temporarily</button></section>`;
+}
+
+function renderDemoSettings(data) {
+  const sprintOptions = Array.isArray(data.workspace.settings?.sprintOptions) ? data.workspace.settings.sprintOptions : [];
+  return `
+    ${demoViewLead('SETTINGS · READ ONLY', 'Demo safety boundary', 'Settings are presented for orientation only. Demo Mode cannot change normal workspace configuration, persistence, or provider credentials.')}
+    <div class="demo-settings-grid">
+      <section class="card"><div class="eyebrow">RUNTIME</div><h3>Local and isolated</h3><dl><div><dt>Network</dt><dd>127.0.0.1 only</dd></div><div><dt>Persistence</dt><dd>In-memory demo session</dd></div><div><dt>AI provider</dt><dd>Not used in Demo Mode</dd></div><div><dt>Private workspace</dt><dd>No access</dd></div></dl></section>
+      <section class="card"><div class="eyebrow">SESSION</div><h3>Automatic cleanup</h3><dl><div><dt>Idle expiry</dt><dd>${escapeHtml(formatDemoExpiry(demoSession.idleExpiresAt))}</dd></div><div><dt>Absolute expiry</dt><dd>${escapeHtml(formatDemoExpiry(demoSession.absoluteExpiresAt))}</dd></div><div><dt>Reset</dt><dd>Restores the fictional fixture</dd></div><div><dt>Exit</dt><dd>Erases demo-only changes</dd></div></dl></section>
+      <section class="card"><div class="eyebrow">SAMPLE CONFIGURATION</div><h3>Fictional workspace defaults</h3><dl><div><dt>Comment freshness</dt><dd>${escapeHtml(String(data.workspace.settings?.commentStaleDays || 7))} days</dd></div><div><dt>Sprints</dt><dd>${escapeHtml(sprintOptions.join(', ') || 'None')}</dd></div><div><dt>Fixture</dt><dd>${escapeHtml(data.metadata.fixtureVersion || 'demo')}</dd></div></dl></section>
+      <section class="card"><div class="eyebrow">BOUNDARY</div><h3>What remains disabled</h3><ul class="demo-check-list"><li>Normal persistence APIs and workspace data</li><li>Provider-backed AI drafting</li><li>File and screenshot upload</li><li>Automatic Jira, Teams, email, or Confluence publication</li></ul></section>
+    </div>`;
+}
+
+function renderDemoView(data) {
+  if (demoCurrentTab === 'stories') return renderDemoWork(data);
+  if (demoCurrentTab === 'tracking') return renderDemoFollowUp(data);
+  if (demoCurrentTab === 'timeline') return renderDemoMilestones(data);
+  if (demoCurrentTab === 'transcripts') return renderDemoCapture(data);
+  if (demoCurrentTab === 'portfolio') return renderDemoPortfolio(data);
+  if (demoCurrentTab === 'reports' || demoCurrentTab === 'briefings') return renderDemoCommunicate(data);
+  if (demoCurrentTab === 'teams') return renderDemoCommunicate(data, true);
+  if (demoCurrentTab === 'manage') return renderDemoSettings(data);
+  return renderDemoOverview(data);
+}
+
+function renderDemoShell() {
+  if (!demoShell || !demoSession) return;
+  const data = demoViewModel();
+  demoShell.innerHTML = `
+    <div class="demo-banner demo-banner-compact">
+      <div><div class="eyebrow">FICTIONAL · TEMPORARY · ISOLATED</div><h2>Explore Priorena without using real project data</h2><p>${escapeHtml(data.metadata.notice || 'Everything shown here is fictional and exists only in this temporary demo session.')}</p></div>
+      <div class="demo-banner-actions"><button class="button secondary" data-onclick="resetDemoSession()" ${demoBusy ? 'disabled' : ''}>Reset demo</button><button class="button" data-onclick="toggleDemoSession()" ${demoBusy ? 'disabled' : ''}>Exit demo</button></div>
+    </div>
+    ${demoFeedback ? `<div class="notice success">${escapeHtml(demoFeedback)}</div>` : ''}
+    ${demoError ? `<div class="notice warning">${escapeHtml(demoError)}</div>` : ''}
+    <div class="demo-session-strip"><span>IN-MEMORY SESSION</span><strong>No private workspace access</strong><span>Idle expiry ${escapeHtml(formatDemoExpiry(demoSession.idleExpiresAt))}</span></div>
+    ${renderDemoView(data)}`;
 }
 
 function setDemoExperienceActive(active) {
@@ -511,7 +569,7 @@ function setDemoExperienceActive(active) {
   viewArea?.classList.toggle('hidden', active);
   quickCaptureButton?.classList.toggle('hidden', active);
   helpButton?.classList.toggle('hidden', active);
-  if (mainNav) mainNav.inert = active;
+  if (mainNav) mainNav.inert = false;
   if (projectSelector) projectSelector.inert = active;
   if (demoModeButton) demoModeButton.textContent = active ? 'Exit Demo' : 'Try Demo';
 
@@ -519,20 +577,21 @@ function setDemoExperienceActive(active) {
     if (brandSub) brandSub.textContent = 'FICTIONAL · TEMPORARY';
     if (footerRole) footerRole.textContent = 'Isolated demo session';
     if (aiModeEl) aiModeEl.textContent = 'no private workspace access';
-    mainTitle.textContent = 'Demo Workspace';
-    mainSubtitle.textContent = 'fictional · temporary · isolated';
-    renderDemoShell();
+    renderProjectSelector();
+    activateDemoTab(demoCurrentTab);
   } else {
     if (brandSub) brandSub.textContent = 'LOCAL · SINGLE-USER';
     if (footerRole) footerRole.textContent = 'PM delivery intelligence';
+    renderProjectSelector();
     updateHeader();
-    fetchMeta();
+    fetchProjects();
   }
 }
 
 async function createDemoSession(feedback = '') {
   demoBusy = true;
   demoError = '';
+  demoCurrentTab = 'overview';
   try {
     const response = await fetch('/api/demo/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     demoSession = await readDemoResponse(response, 'Unable to start Demo Mode');
@@ -872,6 +931,10 @@ async function refreshProject() {
 
 // Sidebar workspace area: the stored compatibility key remains `projects`.
 function renderProjectSelector() {
+  if (demoSession) {
+    projectSelector.innerHTML = '<select disabled aria-label="Fictional demo workspace"><option>Northstar Launch · fictional</option></select>';
+    return;
+  }
   const projectNames = Object.keys(projects);
   const options = projectNames.length
     ? projectNames.map(name => `<option value="${escapeHtml(name)}" ${selectedProject === name ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')
@@ -1211,6 +1274,27 @@ function renderHelpPanel(needsProject) {
     ${needsProject ? `<div class="note warn" style="margin-bottom:14px;">Start by creating a project in Settings. Then add work items, capture a DSU or meeting note, and return to Today for the daily queue.</div>` : ''}
     <div class="help-grid">
       <section class="card help-section">
+        <div class="section-heading"><h4>First-time setup</h4><span class="micro">start here</span></div>
+        <ol class="help-list">
+          <li>Run <strong>npm install</strong>, copy <strong>.env.example</strong> to <strong>.env</strong>, and run <strong>npm start</strong>.</li>
+          <li>Open <strong>http://127.0.0.1:3000</strong> and keep the terminal running. Use <strong>Ctrl+C</strong> to stop the server.</li>
+          <li>With <strong>PRIORENA_DEMO_MODE=1</strong>, the fictional Northstar Launch sample opens automatically.</li>
+          <li>Restart the server after changing server code or <strong>.env</strong>.</li>
+        </ol>
+      </section>
+      <section class="card help-section">
+        <div class="section-heading"><h4>Demo versus normal workspace</h4><span class="micro">separate boundaries</span></div>
+        <ul class="help-list">
+          <li><strong>Demo Mode</strong> provides safe demo-only views for Today, Work, Follow-Up, Milestones, Capture, Portfolio, Communicate, Teams Draft, and Settings.</li>
+          <li>Every demo view reads the same fictional in-memory session. Normal persistence-backed screens and provider integrations stay inaccessible.</li>
+          <li><strong>Reset demo</strong> restores the original fictional sample. Exit, expiry, or server restart erases demo-only changes.</li>
+          <li><strong>Exit Demo</strong> returns to the separate normal workspace, which starts empty and receives no demo data.</li>
+          <li>To use the full application, create a PM workspace in Settings, add a Project for one Jira Epic, and add only authorized local material.</li>
+        </ul>
+      </section>
+    </div>
+    <div class="help-grid">
+      <section class="card help-section">
         <div class="section-heading"><h4>Daily flow</h4><span class="micro">use this order</span></div>
         <ol class="help-list">
           <li><strong>Today:</strong> review the blocked, follow-up, and quiet-thread signals.</li>
@@ -1227,6 +1311,27 @@ function renderHelpPanel(needsProject) {
           <li><strong>Capture</strong> stores structured notes and up to five uploaded sources at once; each source keeps its own type.</li>
           <li><strong>Communicate</strong> contains Briefings, the status summary, and Teams draft. Only Mark communicated advances a briefing baseline.</li>
           <li><strong>Settings</strong> manages projects, workspace rules, records, exports, and advanced prompt controls.</li>
+        </ul>
+      </section>
+    </div>
+    <div class="help-grid">
+      <section class="card help-section">
+        <div class="section-heading"><h4>Build a normal workspace</h4><span class="micro">recommended order</span></div>
+        <ol class="help-list">
+          <li>Create the PM workspace and its Project in <strong>Settings</strong>.</li>
+          <li>Add work items manually or preview a bounded Jira CSV import under <strong>Work</strong>.</li>
+          <li>Use <strong>Capture</strong> to add authorized text evidence and explicitly review extracted findings.</li>
+          <li>Review delivery attention signals in <strong>Today</strong> and <strong>Follow-Up</strong>.</li>
+          <li>Prepare and finalize a briefing in <strong>Communicate</strong>; only an explicit Mark communicated action advances its baseline.</li>
+        </ol>
+      </section>
+      <section class="card help-section">
+        <div class="section-heading"><h4>What Priorena does not do</h4><span class="micro">important limits</span></div>
+        <ul class="help-list">
+          <li>It does not connect to Jira, Teams, email, or Confluence automatically.</li>
+          <li>It does not publish messages, change authoritative work items, or mark a briefing communicated without an explicit action.</li>
+          <li>It does not accept original screenshots; external screenshot processing must return the strict sanitized feed described under Capture.</li>
+          <li>It is not approved for LAN access, tunnels, hosted deployment, shared use, or multiple users.</li>
         </ul>
       </section>
     </div>
@@ -5707,7 +5812,22 @@ async function uploadTranscript() {
 
 // Activate a screen by name. Both the sidebar nav items and the header help (?) icon route
 // here — Help lives on the icon, not in the nav, so no nav item matches it.
+function activateDemoTab(tab) {
+  demoCurrentTab = DEMO_TABS.has(tab) ? tab : 'overview';
+  const primaryTab = ({ portfolio: 'overview', tracking: 'stories', timeline: 'stories', briefings: 'reports', teams: 'reports' })[demoCurrentTab] || demoCurrentTab;
+  navButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === primaryTab));
+  helpButton?.classList.remove('active');
+  const meta = DEMO_SCREEN_META[demoCurrentTab] || DEMO_SCREEN_META.overview;
+  mainTitle.textContent = meta.title;
+  mainSubtitle.textContent = meta.scope;
+  renderDemoShell();
+}
+
 function activateTab(tab) {
+  if (demoSession) {
+    activateDemoTab(tab);
+    return;
+  }
   currentTab = tab;
   const primaryTab = ({ portfolio: 'overview', tracking: 'stories', timeline: 'stories', briefings: 'reports', teams: 'reports' })[tab] || tab;
   navButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === primaryTab));
@@ -5804,5 +5924,9 @@ document.addEventListener('click', event => {
 });
 initSidebarToggle();
 
-fetchProjects();
-fetchDemoConfig();
+async function initializeApp() {
+  await fetchDemoConfig();
+  if (!demoSession) await fetchProjects();
+}
+
+initializeApp();

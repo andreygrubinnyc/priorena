@@ -4,11 +4,26 @@ function createDemoWorkspace() {
       fictional: true,
       fixtureVersion: 'priorena-demo-v2',
       notice: 'All names, organizations, work items, dates, and evidence in this workspace are fictional.',
+      navigationNotice: 'Use the sidebar to explore safe demo-only views. Every view reads this temporary in-memory session and never loads the normal workspace.',
       walkthrough: [
-        'Scan the work items and accepted evidence to understand the launch picture.',
-        'Change a status or assignee to see a temporary, session-only update.',
-        'Submit fictional evidence, review it, and reset the demo when finished.'
-      ]
+        'Start on Today to understand the fictional launch picture and attention signals.',
+        'Open Work and Milestones to inspect delivery scope, ownership, and dates.',
+        'Use Capture to submit fictional evidence and make an explicit review decision.',
+        'Open Communicate to compare channel-ready drafts built from the same sample facts.'
+      ],
+      communicationPreview: {
+        overallStatus: 'At risk',
+        headline: 'Northstar Launch readiness is progressing with one blocker and one dependency to resolve.',
+        teams: [
+          'Readiness checklist verification is in progress.',
+          'Notification templates remain blocked on fictional legal-language review.',
+          'Accessibility validation is complete and approved.',
+          'Analytics event names and the support rehearsal runbook remain follow-up items.'
+        ],
+        emailSubject: 'Northstar Launch — fictional readiness update',
+        emailOpening: 'The fictional launch remains at risk but manageable. Accessibility validation is complete, while notification language and analytics event naming need resolution before the launch decision.',
+        confluenceSummary: 'Five work items are represented in the sample: one done, one blocked, two in progress, and one planned. Six reviewed evidence records support the current status.'
+      }
     },
     projects: {
       'Northstar Launch': {

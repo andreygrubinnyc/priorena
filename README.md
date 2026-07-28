@@ -38,17 +38,53 @@ Requirements:
 - Node.js 24
 - npm
 
+### Start the application
+
 ```bash
 npm install
 cp .env.example .env
 npm start
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Demo Mode automatically opens a fictional **Northstar Launch** starter project with five work items, six accepted evidence records, three milestones, and a short guided walkthrough. You can temporarily update work items, add and review sanitized evidence, and reset the sample.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Keep the terminal window running while you use Priorena. Stop the server with `Ctrl+C`; restart it after changing server code or `.env`.
 
-The demo is independently fictional and temporary. Each local browser session receives an isolated in-memory workspace. Demo state is erased on reset, exit, expiry, or server restart and never enters the normal persistence path.
+Because `.env.example` enables Demo Mode, the browser automatically opens a fictional **Northstar Launch** starter project with five work items, six accepted evidence records, three milestones, and a guided walkthrough.
+
+### Use the fictional demo
+
+1. Start on **Today** for the guided delivery overview.
+2. Use the sidebar to inspect **Work**, **Follow-Up**, and **Milestones**.
+3. In **Work**, change a status or assignee and choose **Apply temporarily**.
+4. In **Capture**, add fictional or already-sanitized text, then accept or reject the pending evidence.
+5. Compare the fictional Teams, email, and Confluence drafts under **Communicate**.
+6. Review the read-only demo boundary under **Settings**, or choose **Reset demo** to restore the original sample.
+
+Demo Mode provides safe demo-only views for Today, Work, Follow-Up, Milestones, Capture, Portfolio, Communicate, Teams Draft, and Settings. Every page reads the same fictional in-memory session. The normal persistence-backed screens, provider integrations, uploads, and private workspace remain inaccessible while Demo Mode is active.
+
+Choose **Exit Demo** to return to the separate normal workspace. It starts empty and does not inherit the fictional demo data. To use it, create a PM workspace in Settings and then add or import your own authorized local data.
+
+The demo is independently fictional and temporary. Each browser session receives an isolated in-memory workspace. Demo state is erased on reset, exit, expiry, or server restart and never enters the normal persistence path.
 
 To run without Demo Mode, remove `PRIORENA_DEMO_MODE=1` from `.env`.
+
+### Start a normal local workspace
+
+1. Disable Demo Mode in `.env` and restart the server.
+2. Open **Settings** and create a PM workspace.
+3. Add a Project for one Jira Epic delivery scope.
+4. Add or import work items under **Work**.
+5. Capture authorized text evidence under **Capture**, then review pending findings.
+6. Use **Today** and **Follow-Up** to review delivery signals.
+7. Prepare a reviewed briefing under **Communicate**.
+
+Priorena does not connect to Jira, Teams, email, or Confluence automatically. It prepares local, reviewable records and drafts; you remain responsible for authoritative updates and publication.
+
+### If something looks wrong
+
+- If the browser cannot connect, confirm `npm start` is still running and open exactly `http://127.0.0.1:3000`.
+- If Demo Mode does not appear, confirm `.env` contains `PRIORENA_DEMO_MODE=1`, then restart the server.
+- If you exited the demo and see empty pages, that is expected: the normal workspace has separate local storage and receives no demo data.
+- If port `3000` is already in use, stop the other local server or start Priorena with a different `PORT` value.
 
 ## Screenshots
 
