@@ -30,6 +30,7 @@ const { ITEM_TYPES, itemTypeOrUnknown } = window.PmWorkItemTypes;
 const CAPTURE_SOURCE_TYPES = ['DSU', 'Sprint Planning', 'Backlog Refinement', 'Story Snapshot', 'Developer Conversation', 'Other External Evidence', 'Meeting', '1:1', 'Interview', 'Call', 'Notes', 'Other'];
 const DEMO_STATUS_VALUES = ['Not started', 'Planned', 'In progress', 'Blocked', 'Done'];
 const DEMO_EVIDENCE_CATEGORIES = ['progress_update', 'blocker', 'dependency', 'risk', 'decision', 'action', 'question', 'other'];
+const MILESTONE_STATUS_VALUES = ['Planned', 'In progress', 'At risk', 'Blocked', 'Completed', 'Cancelled'];
 const DEMO_SCREEN_META = {
   overview: { title: 'Today', scope: 'fictional demo · delivery attention' },
   stories: { title: 'Work', scope: 'fictional demo · work items' },
@@ -108,16 +109,28 @@ let teamsSearch = '';
 let editingProjectDesc = false;
 let storyEditing = null;
 let transcriptEditing = null;
+let timelineEditing = null;
+let sourceSelections = new Set();
+let sourceDeleteFeedback = null;
 let storyShowAddForm = false;
 let storyShowImportForm = false;
 let storyImportPreview = null;
 let storyImportError = '';
 let storyImportLoading = false;
+let storyImportReconciliationSelections = new Set();
 let storyStatusFilter = 'all';
 let storyTypeFilter = 'all';
 let storyAssigneeFilter = 'all';
 let storySprintFilter = 'all';
 let storySearch = '';
+let storyArchiveFilter = 'active';
+let storyGapFilter = 'all';
+let storySelections = new Set();
+let storyBulkAction = 'assign-project';
+let storyBulkValue = '';
+let storyReviewSelected = false;
+let storyHistoryExpanded = false;
+let storyBulkFeedback = null;
 let workItemExpanded = new Set();
 let trackingExpanded = new Set();
 let captureFocus = '';
@@ -173,25 +186,27 @@ function registerCopyPayload(text) {
 
 const DECLARATIVE_ACTIONS = new Set([
   'activateTab', 'addProject', 'addManualBriefingFact', 'applyExternalFeed', 'applyStoryTemplate', 'archiveDeliveryProject', 'assignSelectedWorkItems', 'cancelEditProjectDesc', 'cancelManageEdit',
-  'cancelStoryCsvImport', 'cancelStoryEdit', 'cancelTranscriptEdit', 'clearDsuSelection', 'clearFindingSelection', 'clearTeamsSelection',
+  'cancelStoryCsvImport', 'cancelStoryEdit', 'cancelTimelineEdit', 'cancelTranscriptEdit', 'clearDsuSelection', 'clearFindingSelection', 'clearTeamsSelection',
   'communicateActiveBriefing', 'confirmStoryCsvImport', 'copyTeamsMessage', 'createBriefingStreamFromForm', 'createDeliveryProjectFromForm', 'createStory', 'createTimeline', 'createTrackedItem',
-  'csvImportDragLeave', 'csvImportDragOver', 'csvImportDrop', 'csvImportFileChosen', 'deleteItem',
+  'applySelectedCsvReconciliation', 'applyStorySavedView', 'csvImportDragLeave', 'csvImportDragOver', 'csvImportDrop', 'csvImportFileChosen', 'deleteItem', 'deleteStorySavedView',
   'deleteBriefingStream', 'deleteProject', 'deleteUpdate', 'dismissCommentBanner', 'downloadWorkspaceBackup', 'dzLeave', 'dzOver',
-  'dzDrop', 'dzFileChosen', 'exportManageCSV', 'exportManageMarkdown', 'exportTrackingCSV',
+  'dzDrop', 'dzFileChosen', 'exportManageCSV', 'exportManageMarkdown', 'exportSelectedStoriesCSV', 'exportTrackingCSV',
   'finalizeActiveBriefing', 'generateBriefingOutputs', 'generateStatusReport', 'generateTeamsUpdate', 'logItemComment', 'manageToggleNewProjectForm',
   'openCapture', 'openFollowUp', 'openMilestones', 'openPortfolio', 'openSettings', 'openStatusSummary',
   'openBriefing', 'openBriefings', 'openTeamsDraft', 'openWorkItems', 'previewStoryCsvImport', 'removeBriefingManualFact', 'removeCaptureFile', 'acceptSelectedDsuUpdates', 'acceptSelectedFindings', 'rejectSelectedDsuUpdates', 'rejectSelectedFindings',
   'resetExternalFeed', 'resetStoryCsvImport', 'resumeExternalFeed', 'reviewDsuFindingAgain', 'reviewFinding', 'saveAiPrompts', 'saveAssigneeDirectory', 'saveManageEdit', 'saveProjectDesc',
-  'saveBriefingFacts', 'saveProjectStatusMappings', 'saveExternalFeed', 'saveStoryEdit', 'saveStructuredMeeting', 'saveTranscriptEdit',
-  'saveWorkspaceSettings', 'selectAllTeams', 'selectProject', 'setCaptureListPage', 'setCommentStaleDays', 'setItemFlag',
+  'saveBriefingFacts', 'saveProjectStatusMappings', 'saveExternalFeed', 'saveStoryEdit', 'saveStructuredMeeting', 'saveTimelineEdit', 'saveTranscriptEdit',
+  'saveStoryCurrentView', 'saveWorkspaceSettings', 'selectAllTeams', 'selectProject', 'selectStoryGap', 'setCaptureListPage', 'setCommentStaleDays', 'setItemFlag',
   'setBriefingChangeField', 'setBriefingChangeIncluded', 'setBriefingEvidenceField', 'setBriefingEvidenceIncluded', 'setBriefingEvidencePage', 'setBriefingView', 'setExternalFeedCreateType', 'setManageFilter', 'setExternalFeedText', 'setStoryAssigneeFilter', 'setStoryFilter', 'setStorySearch', 'setStoryTypeFilter',
-  'setStorySprintFilter', 'setTeamsAssigneeFilter', 'setTeamsField', 'setTeamsFilter',
+  'setStoryArchiveFilter', 'setStoryBulkAction', 'setStoryBulkValue', 'setStoryGapFilter', 'setStorySprintFilter', 'setTeamsAssigneeFilter', 'setTeamsField', 'setTeamsFilter',
   'setTrackingFilter', 'setTrackingProjectFilter', 'setTrackingSearch', 'startEditProjectDesc',
-  'startBriefing', 'startManageEdit', 'startStoryEdit', 'startStoryFromTimeline', 'startTranscriptEdit',
+  'startBriefing', 'startManageEdit', 'startStoryEdit', 'startStoryFromTimeline', 'startTimelineEdit', 'startTranscriptEdit',
   'submitLinkStory', 'toggleAddTrackedForm', 'toggleLinkStoryForm', 'toggleStoryAddForm',
-  'toggleCaptureSection', 'toggleDeliveryProjectSelection', 'toggleDsuPageSelection', 'toggleDsuSelection', 'toggleDsuShowReviewed', 'toggleEvidenceShowReviewed', 'toggleExternalFeedAllFields', 'toggleExternalFeedCreate', 'toggleExternalFeedField', 'toggleFindingPageSelection', 'toggleFindingSelection', 'toggleStoryImportForm', 'toggleStoryTracked', 'toggleTeamsStory', 'toggleTrackingExpanded',
+  'toggleCaptureSection', 'toggleCsvReconciliationSelection', 'toggleDeliveryProjectSelection', 'toggleDsuPageSelection', 'toggleDsuSelection', 'toggleDsuShowReviewed', 'toggleEvidenceShowReviewed', 'toggleExternalFeedAllFields', 'toggleExternalFeedCreate', 'toggleExternalFeedField', 'toggleFindingPageSelection', 'toggleFindingSelection', 'toggleStoryHistory', 'toggleStoryImportForm', 'toggleStoryReviewSelected', 'toggleStorySelection', 'toggleStoryTracked', 'toggleTeamsStory', 'toggleTrackingExpanded', 'toggleVisibleStorySelection',
   'toggleDemoSession', 'resetDemoSession', 'saveDemoManualContext', 'saveDemoWorkItem', 'submitDemoEvidence', 'reviewDemoEvidence', 'toggleWorkItemExpanded', 'trackExistingStory', 'untrackItem', 'updateCaptureFile',
-  'updateDsuDraft', 'updateFindingDraft', 'updateItemField', 'updateItemLastComment', 'updateManageEditField', 'uploadTranscript', 'externalFeedFileChosen', 'previewExternalFeed'
+  'updateDsuDraft', 'updateFindingDraft', 'updateItemField', 'updateItemLastComment', 'updateManageEditField', 'uploadTranscript', 'externalFeedFileChosen', 'previewExternalFeed',
+  'clearSourceSelection', 'clearStorySelection', 'deleteSelectedSources', 'deleteSelectedStories', 'runStoryBulkAction', 'selectAllMatchingStories', 'selectVisibleStories',
+  'toggleSourcePageSelection', 'toggleSourceSelection', 'undoStoryBulkChange'
 ]);
 
 function splitDeclarativeArguments(source) {
@@ -1058,12 +1073,18 @@ async function selectProject(name) {
     teamsStatusFilter = 'all';
     teamsSprintFilter = 'all';
     teamsSearch = '';
+    timelineEditing = null;
+    sourceSelections.clear();
+    sourceDeleteFeedback = null;
     findingSelections.clear();
     findingReviewDrafts.clear();
     evidenceReviewFeedback = null;
     dsuSelections.clear();
     dsuReviewDrafts.clear();
     dsuReviewFeedback = null;
+    storySelections.clear();
+    storyReviewSelected = false;
+    storyBulkFeedback = null;
     resetExternalFeedState();
   }
   selectedProject = name;
@@ -1188,20 +1209,51 @@ async function deleteUpdate(project, storyId, updateId) {
   await refreshProject();
 }
 
+function milestoneStatusOptions(currentStatus = 'Planned') {
+  const current = String(currentStatus || 'Planned').trim() || 'Planned';
+  const values = MILESTONE_STATUS_VALUES.includes(current)
+    ? MILESTONE_STATUS_VALUES
+    : [current, ...MILESTONE_STATUS_VALUES];
+  return values.map(status => `<option value="${escapeHtml(status)}" ${status === current ? 'selected' : ''}>${escapeHtml(status)}${MILESTONE_STATUS_VALUES.includes(status) ? '' : ' (existing value)'}</option>`).join('');
+}
+
 function renderMilestonesPanel(project) {
+  const activeStories = (project.stories || []).filter(story => !story.archived);
   const milestones = (project.timeline || []).slice().sort((a, b) => {
     return milestoneHealth(b).score - milestoneHealth(a).score || new Date(a.date || '9999-12-31') - new Date(b.date || '9999-12-31');
   });
   const overdue = milestones.filter(m => milestoneHealth(m).label === 'Overdue').length;
   const dueSoon = milestones.filter(m => milestoneHealth(m).label === 'Due soon').length;
   const noDate = milestones.filter(m => milestoneHealth(m).label === 'No date').length;
-  const linked = milestones.filter(m => project.stories.some(story => story.timelineId === m.id)).length;
+  const linked = milestones.filter(m => activeStories.some(story => story.timelineId === m.id)).length;
 
   const rows = milestones.length ? `
     <ul class="panel-list">
       ${milestones.map(m => {
-        const linkedStories = project.stories.filter(story => story.timelineId === m.id);
+        const linkedStories = activeStories.filter(story => story.timelineId === m.id);
         const health = milestoneHealth(m);
+        if (timelineEditing === m.id) {
+          return `
+            <li class="card milestone-row milestone-row-editing">
+              <div class="section-heading">
+                <h4>Edit Milestone</h4>
+                <span class="micro">local milestone record</span>
+              </div>
+              <div class="form-grid">
+                <div class="form-row"><label>Title</label><input id="timeline-edit-title-${escapeHtml(m.id)}" value="${escapeHtml(m.title || '')}" /></div>
+                <div class="field-row">
+                  <div><label>Date</label><input id="timeline-edit-date-${escapeHtml(m.id)}" type="date" value="${escapeHtml((m.date || '').slice(0, 10))}" /></div>
+                  <div><label>Status</label><select id="timeline-edit-status-${escapeHtml(m.id)}">${milestoneStatusOptions(m.status)}</select></div>
+                </div>
+                <div class="form-row"><label>Notes</label><textarea id="timeline-edit-notes-${escapeHtml(m.id)}">${escapeHtml(m.notes || '')}</textarea></div>
+                <div class="note">Milestone changes are local to Priorena and do not update Jira.</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button class="button" data-onclick="saveTimelineEdit(${escapeHtml(JSON.stringify(m.id))})">Save milestone</button>
+                  <button class="button secondary" data-onclick="cancelTimelineEdit()">Cancel</button>
+                </div>
+              </div>
+            </li>`;
+        }
         return `
           <li class="card milestone-row">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
@@ -1219,6 +1271,7 @@ function renderMilestonesPanel(project) {
                 ${linkedStories.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${linkedStories.slice(0, 5).map(s => `<span class="tag">${escapeHtml(s.summary)}</span>`).join('')}</div>` : ''}
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="button button-small secondary" data-onclick="startTimelineEdit(${escapeHtml(JSON.stringify(m.id))})">Edit</button>
                 <button class="button button-small secondary" data-onclick="startStoryFromTimeline('${m.id}')">Create work item</button>
                 <button class="button button-small secondary" data-onclick="toggleLinkStoryForm('${m.id}')">Link work item</button>
                 <button class="button button-small danger" data-onclick="deleteItem(${escapeHtml(JSON.stringify(selectedProject))}, 'timeline', '${m.id}')">Delete</button>
@@ -1228,7 +1281,7 @@ function renderMilestonesPanel(project) {
               <div class="form-row"><label>Select work item</label>
                 <select id="timeline-story-select-${m.id}">
                   <option value="">Choose a work item</option>
-                  ${project.stories.map(story => `<option value="${story.id}">${escapeHtml(story.summary)}</option>`).join('')}
+                  ${activeStories.map(story => `<option value="${story.id}">${escapeHtml(story.summary)}</option>`).join('')}
                 </select>
               </div>
               <button class="button" data-onclick="submitLinkStory('${m.id}')">Link work item</button>
@@ -1286,7 +1339,7 @@ function renderMilestonesPanel(project) {
           <div class="form-row"><label>Title</label><input id="timeline-title" /></div>
           <div class="field-row">
             <div><label>Date</label><input id="timeline-date" type="date" /></div>
-            <div><label>Status</label><input id="timeline-status" /></div>
+            <div><label>Status</label><select id="timeline-status">${milestoneStatusOptions('Planned')}</select></div>
           </div>
           <div class="form-row"><label>Notes</label><textarea id="timeline-notes"></textarea></div>
           <button class="button" data-onclick="createTimeline()">Add Milestone</button>
@@ -1303,6 +1356,47 @@ function renderMilestonesPanel(project) {
     </div>
     ${rows}
   `;
+}
+
+function startTimelineEdit(id) {
+  if (!selectedProject || !(projects[selectedProject]?.timeline || []).some(entry => entry.id === id)) return;
+  timelineEditing = id;
+  timelinePanel.innerHTML = renderMilestonesPanel(projects[selectedProject]);
+  setTimeout(() => document.getElementById(`timeline-edit-title-${id}`)?.focus(), 0);
+}
+
+function cancelTimelineEdit() {
+  timelineEditing = null;
+  if (selectedProject) timelinePanel.innerHTML = renderMilestonesPanel(projects[selectedProject]);
+}
+
+async function saveTimelineEdit(id) {
+  if (!selectedProject || timelineEditing !== id) return;
+  const fieldValue = field => document.getElementById(`timeline-edit-${field}-${id}`)?.value ?? '';
+  const title = fieldValue('title').trim();
+  if (!title) {
+    alert('Milestone title is required.');
+    return;
+  }
+  const response = await fetch('/api/project/timeline', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project: selectedProject,
+      id,
+      title,
+      date: fieldValue('date'),
+      status: fieldValue('status'),
+      notes: fieldValue('notes').trim()
+    })
+  });
+  const result = await response.json().catch(() => ({ error: 'Unable to update milestone' }));
+  if (!response.ok) {
+    alert(result.error || 'Unable to update milestone.');
+    return;
+  }
+  timelineEditing = null;
+  await refreshProject();
 }
 
 function renderPanels() {
@@ -1369,6 +1463,27 @@ function renderHelpPanel(needsProject) {
     </div>
     <div class="help-grid">
       <details class="card help-section help-disclosure">
+        <summary><span>Managing work items in bulk</span><span class="micro">safe local workflow</span></summary>
+        <ol class="help-list">
+          <li>Use the row checkboxes, <strong>Select shown</strong>, or <strong>Select all matching filters</strong>. Review selected items before applying a change.</li>
+          <li>Choose one explicit action: Project/Jira Epic, assignee, sprint, tracking, labels, type, milestone, archive, or restore. Only that field changes.</li>
+          <li><strong>Preview changes</strong> shows the affected Jira keys and fields. The server rechecks that none changed between preview and apply.</li>
+          <li>Use <strong>Archive</strong> for reversible clean-up. Archived items leave Today, Follow-Up, Briefings, status summaries, and Teams drafts but remain available in Work.</li>
+          <li><strong>Protected delete</strong> requires typing the exact item count and creates a private local recovery snapshot. Change history can undo a bulk change when no later edit conflicts.</li>
+        </ol>
+      </details>
+      <details class="card help-section help-disclosure">
+        <summary><span>Filters, saved views, and gaps</span><span class="micro">repeatable triage</span></summary>
+        <ul class="help-list">
+          <li>Use readiness filters for unassigned work, missing sprint, unidentified Project, missing milestone, and duplicate Jira keys.</li>
+          <li>Save frequently used filters. Saved views store only filter settings, never a frozen copy of work items.</li>
+          <li>Export selected rows to a formula-neutralized CSV for a scoped offline review.</li>
+          <li>CSV preview separates new Jira keys from existing-key reconciliation. Reconciliation starts with nothing selected and supports reviewed item type, assignee, sprint, and label differences.</li>
+        </ul>
+      </details>
+    </div>
+    <div class="help-grid">
+      <details class="card help-section help-disclosure">
         <summary><span>Daily flow</span><span class="micro">use this order</span></summary>
         <ol class="help-list">
           <li><strong>Today:</strong> review the blocked, follow-up, and quiet-thread signals.</li>
@@ -1381,7 +1496,7 @@ function renderHelpPanel(needsProject) {
         <summary><span>Navigation</span><span class="micro">five destinations</span></summary>
         <ul class="help-list">
           <li><strong>Today</strong> is the selected project's immediate attention view. Use Portfolio here for the all-project rollup.</li>
-          <li><strong>Work</strong> contains work items, the cross-project Follow-Up queue, and milestones.</li>
+          <li><strong>Work</strong> contains work items, the cross-project Follow-Up queue, and milestones. Milestones can be edited inline and use Planned, In progress, At risk, Blocked, Completed, or Cancelled status.</li>
           <li><strong>Capture</strong> stores structured notes and up to five uploaded sources at once; each source keeps its own type.</li>
           <li><strong>Communicate</strong> contains Briefings, the status summary, and Teams draft. Only Mark communicated advances a briefing baseline.</li>
           <li><strong>Settings</strong> manages projects, workspace rules, records, exports, and advanced prompt controls.</li>
@@ -1427,7 +1542,8 @@ function renderHelpPanel(needsProject) {
           <li><strong>DSU, Sprint Planning, and Backlog Refinement</strong> create pending findings for review. Only accepted DSU progress findings create work-item updates.</li>
           <li><strong>External ChatGPT feed</strong> validates a separately generated JSON or Markdown feed and requires field-by-field reconciliation before changing work items. Original screenshots never enter this app.</li>
           <li>Extracted updates feed Today, work-item context, status summaries, and Teams drafts.</li>
-          <li>Delete a source and its derived extracted updates are removed too, so the evidence trail stays honest.</li>
+          <li>In Source Library, <strong>Select page</strong> selects the five currently visible sources. Selection can span pages; <strong>Clear selection</strong> clears the full selection.</li>
+          <li>Deleting selected sources also removes their findings and derived DSU updates. Priorena creates a private recovery snapshot first so the evidence trail stays honest and recoverable.</li>
         </ol>
       </details>
     </div>
@@ -1446,7 +1562,7 @@ function renderHelpPanel(needsProject) {
     <details class="card help-section help-templates-card help-disclosure">
       <summary><span>Templates and records</span><span class="micro">consistency without extra process</span></summary>
       <p>Start new work items from the Delivery, Requirement, or Defect/Blocker template to prefill useful acceptance criteria. Templates are starting points, not generated facts: review and adapt them before saving.</p>
-      <p>Use <strong>Import CSV</strong> in Work to preview a Jira export before adding it. Existing and repeated Jira keys are skipped, and imported items are not tracked for follow-up until you choose to track them.</p>
+      <p>Use <strong>Import CSV</strong> in Work to preview a Jira export before adding it. New Jira keys can be imported; existing keys appear in a separate, unselected reconciliation review. Repeated keys inside the CSV are skipped. Imported items are not tracked for follow-up until you choose to track them.</p>
       <p>For externally transcribed screenshots, use <strong>Capture → Import ChatGPT feed</strong>. Copy the strict prompt, process screenshots only in an approved ChatGPT workspace, and bring back only the generated JSON or Markdown feed.</p>
       <button class="button button-small secondary js-copy-text" data-copy-key="${registerCopyPayload(EXTERNAL_FEED_PROMPT)}">Copy external-feed prompt</button>
       <p><strong>Workspace Data</strong> in Settings is a local records browser. It lets you filter, edit, delete, and export saved work items, milestones, transcripts, and meeting notes. It does not connect to Jira or send data anywhere.</p>
@@ -1616,7 +1732,7 @@ function itemNeedsComment(s) {
 function allTrackedItems() {
   const out = [];
   for (const name of Object.keys(projects)) {
-    (projects[name].stories || []).forEach(s => { if (s.tracked) out.push({ project: name, story: s }); });
+    (projects[name].stories || []).forEach(s => { if (s.tracked && !s.archived) out.push({ project: name, story: s }); });
   }
   return out;
 }
@@ -1635,13 +1751,14 @@ function daysUntil(dateValue) {
 }
 
 function milestoneIsClosed(entry) {
-  return /done|complete|completed|closed/i.test(String(entry?.status || ''));
+  return /done|complete|completed|closed|cancelled|canceled/i.test(String(entry?.status || ''));
 }
 
 function milestoneHealth(entry) {
+  if (/cancelled|canceled/i.test(String(entry?.status || ''))) return { label: 'Cancelled', badge: 'notstarted', score: 0 };
+  if (milestoneIsClosed(entry)) return { label: 'Complete', badge: 'done', score: 0 };
   const until = daysUntil(entry?.date);
   if (until === null) return { label: 'No date', badge: 'notstarted', score: 1 };
-  if (milestoneIsClosed(entry)) return { label: 'Complete', badge: 'done', score: 0 };
   if (until < 0) return { label: 'Overdue', badge: 'blocked', score: 4 };
   if (until <= 7) return { label: 'Due soon', badge: 'followup', score: 3 };
   if (until <= 21) return { label: 'Upcoming', badge: 'planned', score: 2 };
@@ -1673,6 +1790,9 @@ function latestStoryActivityLabel(story) {
 
 function workItemAttentionProfile(story, project) {
   const linkedMilestone = project.timeline.find(entry => entry.id === story.timelineId);
+  if (story.archived) {
+    return { badge: 'quiet', label: 'Archived', detail: 'Excluded from active delivery views' };
+  }
   if (inferStatusClient(story) === 'Done') {
     return { badge: 'done', label: 'Stable', detail: 'Recorded as done' };
   }
@@ -1794,14 +1914,14 @@ async function saveProjectDesc() {
 function renderPortfolioPanel() {
   const names = Object.keys(projects);
   if (!names.length) return '<div class="card"><h4>Portfolio</h4><p>No projects yet. Add one from the sidebar.</p></div>';
-  const totalStories = names.reduce((sum, name) => sum + ((projects[name].stories || []).length), 0);
-  const totalBlocked = names.reduce((sum, name) => sum + (projects[name].stories || []).filter(s => inferStatusClient(s) === 'Blocked').length, 0);
-  const totalTracked = names.reduce((sum, name) => sum + (projects[name].stories || []).filter(s => s.tracked).length, 0);
-  const totalQuiet = names.reduce((sum, name) => sum + (projects[name].stories || []).filter(itemNeedsComment).length, 0);
+  const totalStories = names.reduce((sum, name) => sum + ((projects[name].stories || []).filter(s => !s.archived).length), 0);
+  const totalBlocked = names.reduce((sum, name) => sum + (projects[name].stories || []).filter(s => !s.archived && inferStatusClient(s) === 'Blocked').length, 0);
+  const totalTracked = names.reduce((sum, name) => sum + (projects[name].stories || []).filter(s => !s.archived && s.tracked).length, 0);
+  const totalQuiet = names.reduce((sum, name) => sum + (projects[name].stories || []).filter(s => !s.archived).filter(itemNeedsComment).length, 0);
 
   const cards = names.map(name => {
     const p = projects[name];
-    const stories = p.stories || [];
+    const stories = (p.stories || []).filter(story => !story.archived);
     const tracked = stories.filter(s => s.tracked);
     const counts = {};
     stories.forEach(s => { const st = inferStatusClient(s); counts[st] = (counts[st] || 0) + 1; });
@@ -1838,13 +1958,13 @@ function renderPortfolioPanel() {
 
   const attention = [];
   names.forEach(name => {
-    (projects[name].stories || []).filter(s => inferStatusClient(s) === 'Blocked').forEach(s => attention.push({
+    (projects[name].stories || []).filter(s => !s.archived && inferStatusClient(s) === 'Blocked').forEach(s => attention.push({
       badge: 'blocked', label: s.summary, project: name, detail: s.dependencies ? `blocked · ${s.dependencies}` : (s.notes ? `blocked · ${s.notes}` : 'blocked')
     }));
-    (projects[name].stories || []).filter(itemNeedsFollowup).forEach(s => attention.push({
+    (projects[name].stories || []).filter(s => !s.archived).filter(itemNeedsFollowup).forEach(s => attention.push({
       badge: 'followup', label: (s.jiraId ? s.jiraId + ' · ' : '') + (s.summary || ''), project: name, detail: storyAssignee(s) ? `assignee not contacted · ${storyAssignee(s)}` : 'assignee not contacted'
     }));
-    (projects[name].stories || []).filter(itemNeedsComment).forEach(s => attention.push({
+    (projects[name].stories || []).filter(s => !s.archived).filter(itemNeedsComment).forEach(s => attention.push({
       badge: 'quiet', label: (s.jiraId ? s.jiraId + ' · ' : '') + (s.summary || ''), project: name, detail: `no comment · ${lastCommentLabel(s)}`
     }));
   });
@@ -1910,7 +2030,7 @@ const STATUS_COLOR = {
 };
 
 function renderDashboard(project) {
-  const stories = project.stories || [];
+  const stories = (project.stories || []).filter(story => !story.archived);
   const timeline = project.timeline || [];
   const transcripts = project.transcripts || [];
   const tracked = stories.filter(s => s.tracked);
@@ -2218,13 +2338,13 @@ function renderDashboard(project) {
 }
 
 function teamsOwnersOf(project) {
-  const stories = (project && project.stories) || [];
+  const stories = ((project && project.stories) || []).filter(story => !story.archived);
   return [...new Set(stories.map(s => storyAssignee(s)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
 function filteredTeamsStories(project) {
   const search = teamsSearch.trim().toLowerCase();
-  return ((project && project.stories) || []).filter(story => {
+  return ((project && project.stories) || []).filter(story => !story.archived).filter(story => {
     if (teamsAssigneeFilter !== 'all' && storyAssignee(story) !== teamsAssigneeFilter) return false;
     if (teamsStatusFilter !== 'all' && inferStatusClient(story) !== teamsStatusFilter) return false;
     if (teamsSprintFilter !== 'all' && storySprint(story) !== teamsSprintFilter) return false;
@@ -2235,7 +2355,7 @@ function filteredTeamsStories(project) {
 }
 
 function renderTeamsPanel(project) {
-  const stories = (project && project.stories) || [];
+  const stories = ((project && project.stories) || []).filter(story => !story.archived);
   const visibleStories = filteredTeamsStories(project);
   const owners = teamsOwnersOf(project);
   const sprintOptions = [...new Set(stories.map(story => storySprint(story)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -3556,7 +3676,10 @@ function setCaptureListPage(list, page) {
 }
 
 function renderTranscriptsPanel(project) {
-  const transcriptCount = (project.transcripts || []).length;
+  const sourceItems = project.transcripts || [];
+  const transcriptCount = sourceItems.length;
+  const sourceIds = new Set(sourceItems.map(item => item.id));
+  sourceSelections = new Set([...sourceSelections].filter(id => sourceIds.has(id)));
   const dsuCount = (project.transcripts || []).filter(t => /dsu/i.test(t.type || '')).length;
   const findings = (project.transcripts || []).flatMap(t => (t.extractedFindings || []).map(finding => ({ transcript: t, finding })));
   const pendingCount = findings.filter(item => item.finding.reviewStatus === 'pending').length;
@@ -3572,7 +3695,7 @@ function renderTranscriptsPanel(project) {
     if (!t) return '';
     return `<span class="badge ${/dsu/i.test(t) ? 'inprogress' : 'notstarted'}" style="text-transform:uppercase;font-family:var(--mono);font-size:0.66rem;">${escapeHtml(t)}</span>`;
   };
-  const sourceRows = (project.transcripts || []).map(t => {
+  const sourceRows = sourceItems.map(t => {
     if (transcriptEditing === t.id) return transcriptEditRow(t);
     const extracted = Array.isArray(t.extractedFindings) ? t.extractedFindings.length : 0;
     const pending = (t.extractedFindings || []).filter(item => item.reviewStatus === 'pending').length;
@@ -3588,14 +3711,19 @@ function renderTranscriptsPanel(project) {
     }).join('');
     return `
       <li class="card" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
-        <div style="min-width:0;">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <strong>${escapeHtml(t.title)}</strong>${badge(t.type)}
+        <div class="source-library-main">
+          <label class="source-select-control">
+            <input class="source-select-checkbox" type="checkbox" data-transcript-id="${escapeHtml(t.id)}" aria-label="Select source ${escapeHtml(t.title || 'Untitled source')}" ${sourceSelections.has(t.id) ? 'checked' : ''} data-onchange="toggleSourceSelection(${escapeHtml(JSON.stringify(t.id))}, this.checked)" />
+          </label>
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong>${escapeHtml(t.title)}</strong>${badge(t.type)}
+            </div>
+            <div class="micro" style="margin-top:5px;text-transform:none;">${escapeHtml(meta)}</div>
+            ${t.notes ? `<p style="margin-top:6px;">${escapeHtml(t.notes.slice(0, 140))}${t.notes.length > 140 ? '…' : ''}</p>` : ''}
+            ${t.extractionNote ? `<p class="micro source-reference-note">${escapeHtml(t.extractionNote)}</p>` : ''}
+            ${attachmentLinks ? `<div class="source-attachment-links">${attachmentLinks}</div>` : ''}
           </div>
-          <div class="micro" style="margin-top:5px;text-transform:none;">${escapeHtml(meta)}</div>
-          ${t.notes ? `<p style="margin-top:6px;">${escapeHtml(t.notes.slice(0, 140))}${t.notes.length > 140 ? '…' : ''}</p>` : ''}
-          ${t.extractionNote ? `<p class="micro source-reference-note">${escapeHtml(t.extractionNote)}</p>` : ''}
-          ${attachmentLinks ? `<div class="source-attachment-links">${attachmentLinks}</div>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex:none;">
           ${t.externalTranscription?.importStatus === 'pending' ? `<button class="button button-small" data-onclick="resumeExternalFeed(${escapeHtml(JSON.stringify(t.id))})">Reconcile</button>` : ''}
@@ -3606,7 +3734,11 @@ function renderTranscriptsPanel(project) {
   });
   const sourcePageCount = Math.max(1, Math.ceil(sourceRows.length / CAPTURE_LIST_PAGE_SIZE));
   const sourcePage = Math.min(captureListPages.sources, sourcePageCount - 1);
-  const visibleSourceRows = sourceRows.slice(sourcePage * CAPTURE_LIST_PAGE_SIZE, (sourcePage + 1) * CAPTURE_LIST_PAGE_SIZE).join('');
+  const sourcePageStart = sourcePage * CAPTURE_LIST_PAGE_SIZE;
+  const visibleSourceItems = sourceItems.slice(sourcePageStart, sourcePageStart + CAPTURE_LIST_PAGE_SIZE);
+  const visibleSourceRows = sourceRows.slice(sourcePageStart, sourcePageStart + CAPTURE_LIST_PAGE_SIZE).join('');
+  const selectableVisibleSourceIds = visibleSourceItems.filter(item => transcriptEditing !== item.id).map(item => item.id);
+  const sourcePageSelectionChecked = selectableVisibleSourceIds.length > 0 && selectableVisibleSourceIds.every(id => sourceSelections.has(id));
   const meetingExpanded = captureExpandedSections.has('meeting');
   const uploadExpanded = captureExpandedSections.has('upload');
   const sourceLibraryExpanded = captureExpandedSections.has('sourceLibrary');
@@ -3687,7 +3819,14 @@ function renderTranscriptsPanel(project) {
     ${renderExternalFeedCard(project)}
     <div class="card evidence-library-card">
       ${captureSectionHeading('sourceLibrary', 'Source Library', 'Saved inputs', sourceLibraryExpanded, `${transcriptCount} source${transcriptCount === 1 ? '' : 's'}`)}
-      ${sourceLibraryExpanded ? (transcriptCount ? `<ul class="panel-list">${visibleSourceRows}</ul>${capturePagination('sources', sourcePage, sourceRows.length, 'sources')}` : '<p>No transcripts yet.</p>') : ''}
+      ${sourceLibraryExpanded ? (transcriptCount ? `
+        ${sourceDeleteFeedback ? `<div class="capture-upload-feedback ${sourceDeleteFeedback.warning ? 'warning' : ''}">${escapeHtml(sourceDeleteFeedback.message)}</div>` : ''}
+        <div class="finding-bulk-controls">
+          <label class="external-feed-choice"><input id="source-select-page" type="checkbox" ${sourcePageSelectionChecked ? 'checked' : ''} ${selectableVisibleSourceIds.length ? '' : 'disabled'} data-onchange="toggleSourcePageSelection(this.checked)" /> Select page</label>
+          <button id="source-clear-selected" class="button button-small secondary" ${sourceSelections.size ? '' : 'disabled'} data-onclick="clearSourceSelection()">Clear selection</button>
+          <button id="source-delete-selected" class="button button-small danger" ${sourceSelections.size ? '' : 'disabled'} data-onclick="deleteSelectedSources()">Delete selected (${sourceSelections.size})</button>
+        </div>
+        <ul class="panel-list">${visibleSourceRows}</ul>${capturePagination('sources', sourcePage, sourceRows.length, 'sources')}` : '<p>No transcripts yet.</p>') : ''}
     </div>
     ${renderFindingReviewQueue(project)}
     ${renderProjectUpdatesCard(selectedProject, project)}
@@ -4361,6 +4500,71 @@ function cancelTranscriptEdit() {
   transcriptEditing = null;
   if (selectedProject) transcriptsPanel.innerHTML = renderTranscriptsPanel(projects[selectedProject]);
 }
+function updateSourceBulkControls() {
+  const deleteButton = document.getElementById('source-delete-selected');
+  const clearButton = document.getElementById('source-clear-selected');
+  if (deleteButton) {
+    deleteButton.disabled = sourceSelections.size === 0;
+    deleteButton.textContent = `Delete selected (${sourceSelections.size})`;
+  }
+  if (clearButton) clearButton.disabled = sourceSelections.size === 0;
+  const visibleCheckboxes = [...document.querySelectorAll('.source-select-checkbox')];
+  const selectPage = document.getElementById('source-select-page');
+  if (selectPage) {
+    const selectedCount = visibleCheckboxes.filter(input => input.checked).length;
+    selectPage.checked = visibleCheckboxes.length > 0 && selectedCount === visibleCheckboxes.length;
+    selectPage.indeterminate = selectedCount > 0 && selectedCount < visibleCheckboxes.length;
+  }
+}
+
+function toggleSourceSelection(transcriptId, checked) {
+  if (checked) sourceSelections.add(transcriptId); else sourceSelections.delete(transcriptId);
+  updateSourceBulkControls();
+}
+
+function toggleSourcePageSelection(checked) {
+  document.querySelectorAll('.source-select-checkbox').forEach(input => {
+    const id = input.dataset.transcriptId;
+    if (checked) sourceSelections.add(id); else sourceSelections.delete(id);
+    input.checked = checked;
+  });
+  updateSourceBulkControls();
+}
+
+function clearSourceSelection() {
+  sourceSelections.clear();
+  document.querySelectorAll('.source-select-checkbox').forEach(input => { input.checked = false; });
+  updateSourceBulkControls();
+}
+
+async function deleteSelectedSources() {
+  if (!selectedProject || !sourceSelections.size) return;
+  const transcriptIds = [...sourceSelections];
+  if (transcriptIds.length > 100) {
+    sourceDeleteFeedback = { warning: true, message: 'Delete up to 100 sources at a time.' };
+    transcriptsPanel.innerHTML = renderTranscriptsPanel(projects[selectedProject]);
+    return;
+  }
+  const count = transcriptIds.length;
+  const warning = `Delete ${count} selected source${count === 1 ? '' : 's'}? This also removes their extracted findings and any DSU work-item updates derived from them. A private recovery snapshot is created first.`;
+  if (!confirm(warning)) return;
+  const response = await fetch('/api/project/transcripts', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: selectedProject, transcriptIds })
+  });
+  const result = await response.json().catch(() => ({ error: 'The selected sources could not be deleted.' }));
+  if (!response.ok) {
+    sourceDeleteFeedback = { warning: true, message: result.error || 'The selected sources could not be deleted.' };
+    transcriptsPanel.innerHTML = renderTranscriptsPanel(projects[selectedProject]);
+    return;
+  }
+  sourceSelections.clear();
+  sourceDeleteFeedback = { warning: false, message: `${result.deleted || count} source${(result.deleted || count) === 1 ? '' : 's'} deleted. A private recovery snapshot was saved.` };
+  await refreshProject();
+}
+
+
 async function saveTranscriptEdit(id) {
   const val = i => { const el = document.getElementById(i); return el ? el.value : undefined; };
   await fetch('/api/project/transcript', {
@@ -4881,11 +5085,11 @@ function renderManagePanel() {
           ${filteredItems.map(item => {
             const isEditing = manageEditing && manageEditing.project === item.project && manageEditing.type === item.type && manageEditing.id === item.id;
             if (isEditing) {
-              const nameValue = manageEditData.title || item.title;
-              const detailsValue = manageEditData.details || item.details;
-              const metaValue = manageEditData.meta || item.meta;
-              const dateValue = manageEditData.date || item.date;
-              const linkedValue = manageEditData.linked || item.linked;
+              const nameValue = manageEditData.title ?? item.title;
+              const detailsValue = manageEditData.details ?? item.details;
+              const metaValue = manageEditData.meta ?? item.meta;
+              const dateValue = manageEditData.date ?? item.date;
+              const linkedValue = manageEditData.linked ?? item.linked;
               const itemTypeValue = manageEditData.itemType || itemTypeOrUnknown(item.raw?.itemType);
 
               return `
@@ -4895,7 +5099,7 @@ function renderManagePanel() {
                     <div class="form-row"><label>Details</label><textarea id="edit-details-${item.id}" data-onchange="updateManageEditField('details', this.value)">${escapeHtml(detailsValue)}</textarea></div>
                     ${item.type === 'Story' ? `<div class="form-row"><label>Work item type</label><select data-onchange="updateManageEditField('itemType', this.value)">${itemTypeOptions(itemTypeValue)}</select></div>` : ''}
                     ${item.type === 'Story' ? `<div class="form-row"><label>Labels</label><input id="edit-meta-${item.id}" value="${escapeHtml(metaValue)}" data-onchange="updateManageEditField('meta', this.value)" /></div>` : ''}
-                    ${item.type === 'Timeline' ? `<div class="form-row"><label>Status</label><input id="edit-meta-${item.id}" value="${escapeHtml(metaValue)}" data-onchange="updateManageEditField('meta', this.value)" /></div>` : ''}
+                    ${item.type === 'Timeline' ? `<div class="form-row"><label>Status</label><select id="edit-meta-${item.id}" data-onchange="updateManageEditField('meta', this.value)">${milestoneStatusOptions(metaValue)}</select></div>` : ''}
                     ${item.type === 'Transcript' ? `<div class="form-row"><label>Type</label><input id="edit-meta-${item.id}" value="${escapeHtml(metaValue)}" data-onchange="updateManageEditField('meta', this.value)" /></div>` : ''}
                     ${item.type === 'Ticket' ? `<div class="form-row"><label>Status</label><input id="edit-meta-${item.id}" value="${escapeHtml(metaValue)}" data-onchange="updateManageEditField('meta', this.value)" /></div>` : ''}
                     <div class="form-row"><label>Date</label><input id="edit-date-${item.id}" type="date" value="${escapeHtml(dateValue)}" data-onchange="updateManageEditField('date', this.value)" /></div>
@@ -4970,7 +5174,7 @@ function startManageEdit(project, type, id) {
   manageEditData = {
     title: item.title,
     details: item.details,
-    meta: item.meta,
+    meta: item.type === 'Timeline' ? (item.raw?.status || '') : item.meta,
     date: item.date,
     itemType: item.type === 'Story' ? itemTypeOrUnknown(item.raw?.itemType) : ''
   };
@@ -5083,12 +5287,25 @@ function escapeMarkdown(text) {
 
 
 async function deleteItem(project, type, itemId) {
+  if (type === 'story') {
+    if (project !== selectedProject) await selectProject(project);
+    storySelections = new Set([itemId]);
+    storyReviewSelected = true;
+    storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+    await deleteSelectedStories();
+    return;
+  }
   const confirmed = confirm(`Delete ${type} for project ${project}?`);
   if (!confirmed) return;
 
-  await fetch(`/api/project/${type}?project=${encodeURIComponent(project)}&id=${encodeURIComponent(itemId)}`, {
+  const response = await fetch(`/api/project/${type}?project=${encodeURIComponent(project)}&id=${encodeURIComponent(itemId)}`, {
     method: 'DELETE'
   });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({ error: `Unable to delete ${type}` }));
+    alert(result.error || `Unable to delete ${type}`);
+    return;
+  }
 
   await refreshProject();
 }
@@ -5125,6 +5342,7 @@ function initialsFromName(name) {
 
 function workItemSignalBadges(story, project) {
   const badges = [];
+  if (story.archived) return '';
   if (story.tracked) badges.push('<span class="row-signal tracked">Tracked</span>');
   if (itemNeedsFollowup(story)) badges.push('<span class="row-signal followup">Needs follow-up</span>');
   if (itemNeedsComment(story)) badges.push('<span class="row-signal quiet">Quiet</span>');
@@ -5144,10 +5362,15 @@ function renderWorkItemListRow(project, story) {
   const noteLabel = storyLastCommentText(story) ? 'Last comment / PM note' : story.notes ? 'Project note' : 'Description';
   const noteMeta = storyLastCommentText(story) ? `Updated ${lastCommentLabel(story)}` : latestStoryActivityLabel(story);
   const attentionClass = attention.badge === 'followup' ? 'followup' : attention.badge === 'quiet' ? 'quiet' : attention.badge === 'blocked' ? 'blocked' : attention.badge;
+  const selected = storySelections.has(story.id);
 
   return `
-    <li class="work-table-card${expanded ? ' expanded' : ''}">
-      <button class="work-table-toggle" data-onclick="toggleWorkItemExpanded('${story.id}')">
+    <li class="work-table-card${expanded ? ' expanded' : ''}${selected ? ' selected' : ''}">
+      <div class="work-table-card-head">
+        <label class="work-table-select" title="Select ${escapeHtml(story.jiraId || story.summary)}">
+          <input type="checkbox" data-story-id="${escapeHtml(story.id)}" ${selected ? 'checked' : ''} data-onchange="toggleStorySelection(${escapeHtml(JSON.stringify(story.id))}, this.checked)" />
+        </label>
+        <button class="work-table-toggle" data-onclick="toggleWorkItemExpanded('${story.id}')">
         <span class="work-table-dot ${statusBadgeClass(inferStatusClient(story))}"></span>
         <span class="work-table-summary">
           <span class="work-table-title">${escapeHtml(story.summary)}</span>
@@ -5155,6 +5378,7 @@ function renderWorkItemListRow(project, story) {
             <span class="mono">${escapeHtml(summaryId)}</span>
             ${itemTypeBadge(story)}
             ${deliveryProjectBadge(story, project)}
+            ${story.archived ? '<span class="row-signal quiet">Archived</span>' : ''}
             ${workItemSignalBadges(story, project)}
           </span>
         </span>
@@ -5168,7 +5392,8 @@ function renderWorkItemListRow(project, story) {
         <span class="work-table-chevron${expanded ? ' open' : ''}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>
         </span>
-      </button>
+        </button>
+      </div>
       ${expanded ? `
         <div class="work-table-panel">
           <div class="work-table-panel-copy">
@@ -5204,7 +5429,7 @@ function trackingFieldsHtml(prefix, s, showTracked) {
   return `
     ${showTracked ? `<label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:0.9rem;margin-bottom:4px;"><input type="checkbox" id="${prefix}-tracked" ${s.tracked ? 'checked' : ''} style="width:auto;" /> Track this item (add to the follow-up Tracking list)</label>` : ''}
     <div class="field-row">
-      <div><label>Ticket / Jira id</label><input id="${prefix}-jira" value="${escapeHtml(s.jiraId || '')}" placeholder="DELI-1205" /></div>
+      <div><label>Ticket / Jira id</label><input id="${prefix}-jira" value="${escapeHtml(s.jiraId || '')}" placeholder="DEMO-1205" /></div>
       <div><label>Assignee</label><input id="${prefix}-assignee" value="${escapeHtml(storyAssignee(s))}" placeholder="Name" /></div>
     </div>
     <div class="field-row">
@@ -5232,16 +5457,60 @@ function readTrackingFields(prefix) {
   return out;
 }
 
+function storyBulkValueControl(project, assignees, sprints) {
+  const value = escapeHtml(storyBulkValue);
+  if (storyBulkAction === 'assign-project') {
+    return `<select data-onchange="setStoryBulkValue(this.value)"><option value="">Project not identified</option>${deliveryProjectOptions(project, storyBulkValue, false)}</select>`;
+  }
+  if (storyBulkAction === 'assignee') {
+    return `<input list="story-bulk-assignees" value="${value}" placeholder="Assignee name; blank clears" data-oninput="setStoryBulkValue(this.value)" />
+      <datalist id="story-bulk-assignees">${assignees.map(item => `<option value="${escapeHtml(item)}"></option>`).join('')}</datalist>`;
+  }
+  if (storyBulkAction === 'sprint') {
+    return `<input list="story-bulk-sprints" value="${value}" placeholder="Sprint; blank clears" data-oninput="setStoryBulkValue(this.value)" />
+      <datalist id="story-bulk-sprints">${sprints.map(item => `<option value="${escapeHtml(item)}"></option>`).join('')}</datalist>`;
+  }
+  if (storyBulkAction === 'add-labels' || storyBulkAction === 'remove-labels') {
+    return `<input value="${value}" placeholder="Comma-separated labels" data-oninput="setStoryBulkValue(this.value)" />`;
+  }
+  if (storyBulkAction === 'item-type') {
+    return `<select data-onchange="setStoryBulkValue(this.value)">${itemTypeOptions(storyBulkValue || 'Story')}</select>`;
+  }
+  if (storyBulkAction === 'milestone') {
+    return `<select data-onchange="setStoryBulkValue(this.value)"><option value="">No milestone</option>${(project.timeline || []).map(item => `<option value="${escapeHtml(item.id)}" ${item.id === storyBulkValue ? 'selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select>`;
+  }
+  return '<span class="micro bulk-no-value">No additional value required</span>';
+}
+
 function renderStoriesPanel(project) {
   const stories = project.stories || [];
+  const existingIds = new Set(stories.map(story => story.id));
+  storySelections = new Set([...storySelections].filter(id => existingIds.has(id)));
+  const activeStories = stories.filter(story => !story.archived);
   const assigneeOptions = [...new Set(stories.map(story => storyAssignee(story)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const sprintFilterOptions = [...new Set(stories.map(story => storySprint(story)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const duplicateJiraKeys = new Set();
+  const jiraCounts = new Map();
+  stories.forEach(story => {
+    const key = String(story.jiraId || '').trim().toLowerCase();
+    if (key) jiraCounts.set(key, (jiraCounts.get(key) || 0) + 1);
+  });
+  jiraCounts.forEach((count, key) => { if (count > 1) duplicateJiraKeys.add(key); });
   const search = storySearch.trim().toLowerCase();
   const filtered = stories.filter(s => {
+    if (storyArchiveFilter === 'active' && s.archived) return false;
+    if (storyArchiveFilter === 'archived' && !s.archived) return false;
     if (storyTypeFilter !== 'all' && itemTypeOrUnknown(s.itemType) !== storyTypeFilter) return false;
     if (storyStatusFilter !== 'all' && inferStatusClient(s) !== storyStatusFilter) return false;
-    if (storyAssigneeFilter !== 'all' && storyAssignee(s) !== storyAssigneeFilter) return false;
-    if (storySprintFilter !== 'all' && storySprint(s) !== storySprintFilter) return false;
+    if (storyAssigneeFilter === '__gap__' && storyAssignee(s)) return false;
+    if (storyAssigneeFilter !== 'all' && storyAssigneeFilter !== '__gap__' && storyAssignee(s) !== storyAssigneeFilter) return false;
+    if (storySprintFilter === '__gap__' && storySprint(s)) return false;
+    if (storySprintFilter !== 'all' && storySprintFilter !== '__gap__' && storySprint(s) !== storySprintFilter) return false;
+    if (storyGapFilter === 'unassigned' && storyAssignee(s)) return false;
+    if (storyGapFilter === 'no-sprint' && storySprint(s)) return false;
+    if (storyGapFilter === 'no-project' && s.deliveryProjectId) return false;
+    if (storyGapFilter === 'no-milestone' && (project.timeline || []).some(item => item.id === s.timelineId)) return false;
+    if (storyGapFilter === 'duplicate-jira' && !duplicateJiraKeys.has(String(s.jiraId || '').trim().toLowerCase())) return false;
     if (search) {
       const milestone = project.timeline.find(entry => entry.id === s.timelineId);
       const hay = [s.id, s.jiraId, itemTypeOrUnknown(s.itemType), s.summary, s.description, storyAssignee(s), storySprint(s), s.notes, s.dependencies, storyLastCommentText(s), inferStatusClient(s), milestone?.title, (s.labels || []).join(' ')].map(x => String(x || '').toLowerCase()).join(' ');
@@ -5252,20 +5521,20 @@ function renderStoriesPanel(project) {
   const sorted = filtered.slice().sort((a, b) => {
     return statusPriority(b) - statusPriority(a) || (latestStoryActivityTime(b) || 0) - (latestStoryActivityTime(a) || 0);
   });
-  const blockedCount = stories.filter(s => inferStatusClient(s) === 'Blocked').length;
-  const trackedCount = stories.filter(s => s.tracked).length;
-  const followupCount = stories.filter(itemNeedsFollowup).length;
-  const quietCount = stories.filter(itemNeedsComment).length;
-  const openStories = stories.filter(s => inferStatusClient(s) !== 'Done');
+  const blockedCount = activeStories.filter(s => inferStatusClient(s) === 'Blocked').length;
+  const trackedCount = activeStories.filter(s => s.tracked).length;
+  const followupCount = activeStories.filter(itemNeedsFollowup).length;
+  const quietCount = activeStories.filter(itemNeedsComment).length;
+  const openStories = activeStories.filter(s => inferStatusClient(s) !== 'Done');
   const assigneeGapCount = openStories.filter(s => !storyAssignee(s)).length;
   const sprintGapCount = openStories.filter(s => !storySprint(s)).length;
   const commentGapCount = openStories.filter(s => !storyLastCommentText(s)).length;
   const gapImpactCount = openStories.filter(s => {
     return !storyAssignee(s) || !storySprint(s) || !storyLastCommentText(s);
   }).length;
-  const activeCount = stories.filter(s => ['In progress', 'Active'].includes(inferStatusClient(s))).length;
-  const doneCount = stories.filter(s => inferStatusClient(s) === 'Done').length;
-  const operatingQueue = stories.slice().sort((a, b) => statusPriority(b) - statusPriority(a) || (latestStoryActivityTime(b) || 0) - (latestStoryActivityTime(a) || 0)).slice(0, 6);
+  const activeCount = activeStories.filter(s => ['In progress', 'Active'].includes(inferStatusClient(s))).length;
+  const doneCount = activeStories.filter(s => inferStatusClient(s) === 'Done').length;
+  const operatingQueue = activeStories.slice().sort((a, b) => statusPriority(b) - statusPriority(a) || (latestStoryActivityTime(b) || 0) - (latestStoryActivityTime(a) || 0)).slice(0, 6);
   const readinessNotes = [];
   if (assigneeGapCount) readinessNotes.push(`${assigneeGapCount} work item${assigneeGapCount === 1 ? '' : 's'} have no assignee recorded.`);
   if (sprintGapCount) readinessNotes.push(`${sprintGapCount} work item${sprintGapCount === 1 ? '' : 's'} have no sprint recorded.`);
@@ -5317,6 +5586,7 @@ function renderStoriesPanel(project) {
 
   const importPreview = storyImportPreview;
   const previewRows = importPreview?.items?.slice(0, 8) || [];
+  const reconciliationRows = importPreview?.reconciliation || [];
   const importForm = storyShowImportForm ? `
     <div class="card csv-import-card">
       <div class="section-heading">
@@ -5339,6 +5609,7 @@ function renderStoriesPanel(project) {
         <div class="csv-import-summary">
           <div><span class="micro">File</span><strong>${escapeHtml(importPreview.fileName || 'Selected CSV')}</strong></div>
           <div><span class="micro">Ready to add</span><strong>${importPreview.items.length} work item${importPreview.items.length === 1 ? '' : 's'}</strong></div>
+          <div><span class="micro">Reconcile existing</span><strong>${reconciliationRows.length}</strong></div>
           <div><span class="micro">Skipped</span><strong>${importPreview.skipped.length}</strong></div>
           <div><span class="micro">Recognized</span><strong>${escapeHtml((importPreview.columns || []).join(', ') || 'Summary')}</strong></div>
         </div>
@@ -5349,6 +5620,16 @@ function renderStoriesPanel(project) {
             ${statusBadge(inferStatusClient(item))}
           </div>`).join('')}
         </div>` : '<div class="note warn" style="margin:12px 0;">No new work items were recognized in this file.</div>'}
+        ${reconciliationRows.length ? `<div class="csv-reconciliation">
+          <div class="section-heading"><div><h4>Reconcile existing Jira keys</h4><p>Nothing is selected by default. Review the supported field changes from the CSV, then explicitly apply selected rows.</p></div><span class="micro">${storyImportReconciliationSelections.size} selected</span></div>
+          ${reconciliationRows.slice(0, 100).map(item => `<label class="csv-reconciliation-row">
+            <input type="checkbox" ${storyImportReconciliationSelections.has(item.storyId) ? 'checked' : ''} data-onchange="toggleCsvReconciliationSelection(${escapeHtml(JSON.stringify(item.storyId))}, this.checked)" />
+            <span><strong>${escapeHtml(item.jiraId)} · ${escapeHtml(item.summary)}</strong><span class="micro">CSV row ${item.sourceRow} · ${escapeHtml(item.changedFields.join(', '))}</span></span>
+          </label>`).join('')}
+          ${reconciliationRows.length > 100 ? '<div class="note warn">Only the first 100 reconciliation candidates are displayed. Narrow the CSV before applying a larger batch.</div>' : ''}
+          <button class="button" data-onclick="applySelectedCsvReconciliation()" ${storyImportReconciliationSelections.size ? '' : 'disabled'}>Preview and apply selected reconciliation (${storyImportReconciliationSelections.size})</button>
+          <div class="note info">Reconciliation is local and does not update Jira. It supports item type, assignee, sprint, and label differences, with a stale-value recheck before the atomic save.</div>
+        </div>` : ''}
         ${importPreview.skipped.length ? `<div class="csv-import-skipped"><strong>${importPreview.skipped.length} row${importPreview.skipped.length === 1 ? '' : 's'} skipped</strong><span>${escapeHtml(importPreview.skipped.slice(0, 4).map(item => `Row ${item.row}: ${item.reason}`).join(' | '))}${importPreview.skipped.length > 4 ? ' | More rows omitted' : ''}</span></div>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
           <button class="button" data-onclick="confirmStoryCsvImport()" ${!importPreview.items.length || storyImportLoading ? 'disabled' : ''}>${storyImportLoading ? 'Importing...' : `Import ${importPreview.items.length} work item${importPreview.items.length === 1 ? '' : 's'}`}</button>
@@ -5382,6 +5663,69 @@ function renderStoriesPanel(project) {
     <ul class="panel-list">
       ${sorted.map(story => storyEditing === story.id ? renderStoryEditForm(project, story) : renderWorkItemListRow(project, story)).join('')}
     </ul>` : `<div class="card"><p>${stories.length ? 'No work items match the filter.' : 'No work items yet — use “+ New work item”.'}</p></div>`;
+  const selectedStories = stories.filter(story => storySelections.has(story.id));
+  const selectedVisible = sorted.filter(story => storySelections.has(story.id)).length;
+  queueMicrotask(() => {
+    const master = document.getElementById('story-select-visible');
+    if (master) master.indeterminate = selectedVisible > 0 && selectedVisible < sorted.length;
+  });
+  const savedViews = project.workItemSavedViews || [];
+  const history = project.workItemChangeHistory || [];
+  const reviewSelected = storyReviewSelected && selectedStories.length ? `
+    <div class="card bulk-review-card">
+      <div class="section-heading"><div><h4>Review selected work items</h4><p>Verify scope before changing anything. Selection may include items hidden by the current filters.</p></div><button class="button button-small secondary" data-onclick="toggleStoryReviewSelected()">Close</button></div>
+      <div class="bulk-review-list">${selectedStories.map(story => `<div><span class="mono">${escapeHtml(story.jiraId || story.id)}</span><strong>${escapeHtml(story.summary)}</strong><span>${escapeHtml(storyAssignee(story) || 'Unassigned')} · ${escapeHtml(storySprint(story) || 'No sprint')}</span></div>`).join('')}</div>
+    </div>` : '';
+  const historyPanel = storyHistoryExpanded ? `
+    <div class="card bulk-history-card">
+      <div class="section-heading"><div><h4>Work-item change history</h4><p>Bulk updates and protected deletions are recorded locally. Undo is blocked if an item changed again.</p></div><button class="button button-small secondary" data-onclick="toggleStoryHistory()">Close</button></div>
+      ${history.length ? `<div class="bulk-history-list">${history.slice(0, 25).map(entry => `<div class="bulk-history-row">
+        <div><strong>${escapeHtml(entry.summary || entry.kind)}</strong><span class="micro">${escapeHtml(new Date(entry.createdAt).toLocaleString())} · ${entry.itemIds?.length || 0} item${entry.itemIds?.length === 1 ? '' : 's'}${entry.undoneAt ? ' · undone' : ''}</span></div>
+        ${!entry.undoneAt && ['bulk-update', 'bulk-delete', 'item-update'].includes(entry.kind) ? `<button class="button button-small secondary" data-onclick="undoStoryBulkChange(${escapeHtml(JSON.stringify(entry.id))})">Undo</button>` : ''}
+      </div>`).join('')}</div>` : '<p>No bulk changes have been recorded yet.</p>'}
+    </div>` : '';
+  const bulkToolbar = `
+    <div class="card bulk-work-toolbar">
+      <div class="bulk-toolbar-top">
+        <div><strong>${storySelections.size} selected</strong><span class="micro">${selectedVisible} visible in this view</span></div>
+        <div class="bulk-toolbar-buttons">
+          <label class="bulk-master-check"><input id="story-select-visible" type="checkbox" ${sorted.length && selectedVisible === sorted.length ? 'checked' : ''} data-onchange="toggleVisibleStorySelection(this.checked)" /> Shown</label>
+          <button class="button button-small secondary" data-onclick="selectVisibleStories()">Select shown (${sorted.length})</button>
+          <button class="button button-small secondary" data-onclick="selectAllMatchingStories()">Select all matching filters</button>
+          <button class="button button-small secondary" data-onclick="clearStorySelection()" ${storySelections.size ? '' : 'disabled'}>Clear</button>
+          <button class="button button-small secondary" data-onclick="toggleStoryReviewSelected()" ${storySelections.size ? '' : 'disabled'}>Review selected</button>
+        </div>
+      </div>
+      <div class="bulk-toolbar-grid">
+        <label><span class="micro">Bulk action</span><select data-onchange="setStoryBulkAction(this.value)">
+          <option value="assign-project" ${storyBulkAction === 'assign-project' ? 'selected' : ''}>Assign Project / Jira Epic</option>
+          <option value="assignee" ${storyBulkAction === 'assignee' ? 'selected' : ''}>Set assignee</option>
+          <option value="sprint" ${storyBulkAction === 'sprint' ? 'selected' : ''}>Set sprint</option>
+          <option value="track" ${storyBulkAction === 'track' ? 'selected' : ''}>Track for follow-up</option>
+          <option value="untrack" ${storyBulkAction === 'untrack' ? 'selected' : ''}>Stop tracking</option>
+          <option value="add-labels" ${storyBulkAction === 'add-labels' ? 'selected' : ''}>Add labels</option>
+          <option value="remove-labels" ${storyBulkAction === 'remove-labels' ? 'selected' : ''}>Remove labels</option>
+          <option value="item-type" ${storyBulkAction === 'item-type' ? 'selected' : ''}>Set work-item type</option>
+          <option value="milestone" ${storyBulkAction === 'milestone' ? 'selected' : ''}>Link / unlink milestone</option>
+          <option value="archive" ${storyBulkAction === 'archive' ? 'selected' : ''}>Archive</option>
+          <option value="restore" ${storyBulkAction === 'restore' ? 'selected' : ''}>Restore from archive</option>
+        </select></label>
+        <label><span class="micro">New value</span>${storyBulkValueControl(project, assigneeOptions, sprintFilterOptions)}</label>
+        <button class="button" data-onclick="runStoryBulkAction()" ${storySelections.size ? '' : 'disabled'}>Preview changes</button>
+        <button class="button secondary" data-onclick="exportSelectedStoriesCSV()" ${storySelections.size ? '' : 'disabled'}>Export selected</button>
+        <button class="button danger" data-onclick="deleteSelectedStories()" ${storySelections.size ? '' : 'disabled'}>Protected delete</button>
+      </div>
+      <div class="note info">Local Priorena change only — this does not update Jira. Preview lists exact fields before apply. Archive is the safer default; permanent deletion creates a private recovery snapshot.</div>
+      ${storyBulkFeedback ? `<div class="note ${storyBulkFeedback.warning ? 'warn' : 'info'}">${escapeHtml(storyBulkFeedback.message)}</div>` : ''}
+    </div>`;
+  const savedViewsBar = `
+    <div class="saved-views-bar">
+      <div class="saved-view-actions">
+        <button class="button button-small secondary" data-onclick="saveStoryCurrentView()">Save current filters</button>
+        <button class="button button-small secondary" data-onclick="toggleStoryHistory()">Change history (${history.length})</button>
+      </div>
+      <div class="saved-view-list">${savedViews.length ? savedViews.map(view => `<span class="saved-view-chip"><button data-onclick="applyStorySavedView(${escapeHtml(JSON.stringify(view.id))})">${escapeHtml(view.name)}</button><button aria-label="Delete saved view" data-onclick="deleteStorySavedView(${escapeHtml(JSON.stringify(view.id))})">×</button></span>`).join('') : '<span class="micro">No saved views yet</span>'}</div>
+    </div>`;
 
   return `
     <div class="card hero-card screen-lead work-items-lead" style="margin-bottom:14px;">
@@ -5462,17 +5806,36 @@ function renderStoriesPanel(project) {
         </select>
         <select data-onchange="setStoryAssigneeFilter(this.value)" style="width:auto;max-width:190px;">
           <option value="all" ${storyAssigneeFilter === 'all' ? 'selected' : ''}>All assignees</option>
+          <option value="__gap__" ${storyAssigneeFilter === '__gap__' ? 'selected' : ''}>Unassigned</option>
           ${assigneeOptions.map(value => `<option value="${escapeHtml(value)}" ${storyAssigneeFilter === value ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}
         </select>
         <select data-onchange="setStorySprintFilter(this.value)" style="width:auto;max-width:190px;">
           <option value="all" ${storySprintFilter === 'all' ? 'selected' : ''}>All sprints</option>
+          <option value="__gap__" ${storySprintFilter === '__gap__' ? 'selected' : ''}>No sprint</option>
           ${sprintFilterOptions.map(value => `<option value="${escapeHtml(value)}" ${storySprintFilter === value ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}
+        </select>
+        <select data-onchange="setStoryGapFilter(this.value)" style="width:auto;max-width:200px;">
+          <option value="all" ${storyGapFilter === 'all' ? 'selected' : ''}>All readiness states</option>
+          <option value="unassigned" ${storyGapFilter === 'unassigned' ? 'selected' : ''}>Assignee gap</option>
+          <option value="no-sprint" ${storyGapFilter === 'no-sprint' ? 'selected' : ''}>Sprint gap</option>
+          <option value="no-project" ${storyGapFilter === 'no-project' ? 'selected' : ''}>Project not identified</option>
+          <option value="no-milestone" ${storyGapFilter === 'no-milestone' ? 'selected' : ''}>No milestone</option>
+          <option value="duplicate-jira" ${storyGapFilter === 'duplicate-jira' ? 'selected' : ''}>Duplicate Jira key (${duplicateJiraKeys.size})</option>
+        </select>
+        <select data-onchange="setStoryArchiveFilter(this.value)" style="width:auto;max-width:170px;">
+          <option value="active" ${storyArchiveFilter === 'active' ? 'selected' : ''}>Active items</option>
+          <option value="archived" ${storyArchiveFilter === 'archived' ? 'selected' : ''}>Archived items</option>
+          <option value="all" ${storyArchiveFilter === 'all' ? 'selected' : ''}>Active + archived</option>
         </select>
         <input id="story-search" value="${escapeHtml(storySearch)}" placeholder="Search jira, assignee, sprint, notes, labels…" data-oninput="setStorySearch(this.value)" style="width:260px;" />
       </div>
-      <div class="micro">${sorted.length} shown · ${trackedCount} tracked for follow-up</div>
+      <div class="micro">${sorted.length} shown · ${activeStories.length} active · ${stories.length - activeStories.length} archived · ${trackedCount} tracked</div>
     </div>
+    ${savedViewsBar}
     <div class="note warn" style="margin-bottom:14px;">Priority order: blocked work, assignee follow-up risk, quiet Jira threads, then latest recorded activity.</div>
+    ${bulkToolbar}
+    ${reviewSelected}
+    ${historyPanel}
     ${addForm}
     ${importForm}
     ${listBody}
@@ -5495,12 +5858,275 @@ function setStorySprintFilter(value) {
   storySprintFilter = value;
   if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
 }
+function setStoryArchiveFilter(value) {
+  storyArchiveFilter = ['active', 'archived', 'all'].includes(value) ? value : 'active';
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+function setStoryGapFilter(value) {
+  storyGapFilter = value;
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
 function setStorySearch(value) {
   storySearch = value;
   if (!selectedProject) return;
   storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
   const el = document.getElementById('story-search');
   if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+}
+
+function toggleStorySelection(id, checked) {
+  if (checked) storySelections.add(id);
+  else storySelections.delete(id);
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+function visibleStoryIds() {
+  return [...document.querySelectorAll('#stories-panel input[data-story-id]')]
+    .map(input => input.dataset.storyId)
+    .filter(Boolean);
+}
+
+function selectVisibleStories() {
+  visibleStoryIds().forEach(id => storySelections.add(id));
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+function toggleVisibleStorySelection(checked) {
+  visibleStoryIds().forEach(id => {
+    if (checked) storySelections.add(id);
+    else storySelections.delete(id);
+  });
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+function selectAllMatchingStories() {
+  // Work currently renders the complete filtered result without pagination, so "shown"
+  // and "all matching" resolve to the same bounded set. Keeping both actions makes the
+  // scope explicit and preserves the contract if pagination is added later.
+  selectVisibleStories();
+}
+
+function clearStorySelection() {
+  storySelections.clear();
+  storyReviewSelected = false;
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+function toggleStoryReviewSelected() {
+  storyReviewSelected = !storyReviewSelected;
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+function toggleStoryHistory() {
+  storyHistoryExpanded = !storyHistoryExpanded;
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+function setStoryBulkAction(value) {
+  storyBulkAction = value;
+  storyBulkValue = value === 'item-type' ? 'Story' : '';
+  if (selectedProject) storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+function setStoryBulkValue(value) {
+  storyBulkValue = value;
+}
+
+function storyBulkPatch() {
+  if (storyBulkAction === 'assign-project') return { deliveryProjectId: storyBulkValue };
+  if (storyBulkAction === 'assignee') return { assignee: storyBulkValue };
+  if (storyBulkAction === 'sprint') return { sprint: storyBulkValue };
+  if (storyBulkAction === 'track') return { tracked: true };
+  if (storyBulkAction === 'untrack') return { tracked: false };
+  if (storyBulkAction === 'add-labels') return { labelsAdd: storyBulkValue.split(',').map(value => value.trim()).filter(Boolean) };
+  if (storyBulkAction === 'remove-labels') return { labelsRemove: storyBulkValue.split(',').map(value => value.trim()).filter(Boolean) };
+  if (storyBulkAction === 'item-type') return { itemType: storyBulkValue || 'Story' };
+  if (storyBulkAction === 'milestone') return { timelineId: storyBulkValue };
+  if (storyBulkAction === 'archive') return { archived: true };
+  if (storyBulkAction === 'restore') return { archived: false };
+  return null;
+}
+
+function storyBulkSummary() {
+  return {
+    'assign-project': 'Assign Project / Jira Epic',
+    assignee: 'Set assignee',
+    sprint: 'Set sprint',
+    track: 'Track for follow-up',
+    untrack: 'Stop tracking',
+    'add-labels': 'Add labels',
+    'remove-labels': 'Remove labels',
+    'item-type': 'Set work-item type',
+    milestone: 'Link / unlink milestone',
+    archive: 'Archive work items',
+    restore: 'Restore archived work items'
+  }[storyBulkAction] || 'Bulk work-item update';
+}
+
+async function fetchStoryBulkPreview(payload) {
+  const response = await fetch('/api/project/story/bulk/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json().catch(() => ({ error: 'Unable to preview changes' }));
+  if (!response.ok) throw new Error(result.error || 'Unable to preview changes');
+  return result;
+}
+
+async function runStoryBulkAction() {
+  if (!selectedProject || !storySelections.size) return;
+  const patch = storyBulkPatch();
+  if (!patch) return;
+  if (['add-labels', 'remove-labels'].includes(storyBulkAction) && !storyBulkValue.trim()) {
+    storyBulkFeedback = { warning: true, message: 'Enter at least one label.' };
+    storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+    return;
+  }
+  try {
+    const itemIds = [...storySelections];
+    const preview = await fetchStoryBulkPreview({ project: selectedProject, itemIds, patch });
+    const changedItems = preview.items.filter(item => item.changedFields.length);
+    const examples = changedItems.slice(0, 8).map(item => `${item.jiraId || item.id}: ${item.changedFields.join(', ')}`).join('\n');
+    const extra = changedItems.length > 8 ? `\n…and ${changedItems.length - 8} more.` : '';
+    if (!changedItems.length) {
+      storyBulkFeedback = { warning: false, message: 'Preview found no changes to apply.' };
+      storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+      return;
+    }
+    if (!confirm(`${storyBulkSummary()}\n\n${changedItems.length} of ${itemIds.length} selected work items will change:\n${examples}${extra}\n\nLocal Priorena only — Jira will not be updated. Apply now?`)) return;
+    const expected = Object.fromEntries(preview.items.map(item => [item.id, item.expectedHash]));
+    const response = await fetch('/api/project/story/bulk', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: selectedProject, itemIds, patch, expected, summary: storyBulkSummary() })
+    });
+    const result = await response.json().catch(() => ({ error: 'Unable to apply changes' }));
+    if (!response.ok) throw new Error(result.error || 'Unable to apply changes');
+    storySelections.clear();
+    storyReviewSelected = false;
+    storyBulkFeedback = { warning: false, message: `${result.changed} work item${result.changed === 1 ? '' : 's'} changed. Jira was not updated.` };
+    await refreshProject();
+  } catch (error) {
+    storyBulkFeedback = { warning: true, message: error.message };
+    storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+  }
+}
+
+async function deleteSelectedStories() {
+  if (!selectedProject || !storySelections.size) return;
+  try {
+    const itemIds = [...storySelections];
+    const preview = await fetchStoryBulkPreview({ project: selectedProject, itemIds, mode: 'delete' });
+    const keys = preview.items.slice(0, 10).map(item => item.jiraId || item.id).join(', ');
+    const typed = prompt(`Permanent deletion is recoverable only through the private snapshot or Change history.\n\n${itemIds.length} work item${itemIds.length === 1 ? '' : 's'}: ${keys}${itemIds.length > 10 ? ', …' : ''}\n\nType DELETE ${itemIds.length} to continue:`);
+    if (typed === null) return;
+    const expected = Object.fromEntries(preview.items.map(item => [item.id, item.expectedHash]));
+    const response = await fetch('/api/project/story/bulk', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: selectedProject, itemIds, expected, confirmation: typed })
+    });
+    const result = await response.json().catch(() => ({ error: 'Unable to delete work items' }));
+    if (!response.ok) throw new Error(result.error || 'Unable to delete work items');
+    storySelections.clear();
+    storyReviewSelected = false;
+    storyBulkFeedback = { warning: false, message: `${result.deleted} work item${result.deleted === 1 ? '' : 's'} deleted. Private recovery snapshot: ${result.recoveryFile}.` };
+    await refreshProject();
+  } catch (error) {
+    storyBulkFeedback = { warning: true, message: error.message };
+    storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+  }
+}
+
+function exportSelectedStoriesCSV() {
+  if (!selectedProject) return;
+  const project = projects[selectedProject];
+  const selected = (project.stories || []).filter(story => storySelections.has(story.id));
+  if (!selected.length) return;
+  const headers = ['Jira Key', 'Type', 'Summary', 'Status', 'Project', 'Assignee', 'Sprint', 'Milestone', 'Labels', 'Tracked', 'Archived'];
+  const rows = selected.map(story => [
+    story.jiraId || '', itemTypeOrUnknown(story.itemType), story.summary || '', inferStatusClient(story),
+    deliveryProjectForStory(project, story)?.name || '', storyAssignee(story), storySprint(story),
+    (project.timeline || []).find(item => item.id === story.timelineId)?.title || '',
+    (story.labels || []).join('; '), story.tracked ? 'Yes' : 'No', story.archived ? 'Yes' : 'No'
+  ]);
+  downloadFile(`priorena-${selectedProject}-selected-work-items.csv`, [headers, ...rows].map(row => row.map(escapeCsvCell).join(',')).join('\n'), 'text/csv');
+}
+
+async function saveStoryCurrentView() {
+  if (!selectedProject) return;
+  const name = prompt('Name this work-item view:');
+  if (!name?.trim()) return;
+  const filters = {
+    type: storyTypeFilter, status: storyStatusFilter, assignee: storyAssigneeFilter,
+    sprint: storySprintFilter, search: storySearch, archive: storyArchiveFilter, gap: storyGapFilter
+  };
+  const response = await fetch('/api/project/story/views', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: selectedProject, name: name.trim(), filters })
+  });
+  const result = await response.json().catch(() => ({ error: 'Unable to save view' }));
+  if (!response.ok) {
+    storyBulkFeedback = { warning: true, message: result.error || 'Unable to save view' };
+    storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+    return;
+  }
+  storyBulkFeedback = { warning: false, message: `Saved view “${result.name}”.` };
+  await refreshProject();
+}
+
+function applyStorySavedView(id) {
+  const view = (projects[selectedProject]?.workItemSavedViews || []).find(item => item.id === id);
+  if (!view) return;
+  const filters = view.filters || {};
+  storyTypeFilter = filters.type || 'all';
+  storyStatusFilter = filters.status || 'all';
+  storyAssigneeFilter = filters.assignee || 'all';
+  storySprintFilter = filters.sprint || 'all';
+  storySearch = filters.search || '';
+  storyArchiveFilter = filters.archive || 'active';
+  storyGapFilter = filters.gap || 'all';
+  storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+}
+
+async function deleteStorySavedView(id) {
+  if (!selectedProject || !confirm('Delete this saved view? Work items will not be changed.')) return;
+  const response = await fetch('/api/project/story/views', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: selectedProject, id })
+  });
+  const result = await response.json().catch(() => ({ error: 'Unable to delete saved view' }));
+  if (!response.ok) {
+    storyBulkFeedback = { warning: true, message: result.error || 'Unable to delete saved view' };
+    storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+    return;
+  }
+  await refreshProject();
+}
+
+async function undoStoryBulkChange(historyId) {
+  if (!selectedProject || !confirm('Undo this recorded bulk change? Undo is blocked if any affected work item changed again.')) return;
+  const response = await fetch('/api/project/story/bulk/undo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: selectedProject, historyId })
+  });
+  const result = await response.json().catch(() => ({ error: 'Unable to undo change' }));
+  storyBulkFeedback = response.ok
+    ? { warning: false, message: 'Bulk change undone.' }
+    : { warning: true, message: result.error || 'Unable to undo change' };
+  await refreshProject();
+}
+
+function selectStoryGap(kind) {
+  storyGapFilter = kind;
+  if (selectedProject) {
+    storiesPanel.innerHTML = renderStoriesPanel(projects[selectedProject]);
+    selectAllMatchingStories();
+  }
 }
 function toggleStoryAddForm() {
   storyShowAddForm = !storyShowAddForm;
@@ -5517,6 +6143,7 @@ function toggleStoryImportForm() {
   storyImportPreview = null;
   storyImportError = '';
   storyImportLoading = false;
+  storyImportReconciliationSelections.clear();
   renderStoriesAfterCsvChange();
   if (storyShowImportForm) {
     const input = document.getElementById('story-import-file');
@@ -5528,6 +6155,7 @@ function resetStoryCsvImport() {
   storyImportPreview = null;
   storyImportError = '';
   storyImportLoading = false;
+  storyImportReconciliationSelections.clear();
   renderStoriesAfterCsvChange();
 }
 
@@ -5580,6 +6208,7 @@ function cancelStoryCsvImport() {
   storyImportPreview = null;
   storyImportError = '';
   storyImportLoading = false;
+  storyImportReconciliationSelections.clear();
   renderStoriesAfterCsvChange();
 }
 
@@ -5601,9 +6230,45 @@ async function previewStoryCsvImport() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Unable to preview this CSV');
     storyImportPreview = result;
+    storyImportReconciliationSelections.clear();
   } catch (error) {
     storyImportError = error.message || 'Unable to preview this CSV';
   } finally {
+    storyImportLoading = false;
+    renderStoriesAfterCsvChange();
+  }
+}
+
+function toggleCsvReconciliationSelection(storyId, checked) {
+  if (checked) storyImportReconciliationSelections.add(storyId);
+  else storyImportReconciliationSelections.delete(storyId);
+  renderStoriesAfterCsvChange();
+}
+
+async function applySelectedCsvReconciliation() {
+  const available = storyImportPreview?.reconciliation || [];
+  const decisions = available.filter(item => storyImportReconciliationSelections.has(item.storyId));
+  if (!decisions.length) return;
+  const preview = decisions.slice(0, 10).map(item => `${item.jiraId}: ${item.changedFields.join(', ')}`).join('\n');
+  if (!confirm(`Apply CSV reconciliation to ${decisions.length} existing work item${decisions.length === 1 ? '' : 's'}?\n\n${preview}${decisions.length > 10 ? '\n…and more.' : ''}\n\nLocal Priorena only — Jira will not be updated.`)) return;
+  storyImportLoading = true;
+  storyImportError = '';
+  renderStoriesAfterCsvChange();
+  try {
+    const response = await fetch('/api/project/story/import/reconcile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: selectedProject, decisions })
+    });
+    const result = await response.json().catch(() => ({ error: 'Unable to reconcile CSV changes' }));
+    if (!response.ok) throw new Error(result.error || 'Unable to reconcile CSV changes');
+    storyImportReconciliationSelections.clear();
+    storyBulkFeedback = { warning: false, message: `${result.changed} existing work item${result.changed === 1 ? '' : 's'} reconciled from the reviewed CSV fields.` };
+    storyShowImportForm = false;
+    storyImportPreview = null;
+    await refreshProject();
+  } catch (error) {
+    storyImportError = error.message || 'Unable to reconcile CSV changes';
     storyImportLoading = false;
     renderStoriesAfterCsvChange();
   }

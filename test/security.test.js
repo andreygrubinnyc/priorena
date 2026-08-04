@@ -9,6 +9,7 @@ const test = require('node:test');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pmds-security-'));
 process.env.PMDS_DATA_FILE = path.join(tempRoot, 'pilot-data.json');
 process.env.PMDS_UPLOADS_DIR = path.join(tempRoot, 'uploads');
+process.env.PMDS_RECOVERY_DIR = path.join(tempRoot, 'backups');
 process.env.PRIORENA_DEMO_MODE = '1';
 fs.writeFileSync(process.env.PMDS_DATA_FILE, JSON.stringify({ projects: {} }), { mode: 0o600 });
 
@@ -378,6 +379,118 @@ test('public source and documentation are English-only', () => {
     const content = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
     assert.doesNotMatch(content, /[\u0400-\u04ff]/, `${file} should contain English-language text only`);
   });
+});
+
+test('management UI exposes bounded bulk work, source, and milestone controls', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+
+  assert.match(source, /Select all matching filters/);
+  assert.match(source, /Review selected work items/);
+  assert.match(source, /master\.indeterminate = selectedVisible > 0/);
+  assert.match(source, /Local Priorena change only — this does not update Jira/);
+  assert.match(source, /Protected delete/);
+  assert.match(source, /private recovery snapshot/);
+  assert.match(source, /Reconcile existing Jira keys/);
+  assert.match(styles, /\.bulk-work-toolbar/);
+  assert.match(styles, /\.work-table-card\.selected/);
+
+  assert.match(source, /id="source-select-page"/);
+  assert.match(source, /data-onclick="clearSourceSelection\(\)"/);
+  assert.match(source, /data-onclick="deleteSelectedSources\(\)"/);
+  assert.match(source, /extracted findings and any DSU work-item updates derived from them/);
+  assert.match(styles, /\.source-library-main/);
+
+  assert.match(source, /const MILESTONE_STATUS_VALUES = \['Planned', 'In progress', 'At risk', 'Blocked', 'Completed', 'Cancelled'\]/);
+  assert.match(source, /data-onclick="startTimelineEdit/);
+  assert.match(source, /data-onclick="saveTimelineEdit/);
+  assert.match(source, /Milestone changes are local to Priorena and do not update Jira/);
+  assert.match(serverSource, /Milestone status must be one of/);
+  assert.match(styles, /\.milestone-row-editing/);
+});
+
+test('milestones use canonical statuses and support validated edits', async () => {
+  let response = await jsonRequest('POST', '/api/projects', { name: 'Milestone Status Project' });
+  assert.equal(response.status, 200);
+
+  response = await jsonRequest('POST', '/api/project/timeline', {
+    project: 'Milestone Status Project', title: 'Fictional planned checkpoint',
+    date: '2026-08-15', status: 'Almost finished', notes: 'Fictional test only'
+  });
+  assert.equal(response.status, 400);
+  assert.match(response.json().error, /Milestone status must be one of/);
+
+  response = await jsonRequest('POST', '/api/project/timeline', {
+    project: 'Milestone Status Project', title: 'Fictional planned checkpoint',
+    date: '2026-08-15', notes: 'Fictional test only'
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.json().status, 'Planned');
+  const milestoneId = response.json().id;
+
+  response = await jsonRequest('PUT', '/api/project/timeline', {
+    project: 'Milestone Status Project', id: milestoneId, status: 'Nearly done'
+  });
+  assert.equal(response.status, 400);
+
+  response = await jsonRequest('PUT', '/api/project/timeline', {
+    project: 'Milestone Status Project', id: milestoneId,
+    title: 'Fictional completed checkpoint', date: '2026-08-16',
+    status: 'Completed', notes: 'Reviewed locally'
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.json().status, 'Completed');
+  assert.equal(response.json().title, 'Fictional completed checkpoint');
+  fs.writeFileSync(process.env.PMDS_DATA_FILE, JSON.stringify({ projects: {} }), { mode: 0o600 });
+});
+
+test('bulk source deletion is atomic and removes derived updates', async () => {
+  let response = await jsonRequest('POST', '/api/projects', { name: 'Source Deletion Project' });
+  assert.equal(response.status, 200);
+  response = await jsonRequest('POST', '/api/project/story', {
+    project: 'Source Deletion Project', itemType: 'Story', summary: 'Validate fictional source deletion',
+    jiraId: 'SAFE-101', assignee: 'Taylor'
+  });
+  assert.equal(response.status, 200);
+  const storyId = response.json().id;
+
+  const uploadSource = async (title, notes) => {
+    const form = multipartRequest({ project: 'Source Deletion Project', title, type: 'DSU', notes }, []);
+    const uploadResponse = await requestApp({ method: 'POST', url: '/api/project/transcript', ...form });
+    assert.equal(uploadResponse.status, 200);
+    return uploadResponse.json().transcripts[0];
+  };
+  const first = await uploadSource('Fictional source one', 'SAFE-101 is moving through fictional validation.');
+  const second = await uploadSource('Fictional source two', 'SAFE-101 completed another fictional review step.');
+  const firstFinding = first.extractedFindings.find(finding => finding.category === 'progress_update');
+  assert.ok(firstFinding);
+  response = await jsonRequest('PUT', '/api/project/transcript/finding', {
+    project: 'Source Deletion Project', transcriptId: first.id, findingId: firstFinding.id,
+    reviewStatus: 'accepted', storyId
+  });
+  assert.equal(response.status, 200);
+
+  response = await jsonRequest('DELETE', '/api/project/transcripts', {
+    project: 'Source Deletion Project', transcriptIds: [first.id, 'missing-source']
+  });
+  assert.equal(response.status, 404);
+  response = await requestApp({ url: '/api/project?name=Source%20Deletion%20Project' });
+  assert.equal(response.json().transcripts.length, 2);
+  assert.equal(response.json().stories[0].updates.length, 1);
+
+  response = await jsonRequest('DELETE', '/api/project/transcripts', {
+    project: 'Source Deletion Project', transcriptIds: [first.id, second.id]
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.json().deleted, 2);
+  assert.match(response.json().recoverySnapshot, /^priorena-pre-source-delete-/);
+  assert.ok(fs.existsSync(path.join(process.env.PMDS_RECOVERY_DIR, response.json().recoverySnapshot)));
+
+  response = await requestApp({ url: '/api/project?name=Source%20Deletion%20Project' });
+  assert.equal(response.json().transcripts.length, 0);
+  assert.equal(response.json().stories[0].updates.length, 0);
+  fs.writeFileSync(process.env.PMDS_DATA_FILE, JSON.stringify({ projects: {} }), { mode: 0o600 });
 });
 
 test('workspace backup uses the Priorena download name', async () => {

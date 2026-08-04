@@ -84,9 +84,11 @@ To run without Demo Mode, remove `PRIORENA_DEMO_MODE=1` from `.env`.
 2. Open **Settings** and create a PM workspace.
 3. Add a Project for one Jira Epic delivery scope.
 4. Add or import work items under **Work**.
-5. Capture authorized text evidence under **Capture**, then review pending findings.
-6. Use **Today** and **Follow-Up** to review delivery signals.
-7. Prepare a reviewed briefing under **Communicate**.
+5. Use row checkboxes for reviewed bulk changes, saved filter views, archive/restore, or protected deletion. Priorena previews each bulk change and keeps local change history.
+6. Add milestones with a predefined status, and edit their title, date, status, or notes inline.
+7. Capture authorized text evidence under **Capture**, then review pending findings. Source Library supports page selection and atomic deletion with a local recovery snapshot.
+8. Use **Today** and **Follow-Up** to review delivery signals. Archived work stays out of operational views and communication drafts.
+9. Prepare a reviewed briefing under **Communicate**.
 
 Priorena does not connect to Jira, Teams, email, or Confluence automatically. It prepares local, reviewable records and drafts; you remain responsible for authoritative updates and publication.
 
@@ -118,6 +120,7 @@ Without environment overrides, local state is created under the git-ignored `.pr
 ```text
 .priorena-data/
 ├── pilot-data.json
+├── backups/
 └── uploads/
     └── transcripts/
 ```
@@ -146,7 +149,7 @@ Keep `.env` private. Use only an organization-approved provider and do not submi
 npm test
 ```
 
-The suite covers loopback request boundaries, security headers, bounded uploads and imports, rejected-file cleanup, review queues, external-feed v1/v2/v3 compatibility, exact Jira-Epic association, typed work items, briefing lifecycle and baselines, output traceability, fictional demo isolation and expiry, export neutralization, AI throttling, and safe failure behavior.
+The suite covers loopback request boundaries, security headers, bounded uploads and imports, rejected-file cleanup, review queues, atomic Source Library deletion, milestone validation, bulk work-item preview/apply/undo/delete behavior, archive boundaries, saved views, external-feed v1/v2/v3 compatibility, exact Jira-Epic association, typed work items, briefing lifecycle and baselines, output traceability, fictional demo isolation and expiry, export neutralization, AI throttling, and safe failure behavior.
 
 The source snapshot used to prepare this public edition completed a repository-wide Codex Security review with no reportable findings. See [SECURITY_REVIEW_SUMMARY.md](SECURITY_REVIEW_SUMMARY.md) for the bounded verification record. That result applies only to the reviewed snapshot and the documented local-only deployment boundary; it is not a guarantee of future security.
 
@@ -157,6 +160,7 @@ briefings/        Briefing validation, lifecycle, and evidence candidates
 demo/             Independently fictional fixture and in-memory session store
 public/           Browser application, styles, utilities, and self-hosted fonts
 test/             Synthetic security and domain regression tests
+work-items/       Bulk preview, update, history, undo, deletion, and saved-view rules
 workspaces/       Project/Jira-Epic domain rules
 external-feed.js  Strict external-feed parser and reconciliation logic
 server.js         Loopback-only Express application and API routes
