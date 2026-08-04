@@ -14,6 +14,7 @@ The following paths are git-ignored and must never be committed, attached to iss
 - `.priorena-data/`
 - `pilot-data.json`
 - `uploads/`
+- `backups/`
 
 Use only synthetic fixtures in tests and documentation.
 

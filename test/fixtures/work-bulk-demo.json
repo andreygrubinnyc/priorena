@@ -1,0 +1,113 @@
+{
+  "projects": {
+    "Fictional Delivery Lab": {
+      "description": "Synthetic workspace used only for local interface verification.",
+      "deliveryProjects": [
+        {
+          "id": "delivery-fictional-launch",
+          "name": "Fictional Launch",
+          "jiraEpicKey": "DEMO-100",
+          "jiraEpicName": "Fictional Launch",
+          "owner": "Morgan Lee",
+          "planningTarget": "Fictional Q3",
+          "description": "Synthetic Project scope.",
+          "workstreams": [],
+          "archived": false
+        }
+      ],
+      "stories": [
+        {
+          "id": "story-fictional-101",
+          "jiraId": "DEMO-101",
+          "itemType": "Story",
+          "summary": "Prepare fictional readiness checklist",
+          "description": "Synthetic work item for UI verification.",
+          "acceptanceCriteria": [],
+          "dependencies": "",
+          "labels": ["planned"],
+          "environment": "",
+          "notes": "",
+          "timelineId": "",
+          "deliveryProjectId": "",
+          "createdAt": "2026-07-01T12:00:00.000Z",
+          "updates": [],
+          "tracked": false,
+          "assignee": "",
+          "owner": "",
+          "sprint": "",
+          "contacted": false,
+          "commentAdded": false,
+          "lastCommentedAt": null,
+          "lastComment": "",
+          "lastUpdate": "",
+          "lastUpdateNotes": "",
+          "archived": false
+        },
+        {
+          "id": "story-fictional-102",
+          "jiraId": "DEMO-102",
+          "itemType": "Task",
+          "summary": "Review fictional launch evidence",
+          "description": "Synthetic work item for UI verification.",
+          "acceptanceCriteria": [],
+          "dependencies": "",
+          "labels": ["in progress"],
+          "environment": "",
+          "notes": "Fictional note.",
+          "timelineId": "milestone-fictional",
+          "deliveryProjectId": "delivery-fictional-launch",
+          "createdAt": "2026-07-02T12:00:00.000Z",
+          "updates": [],
+          "tracked": true,
+          "assignee": "Jordan Rivera",
+          "owner": "Jordan Rivera",
+          "sprint": "Sprint 1",
+          "contacted": false,
+          "commentAdded": false,
+          "lastCommentedAt": null,
+          "lastComment": "",
+          "lastUpdate": "",
+          "lastUpdateNotes": "",
+          "archived": false
+        },
+        {
+          "id": "story-fictional-103",
+          "jiraId": "DEMO-102",
+          "itemType": "Bug",
+          "summary": "Resolve fictional duplicate-key exercise",
+          "description": "Synthetic duplicate Jira key for filter verification.",
+          "acceptanceCriteria": [],
+          "dependencies": "Fictional dependency",
+          "labels": ["blocked"],
+          "environment": "",
+          "notes": "",
+          "timelineId": "",
+          "deliveryProjectId": "",
+          "createdAt": "2026-07-03T12:00:00.000Z",
+          "updates": [],
+          "tracked": false,
+          "assignee": "",
+          "owner": "",
+          "sprint": "",
+          "contacted": false,
+          "commentAdded": false,
+          "lastCommentedAt": null,
+          "lastComment": "",
+          "lastUpdate": "",
+          "lastUpdateNotes": "",
+          "archived": false
+        }
+      ],
+      "timeline": [
+        {
+          "id": "milestone-fictional",
+          "title": "Fictional readiness review",
+          "date": "2026-08-15",
+          "status": "Planned",
+          "notes": "Synthetic milestone."
+        }
+      ],
+      "transcripts": []
+    }
+  }
+}

@@ -64,7 +64,7 @@ function collectAcceptedEvidenceCandidates(projects, briefing, limit = MAX_CANDI
   briefing.projectNames.forEach(projectName => {
     const project = projects[projectName];
     if (!project) return;
-    const stories = Array.isArray(project.stories) ? project.stories : [];
+    const stories = (Array.isArray(project.stories) ? project.stories : []).filter(story => !story.archived);
     const storyMap = new Map(stories.map(story => [story.id, story]));
     stories.forEach(story => {
       const exactExcerpt = bounded(story && story.lastComment, 10_000);

@@ -273,6 +273,7 @@ function buildBriefingSnapshot(stream, projects, capturedAt = new Date().toISOSt
     const deliveryProjects = Array.isArray(project.deliveryProjects) ? project.deliveryProjects : [];
     const projectMap = new Map(deliveryProjects.map(item => [item.id, item]));
     const stories = (Array.isArray(project.stories) ? project.stories : [])
+      .filter(story => !story.archived)
       .filter(story => !selectedIds.size || selectedIds.has(story.deliveryProjectId));
     workItemCount += stories.length;
     if (workItemCount > LIMITS.workItemsPerSnapshot) {
