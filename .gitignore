@@ -1,8 +1,21 @@
 # Local runtime state and secrets
 .env
+.env.*
+!.env.example
 .priorena-data/
 pilot-data.json
 uploads/
+backups/
+
+# Private keys, local databases, exports, and recovery archives
+*.key
+*.p12
+*.pem
+*.pfx
+*.sqlite
+*.sqlite3
+*.dump
+*.bak
 
 # Dependencies and generated output
 node_modules/

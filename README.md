@@ -153,6 +153,28 @@ The suite covers loopback request boundaries, security headers, bounded uploads 
 
 The source snapshot used to prepare this public edition completed a repository-wide Codex Security review with no reportable findings. See [SECURITY_REVIEW_SUMMARY.md](SECURITY_REVIEW_SUMMARY.md) for the bounded verification record. That result applies only to the reviewed snapshot and the documented local-only deployment boundary; it is not a guarantee of future security.
 
+### Secure development gates
+
+Install the version-controlled Git hooks after cloning. `npm install` runs this automatically; it can also be requested explicitly:
+
+```bash
+npm run hooks:install
+```
+
+The fast pre-commit gate inspects the staged patch for prohibited private files, credentials, operational markers, unexpected binary files, merge artifacts, JavaScript syntax errors, and test regressions:
+
+```bash
+npm run verify:commit
+```
+
+The pre-push and CI gate scans the committed tree and additionally runs the production validation build and the npm vulnerability audit:
+
+```bash
+npm run verify:push
+```
+
+GitHub pull requests also run the security gate, dependency review, and CodeQL. Required checks and the protected `main` branch are the authoritative merge boundary. Do not bypass hooks with `--no-verify`; a check that cannot run is unverified, not passed.
+
 ## Repository map
 
 ```text
@@ -160,6 +182,7 @@ briefings/        Briefing validation, lifecycle, and evidence candidates
 demo/             Independently fictional fixture and in-memory session store
 public/           Browser application, styles, utilities, and self-hosted fonts
 test/             Synthetic security and domain regression tests
+scripts/security/ Version-controlled commit, push, syntax, build, and sanitization gates
 work-items/       Bulk preview, update, history, undo, deletion, and saved-view rules
 workspaces/       Project/Jira-Epic domain rules
 external-feed.js  Strict external-feed parser and reconciliation logic

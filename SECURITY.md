@@ -35,6 +35,16 @@ Use only synthetic fixtures in tests and documentation.
 
 Priorena performs no OCR and never receives or stores original screenshots. A separately generated external feed is untrusted input and must pass strict schema validation, exact evidence linkage, explicit field decisions, and final stale-value checks.
 
+## Secure contribution gates
+
+The repository uses version-controlled pre-commit and pre-push hooks from `.githooks/`. `npm install` configures the checkout to use them, and `npm run hooks:install` can restore that configuration.
+
+- `npm run verify:commit` scans the staged patch, verifies JavaScript syntax, and runs the complete test suite.
+- `npm run verify:push` scans the committed tree, repeats syntax and tests, performs a production validation build, and runs `npm audit` at moderate severity or higher.
+- Pull requests repeat the full gate and add dependency review and CodeQL analysis using SHA-pinned GitHub Actions with least-privilege workflow tokens.
+
+Do not use `--no-verify`. An unavailable registry, scanner, or required check is an unverified result and blocks publication. No automated or manual scan proves the absence of every vulnerability; results apply only to the exact reviewed revision and documented deployment boundary.
+
 ## Reporting vulnerabilities
 
 Report suspected vulnerabilities privately to the repository owner. Do not include credentials, operational workspace data, private transcripts, provider responses, or screenshots containing real project information.
