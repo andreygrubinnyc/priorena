@@ -4,8 +4,16 @@
   "private": true,
   "main": "server.js",
   "scripts": {
+    "build": "node scripts/security/build-check.js",
+    "hooks:install": "node scripts/security/install-hooks.js",
+    "lint": "node scripts/security/verify-syntax.js",
+    "prepare": "node scripts/security/install-hooks.js",
+    "security:scan": "node scripts/security/repository-scan.js --head",
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "verify:ci": "npm run verify:push",
+    "verify:commit": "node scripts/security/repository-scan.js --staged && npm run lint && npm test",
+    "verify:push": "node scripts/security/repository-scan.js --head && npm run lint && npm test && npm run build && npm audit --audit-level=moderate"
   },
   "dependencies": {
     "busboy": "^1.6.0",
