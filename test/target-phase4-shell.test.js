@@ -10,6 +10,7 @@ const { createCleanSeed } = require('../target-model/clean-seed');
 const { serializeTargetData } = require('../target-model/persistence');
 const { createTargetApiApp } = require('../target-server/app');
 const { LOOPBACK_HOST, parseArguments } = require('../target-server/dev');
+const { requestApp } = require('../test-support/target-api-harness');
 const {
   categorizeVersions,
   createTargetBriefingApiClient,
@@ -172,6 +173,14 @@ test('target UI is registered only on the isolated target app without mutating t
   });
   assert.equal(typeof app.handle, 'function');
   assert.equal(app._router.stack.some(layer => String(layer.regexp).includes('target')), true);
+  for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-briefing-state.js']) {
+    const response = await requestApp(app, { url: `/target-modules/${moduleName}` });
+    assert.equal(response.status, 200);
+    assert.match(response.headers['content-type'], /^application\/javascript/);
+    assert.equal(response.body, await source(`public/${moduleName}`));
+  }
+  assert.equal((await requestApp(app, { url: '/target-modules/app.js' })).status, 404);
+  assert.doesNotMatch(await source('target-server/app.js'), /\.sendFile\s*\(/);
   assert.deepEqual(await fs.readFile(targetDataFile), before);
 
   const legacyServer = await source('server.js');

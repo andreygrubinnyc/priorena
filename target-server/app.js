@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const { TargetResourceLimitError, TargetValidationError } = require('../target-model/schema');
@@ -22,6 +23,12 @@ const { createTargetServices } = require('./services');
 const { safeDownloadName } = require('./source-files');
 
 const TARGET_API_NAMESPACE = '/api/v2';
+const PUBLIC_ROOT = path.join(__dirname, '..', 'public');
+const TARGET_MODULE_ASSETS = Object.freeze([
+  ['target-context-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-context-state.js'), 'utf8')],
+  ['target-workflow-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-workflow-state.js'), 'utf8')],
+  ['target-briefing-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-briefing-state.js'), 'utf8')]
+].map(([name, source]) => Object.freeze({ route: `/target-modules/${name}`, source })));
 
 function createTargetApiApp(options = {}) {
   const services = createTargetServices(options);
@@ -32,7 +39,7 @@ function createTargetApiApp(options = {}) {
   app.use(targetSecurityHeaders);
   app.use(targetRequestProvenance);
   app.use(targetRequestLimit);
-  const targetUiRoot = path.join(__dirname, '..', 'public', 'target');
+  const targetUiRoot = path.join(PUBLIC_ROOT, 'target');
   app.use('/target', express.static(targetUiRoot, {
     dotfiles: 'deny',
     etag: false,
@@ -41,15 +48,10 @@ function createTargetApiApp(options = {}) {
     maxAge: 0,
     redirect: true
   }));
-  app.get('/target-modules/target-context-state.js', (req, res) => {
-    res.type('application/javascript').sendFile(path.join(__dirname, '..', 'public', 'target-context-state.js'));
+  TARGET_MODULE_ASSETS.forEach(asset => {
+    app.get(asset.route, (req, res) => res.type('application/javascript').send(asset.source));
   });
-  app.get('/target-modules/target-workflow-state.js', (req, res) => {
-    res.type('application/javascript').sendFile(path.join(__dirname, '..', 'public', 'target-workflow-state.js'));
-  });
-  app.get('/target-modules/target-briefing-state.js', (req, res) => {
-    res.type('application/javascript').sendFile(path.join(__dirname, '..', 'public', 'target-briefing-state.js'));
-  });
+  app.use('/target-modules/*', (req, res, next) => next(notFound()));
   app.options(`${TARGET_API_NAMESPACE}/*`, (req, res) => res.status(204).end());
   app.use(TARGET_API_NAMESPACE, express.json({ limit: MAX_TARGET_REQUEST_BYTES, strict: true, type: 'application/json' }));
 
