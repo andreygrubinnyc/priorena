@@ -28,6 +28,8 @@ const {
 } = require('./projections');
 const { createTargetResolvers } = require('./resolvers');
 const { readSourceFile, requireExplicitRoot } = require('./source-files');
+const { createCaptureServices } = require('./capture-services');
+const { createWorkServices } = require('./work-services');
 
 const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024;
 const MAX_AI_CONTEXT_BYTES = 512 * 1024;
@@ -52,6 +54,8 @@ function boundedAiContext(document, organizationId, workspaceId) {
 function createTargetServices(options = {}) {
   const targetDataFile = requireExplicitTargetDataFile(options.targetDataFile);
   const sourceFilesRoot = requireExplicitRoot(options.sourceFilesRoot);
+  const captureServices = createCaptureServices({ ...options, targetDataFile });
+  const workServices = createWorkServices({ ...options, targetDataFile });
 
   async function read(projector) {
     const { document, revision } = await readTargetDataWithRevision(targetDataFile);
@@ -59,6 +63,8 @@ function createTargetServices(options = {}) {
   }
 
   return Object.freeze({
+    ...captureServices,
+    ...workServices,
     listOrganizations: () => read(listOrganizations),
     getOrganization: organizationId => read(document => getOrganization(document, organizationId)),
     listWorkspaces: organizationId => read(document => listWorkspaces(document, organizationId)),

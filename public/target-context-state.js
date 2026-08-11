@@ -9,10 +9,19 @@ function emptyOperationalState() {
     pendingSelections: [],
     searchResults: [],
     counts: {},
+    scopes: [],
+    workItems: [],
+    milestones: [],
     sources: [],
+    findings: [],
     evidence: [],
+    proposedChanges: [],
     briefings: [],
-    renderedOutput: ''
+    renderedOutput: '',
+    workflowPreview: null,
+    workflowConfirmation: null,
+    workflowStatus: null,
+    conflict: false
   };
 }
 
@@ -126,6 +135,7 @@ function createTargetContextController(api) {
         if (generation !== requestGeneration) return snapshot();
         state.today = structuredClone(today);
         state.workspaceRecords = structuredClone(today.workItems || []);
+        state.workItems = structuredClone(today.workItems || []);
         state.counts = structuredClone(today.counts || {});
       }
       state.loading = false;
@@ -159,6 +169,7 @@ function createTargetContextController(api) {
       state.portfolio = structuredClone(portfolio);
       state.today = structuredClone(today);
       state.workspaceRecords = structuredClone(today.workItems || []);
+      state.workItems = structuredClone(today.workItems || []);
       state.counts = structuredClone(today.counts || {});
       state.loading = false;
       return snapshot();
@@ -191,7 +202,11 @@ function createTargetContextController(api) {
 
   function replaceWorkspaceData(token, values = {}) {
     if (!isCurrentWorkspaceRequestToken(token)) return snapshot();
-    const keys = ['pendingSelections', 'searchResults', 'sources', 'evidence', 'briefings', 'renderedOutput'];
+    const keys = [
+      'pendingSelections', 'searchResults', 'scopes', 'workItems', 'milestones', 'sources',
+      'findings', 'evidence', 'proposedChanges', 'briefings', 'renderedOutput', 'workflowPreview',
+      'workflowConfirmation', 'workflowStatus', 'conflict'
+    ];
     keys.forEach(key => {
       if (Object.hasOwn(values, key)) state[key] = structuredClone(values[key]);
     });
