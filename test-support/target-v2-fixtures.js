@@ -525,6 +525,223 @@ function createPhase3WorkflowFixture() {
   return document;
 }
 
+function createPhase4BriefingFixture() {
+  const document = createPhase3WorkflowFixture();
+  document.organizations.find(item => item.id === 'org-fixture-beta').name = 'Fictional Organization Alpha';
+  const briefing = document.briefings.find(item => item.id === 'briefing-alpha');
+  briefing.briefingType = 'status-update';
+  briefing.draftingGuidance = 'Use concise, fictional, repository-safe delivery language.';
+  document.briefings.find(item => item.id === 'briefing-beta').briefingType = 'status-update';
+  document.briefings.push(
+    {
+      id: 'briefing-alpha-entire-workspace',
+      organizationId: 'org-fixture-alpha',
+      name: 'Fictional Entire Workspace Briefing',
+      workspaceIds: ['workspace-alpha-shared'],
+      scopeIds: [],
+      audienceProfile: 'Fictional workspace stakeholders',
+      preferredFormats: ['email'],
+      defaultSections: ['summary', 'progress'],
+      briefingType: 'general',
+      draftingGuidance: '',
+      lastCommunicatedVersionId: null,
+      archived: false,
+      createdAt: FIXTURE_TIMESTAMP,
+      updatedAt: FIXTURE_TIMESTAMP
+    },
+    {
+      id: 'briefing-alpha-one-scope',
+      organizationId: 'org-fixture-alpha',
+      name: 'Fictional One Scope Briefing',
+      workspaceIds: ['workspace-alpha-shared'],
+      scopeIds: ['scope-alpha-multiple-mappings'],
+      audienceProfile: 'Fictional Scope stakeholders',
+      preferredFormats: ['teams'],
+      defaultSections: ['progress', 'risk'],
+      briefingType: 'delivery-status',
+      draftingGuidance: '',
+      lastCommunicatedVersionId: null,
+      archived: false,
+      createdAt: FIXTURE_TIMESTAMP,
+      updatedAt: FIXTURE_TIMESTAMP
+    },
+    {
+      id: 'briefing-alpha-multiple-scopes',
+      organizationId: 'org-fixture-alpha',
+      name: 'Fictional Multiple Scope Briefing',
+      workspaceIds: ['workspace-alpha-shared'],
+      scopeIds: ['scope-alpha-zero-mapping', 'scope-alpha-multiple-mappings'],
+      audienceProfile: 'Fictional multi-Scope stakeholders',
+      preferredFormats: ['confluence'],
+      defaultSections: ['progress', 'milestones'],
+      briefingType: 'status-update',
+      draftingGuidance: '',
+      lastCommunicatedVersionId: null,
+      archived: false,
+      createdAt: FIXTURE_TIMESTAMP,
+      updatedAt: FIXTURE_TIMESTAMP
+    }
+  );
+
+  const definition = {
+    briefingId: briefing.id,
+    name: briefing.name,
+    briefingType: briefing.briefingType,
+    audienceProfile: briefing.audienceProfile,
+    preferredFormats: [...briefing.preferredFormats],
+    defaultSections: [...briefing.defaultSections],
+    draftingGuidance: briefing.draftingGuidance,
+    workspaceIds: [...briefing.workspaceIds],
+    scopeIds: [...briefing.scopeIds],
+    workspaces: [
+      {
+        id: 'workspace-alpha-shared',
+        name: 'Shared Delivery Workspace',
+        selection: {
+          kind: 'selected-scopes',
+          label: 'Mapped Scope',
+          scopes: [{ id: 'scope-alpha-multiple-mappings', name: 'Mapped Scope' }]
+        }
+      },
+      {
+        id: 'workspace-alpha-secondary',
+        name: 'Secondary Delivery Workspace',
+        selection: {
+          kind: 'selected-scopes',
+          label: 'Shared Scope',
+          scopes: [{ id: 'scope-alpha-secondary', name: 'Shared Scope' }]
+        }
+      }
+    ]
+  };
+  const acceptedEvidenceFact = {
+    id: 'fact:accepted-evidence:evidence-alpha-accepted',
+    kind: 'accepted-evidence',
+    section: 'progress',
+    organizationId: 'org-fixture-alpha',
+    workspaceId: 'workspace-alpha-shared',
+    scopeId: 'scope-alpha-multiple-mappings',
+    recordId: 'evidence-alpha-accepted',
+    title: 'Fictional Alpha Source',
+    text: 'The fictional Alpha dependency is waiting for review.',
+    currentness: 'historical-support',
+    provenance: {
+      type: 'accepted-evidence',
+      evidenceId: 'evidence-alpha-accepted',
+      findingId: 'finding-alpha-accepted',
+      sourceId: 'source-alpha-sentinel',
+      sourceDate: '2026-08-07',
+      acceptedAt: FIXTURE_TIMESTAMP
+    },
+    truncated: false,
+    originalCharacterCount: 53
+  };
+  const manualFact = {
+    id: 'fact:manual:phase4-fixture',
+    kind: 'manual-input',
+    section: 'progress',
+    organizationId: 'org-fixture-alpha',
+    workspaceId: null,
+    scopeId: null,
+    recordId: 'manual:phase4-fixture',
+    title: 'Manual PM input',
+    text: '<img src=x onerror=fictional()> A fictional PM review checkpoint is scheduled.',
+    currentness: 'manual',
+    provenance: { type: 'manual-pm-input', label: 'Manual PM input' },
+    truncated: false,
+    originalCharacterCount: 81
+  };
+  const canonicalOutput = {
+    format: 'teams',
+    mediaType: 'text/plain',
+    contentHash: 'a'.repeat(64),
+    factIds: [acceptedEvidenceFact.id, manualFact.id],
+    manualInputIds: [manualFact.recordId],
+    text: '**Fictional Alpha Delivery Briefing**\n\n**progress**\n- Fictional Alpha Source: The fictional Alpha dependency is waiting for review.\n- Manual PM input: <img src=x onerror=fictional()> A fictional PM review checkpoint is scheduled.'
+  };
+  const draftSnapshot = {
+    schema: 'priorena-briefing-draft-v1',
+    definition,
+    candidates: [acceptedEvidenceFact],
+    candidateStateHash: 'b'.repeat(64),
+    selectedFactIds: [acceptedEvidenceFact.id],
+    manualInputs: [{ id: manualFact.recordId, label: 'Manual PM input', section: 'progress', text: manualFact.text }],
+    comparison: {
+      baselineVersionId: 'briefing-version-alpha-communicated',
+      addedFactIds: [],
+      changedFactIds: [],
+      removedFactIds: []
+    },
+    preparedAt: '2026-08-08T12:00:00.000Z'
+  };
+
+  const communicated = document.briefingVersions.find(item => item.id === 'briefing-version-alpha-communicated');
+  communicated.frozenSnapshot = {
+    ...draftSnapshot,
+    comparison: { baselineVersionId: null, addedFactIds: [acceptedEvidenceFact.id], changedFactIds: [], removedFactIds: [] },
+    finalize: {
+      actor: 'fictional-phase4-reviewer',
+      timestamp: communicated.finalizedAt,
+      basisRevision: 'phase4-fixture-revision',
+      draftStateHash: 'c'.repeat(64),
+      contentHash: canonicalOutput.contentHash
+    }
+  };
+  communicated.facts = [acceptedEvidenceFact, manualFact];
+  communicated.outputs = [canonicalOutput];
+  communicated.communication = {
+    channel: 'teams',
+    outputFormat: 'teams',
+    referenceNote: 'Copied into a fictional delivery channel.',
+    actor: 'fictional-phase4-reviewer'
+  };
+
+  document.briefingVersions.push(
+    {
+      id: 'briefing-version-alpha-draft',
+      organizationId: briefing.organizationId,
+      briefingId: briefing.id,
+      workspaceIds: [...briefing.workspaceIds],
+      scopeIds: [...briefing.scopeIds],
+      status: 'draft',
+      comparisonVersionId: communicated.id,
+      frozenSnapshot: draftSnapshot,
+      facts: [acceptedEvidenceFact, manualFact],
+      outputs: [],
+      createdAt: '2026-08-08T12:00:00.000Z',
+      finalizedAt: null,
+      communicatedAt: null,
+      communication: null
+    },
+    {
+      id: 'briefing-version-alpha-finalized',
+      organizationId: briefing.organizationId,
+      briefingId: briefing.id,
+      workspaceIds: [...briefing.workspaceIds],
+      scopeIds: [...briefing.scopeIds],
+      status: 'finalized',
+      comparisonVersionId: communicated.id,
+      frozenSnapshot: {
+        ...draftSnapshot,
+        finalize: {
+          actor: 'fictional-phase4-reviewer',
+          timestamp: '2026-08-08T14:00:00.000Z',
+          basisRevision: 'phase4-fixture-revision',
+          draftStateHash: 'd'.repeat(64),
+          contentHash: canonicalOutput.contentHash
+        }
+      },
+      facts: [acceptedEvidenceFact, manualFact],
+      outputs: [canonicalOutput],
+      createdAt: '2026-08-08T13:00:00.000Z',
+      finalizedAt: '2026-08-08T14:00:00.000Z',
+      communicatedAt: null,
+      communication: null
+    }
+  );
+  return document;
+}
+
 function createInvalidPhase3ProposedChangeFixture() {
   const document = createPhase3WorkflowFixture();
   document.proposedChanges[0].evidenceIds = ['evidence-beta-accepted'];
@@ -537,6 +754,7 @@ module.exports = {
   createInvalidPhase3ProposedChangeFixture,
   createInvalidCrossWorkspaceFixture,
   createMultiOrganizationFixture,
+  createPhase4BriefingFixture,
   createPhase3WorkflowFixture,
   followUp,
   workItem

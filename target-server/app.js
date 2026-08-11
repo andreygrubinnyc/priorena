@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const path = require('node:path');
 
 const { TargetResourceLimitError, TargetValidationError } = require('../target-model/schema');
 const {
@@ -31,6 +32,24 @@ function createTargetApiApp(options = {}) {
   app.use(targetSecurityHeaders);
   app.use(targetRequestProvenance);
   app.use(targetRequestLimit);
+  const targetUiRoot = path.join(__dirname, '..', 'public', 'target');
+  app.use('/target', express.static(targetUiRoot, {
+    dotfiles: 'deny',
+    etag: false,
+    fallthrough: false,
+    index: 'index.html',
+    maxAge: 0,
+    redirect: true
+  }));
+  app.get('/target-modules/target-context-state.js', (req, res) => {
+    res.type('application/javascript').sendFile(path.join(__dirname, '..', 'public', 'target-context-state.js'));
+  });
+  app.get('/target-modules/target-workflow-state.js', (req, res) => {
+    res.type('application/javascript').sendFile(path.join(__dirname, '..', 'public', 'target-workflow-state.js'));
+  });
+  app.get('/target-modules/target-briefing-state.js', (req, res) => {
+    res.type('application/javascript').sendFile(path.join(__dirname, '..', 'public', 'target-briefing-state.js'));
+  });
   app.options(`${TARGET_API_NAMESPACE}/*`, (req, res) => res.status(204).end());
   app.use(TARGET_API_NAMESPACE, express.json({ limit: MAX_TARGET_REQUEST_BYTES, strict: true, type: 'application/json' }));
 
@@ -116,10 +135,25 @@ function createTargetApiApp(options = {}) {
     res.send(file.bytes);
   }));
 
-  jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId/briefings`, req => services.listBriefings(req.params.organizationId));
-  jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId/briefings/:briefingId`, req => services.getBriefing(req.params.organizationId, req.params.briefingId));
-  jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId/briefings/:briefingId/versions`, req => services.listBriefingVersions(req.params.organizationId, req.params.briefingId));
-  jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId/briefings/:briefingId/versions/:versionId`, req => services.getBriefingVersion(req.params.organizationId, req.params.briefingId, req.params.versionId));
+  const briefingBase = `${TARGET_API_NAMESPACE}/organizations/:organizationId/briefings`;
+  jsonRoute(briefingBase, req => services.listBriefings(req.params.organizationId));
+  mutationRoute('post', briefingBase, req => services.createBriefing(req.params.organizationId, req.body));
+  jsonRoute(`${briefingBase}/:briefingId`, req => services.getBriefing(req.params.organizationId, req.params.briefingId));
+  mutationRoute('patch', `${briefingBase}/:briefingId`, req => services.updateBriefing(req.params.organizationId, req.params.briefingId, req.body));
+  mutationRoute('post', `${briefingBase}/:briefingId/candidates/prepare`, req => services.prepareBriefingCandidates(req.params.organizationId, req.params.briefingId, req.body));
+  jsonRoute(`${briefingBase}/:briefingId/versions`, req => services.listBriefingVersions(req.params.organizationId, req.params.briefingId));
+  mutationRoute('post', `${briefingBase}/:briefingId/versions`, req => services.createDraft(req.params.organizationId, req.params.briefingId, req.body));
+  jsonRoute(`${briefingBase}/:briefingId/versions/open`, req => services.listOpenBriefingVersions(req.params.organizationId, req.params.briefingId));
+  jsonRoute(`${briefingBase}/:briefingId/versions/history`, req => services.listBriefingHistory(req.params.organizationId, req.params.briefingId));
+  jsonRoute(`${briefingBase}/:briefingId/versions/:versionId`, req => services.getBriefingVersion(req.params.organizationId, req.params.briefingId, req.params.versionId));
+  mutationRoute('patch', `${briefingBase}/:briefingId/versions/:versionId`, req => services.editDraft(req.params.organizationId, req.params.briefingId, req.params.versionId, req.body));
+  mutationRoute('post', `${briefingBase}/:briefingId/versions/:versionId/refresh`, req => services.refreshDraft(req.params.organizationId, req.params.briefingId, req.params.versionId, req.body));
+  mutationRoute('post', `${briefingBase}/:briefingId/versions/:versionId/outputs/preview`, req => services.previewDraftOutputs(req.params.organizationId, req.params.briefingId, req.params.versionId, req.body));
+  jsonRoute(`${briefingBase}/:briefingId/versions/:versionId/outputs/:format`, req => services.getFrozenOutput(req.params.organizationId, req.params.briefingId, req.params.versionId, req.params.format));
+  mutationRoute('post', `${briefingBase}/:briefingId/versions/:versionId/finalize/preview`, req => services.previewFinalize(req.params.organizationId, req.params.briefingId, req.params.versionId, req.body));
+  mutationRoute('post', `${briefingBase}/:briefingId/versions/:versionId/finalize`, req => services.finalize(req.params.organizationId, req.params.briefingId, req.params.versionId, req.body));
+  mutationRoute('post', `${briefingBase}/:briefingId/versions/:versionId/communicate/preview`, req => services.previewCommunicate(req.params.organizationId, req.params.briefingId, req.params.versionId, req.body));
+  mutationRoute('post', `${briefingBase}/:briefingId/versions/:versionId/communicate`, req => services.markCommunicated(req.params.organizationId, req.params.briefingId, req.params.versionId, req.body));
 
   for (const kind of ['export', 'backup']) {
     app.get(`${TARGET_API_NAMESPACE}/organizations/:organizationId/${kind}`, wrap(async (req, res) => {

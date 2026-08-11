@@ -9,15 +9,11 @@ const {
   buildOrganizationArchive,
   buildPortfolio,
   buildToday,
-  getBriefing,
-  getBriefingVersion,
   getEvidenceForSource,
   getFindingForSource,
   getOrganization,
   getWorkspace,
   getWorkspaceChild,
-  listBriefingVersions,
-  listBriefings,
   listEvidenceForSource,
   listFindingsForSource,
   listOrganizations,
@@ -29,6 +25,7 @@ const {
 const { createTargetResolvers } = require('./resolvers');
 const { readSourceFile, requireExplicitRoot } = require('./source-files');
 const { createCaptureServices } = require('./capture-services');
+const { createBriefingServices } = require('./briefing-services');
 const { createWorkServices } = require('./work-services');
 
 const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024;
@@ -55,6 +52,7 @@ function createTargetServices(options = {}) {
   const targetDataFile = requireExplicitTargetDataFile(options.targetDataFile);
   const sourceFilesRoot = requireExplicitRoot(options.sourceFilesRoot);
   const captureServices = createCaptureServices({ ...options, targetDataFile });
+  const briefingServices = createBriefingServices({ ...options, targetDataFile });
   const workServices = createWorkServices({ ...options, targetDataFile });
 
   async function read(projector) {
@@ -64,6 +62,7 @@ function createTargetServices(options = {}) {
 
   return Object.freeze({
     ...captureServices,
+    ...briefingServices,
     ...workServices,
     listOrganizations: () => read(listOrganizations),
     getOrganization: organizationId => read(document => getOrganization(document, organizationId)),
@@ -83,10 +82,6 @@ function createTargetServices(options = {}) {
       const source = createTargetResolvers(document).resolveWorkspaceChild('sources', organizationId, workspaceId, sourceId);
       return readSourceFile(source, sourceFilesRoot);
     }),
-    listBriefings: organizationId => read(document => listBriefings(document, organizationId)),
-    getBriefing: (organizationId, briefingId) => read(document => getBriefing(document, organizationId, briefingId)),
-    listBriefingVersions: (organizationId, briefingId) => read(document => listBriefingVersions(document, organizationId, briefingId)),
-    getBriefingVersion: (organizationId, briefingId, versionId) => read(document => getBriefingVersion(document, organizationId, briefingId, versionId)),
     exportOrganization: organizationId => read(document => boundedArchive(document, organizationId, 'export')),
     backupOrganization: organizationId => read(document => boundedArchive(document, organizationId, 'backup')),
     buildAiContext: (organizationId, workspaceId) => read(document => boundedAiContext(document, organizationId, workspaceId))

@@ -92,10 +92,12 @@ function createTargetResolvers(document) {
     const briefing = resolveBriefing(organizationId, briefingId);
     const version = indexes.briefingVersions.get(assertStableId(versionId));
     if (!version || version.organizationId !== briefing.organizationId || version.briefingId !== briefing.id) throw notFound();
-    const selectedWorkspaceIds = new Set(briefing.workspaceIds);
-    if (version.workspaceIds.some(workspaceId => !selectedWorkspaceIds.has(workspaceId))) throw notFound();
-    const selectedScopeIds = new Set(briefing.scopeIds);
-    if (version.scopeIds.some(scopeId => !selectedScopeIds.has(scopeId))) throw notFound();
+    const selectedWorkspaceIds = new Set(version.workspaceIds);
+    version.workspaceIds.forEach(workspaceId => resolveWorkspace(briefing.organizationId, workspaceId));
+    version.scopeIds.forEach(scopeId => {
+      const scope = indexes.scopes.get(assertStableId(scopeId));
+      if (!scope || scope.organizationId !== briefing.organizationId || !selectedWorkspaceIds.has(scope.workspaceId)) throw notFound();
+    });
     return version;
   }
 

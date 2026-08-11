@@ -9,6 +9,9 @@ function isLoopbackHost(host) {
 function targetSecurityHeaders(req, res, next) {
   res.set('Content-Security-Policy', [
     "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "connect-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'none'"

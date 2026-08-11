@@ -18,6 +18,9 @@ try {
     'public/index.html',
     'public/app.js',
     'public/styles.css',
+    'public/target/index.html',
+    'public/target/app.js',
+    'public/target/styles.css',
     'demo/demo-fixture.js',
     'demo/demo-session-store.js'
   ];
@@ -37,6 +40,12 @@ try {
   fs.writeFileSync(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });
   const target = createTargetApiApp({ targetDataFile, sourceFilesRoot: targetSourceFilesRoot });
   assert.equal(typeof target.app?.handle, 'function');
+  const { parseArguments } = require('../../target-server/dev');
+  assert.deepEqual(parseArguments([
+    '--data-file', targetDataFile,
+    '--source-files-root', targetSourceFilesRoot,
+    '--port', '0'
+  ]), { targetDataFile, sourceFilesRoot: targetSourceFilesRoot, port: 0 });
   console.log('Production validation build passed.');
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
