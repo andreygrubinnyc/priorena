@@ -207,3 +207,8 @@ test('legacy regression scan catches active behavior and permits only narrow enf
   assert.ok(scanLegacyText('scripts/release/rehearse.js', `const legacyBytes = Buffer.from('{"${legacyRootCollection}": {}}\\n');\nconst releaseData = { ${legacyRootCollection}: { active: true } };`).length);
   assert.ok(scanLegacyText('target-server/example.js', catchAllScope).length);
 });
+
+test('CI fetches the known rollback commit history before running the exact-revision rehearsal', async () => {
+  const workflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'security-gate.yml'), 'utf8');
+  assert.match(workflow, /uses: actions\/checkout@[^\n]+[\s\S]{0,200}fetch-depth: 0[\s\S]{0,100}persist-credentials: false/);
+});
