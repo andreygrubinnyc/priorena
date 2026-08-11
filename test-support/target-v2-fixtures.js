@@ -240,6 +240,19 @@ function createMultiOrganizationFixture() {
         linkedWorkItemIds: ['work-item-alpha-assigned'],
         createdAt: FIXTURE_TIMESTAMP,
         updatedAt: FIXTURE_TIMESTAMP
+      },
+      {
+        id: 'milestone-beta-workspace',
+        organizationId: 'org-fixture-beta',
+        workspaceId: 'workspace-beta-shared',
+        scopeId: null,
+        title: 'BETA MILESTONE SENTINEL — fictional workspace checkpoint',
+        date: '2026-09-20',
+        status: 'At risk',
+        notes: 'Fictional Beta milestone note.',
+        linkedWorkItemIds: ['work-item-beta-assigned'],
+        createdAt: FIXTURE_TIMESTAMP,
+        updatedAt: FIXTURE_TIMESTAMP
       }
     ],
     sources: [
@@ -438,6 +451,13 @@ function createMultiOrganizationFixture() {
       logLevel: 'info'
     }
   };
+
+  const alphaWorkspace = document.workspaces.find(item => item.id === 'workspace-alpha-shared');
+  alphaWorkspace.promptOverrides = { statusDraft: 'ALPHA PROMPT SENTINEL — use only fictional Alpha records.' };
+  alphaWorkspace.draftingGuidance = 'ALPHA GUIDANCE SENTINEL — fictional drafting guidance.';
+  const betaWorkspace = document.workspaces.find(item => item.id === 'workspace-beta-shared');
+  betaWorkspace.promptOverrides = { statusDraft: 'BETA PROMPT SENTINEL — use only fictional Beta records.' };
+  betaWorkspace.draftingGuidance = 'BETA GUIDANCE SENTINEL — fictional drafting guidance.';
 
   return document;
 }
