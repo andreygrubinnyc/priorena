@@ -20,6 +20,7 @@ const {
   targetSecurityHeaders
 } = require('./http-security');
 const { createTargetServices } = require('./services');
+const { createTargetRateLimiter } = require('./rate-limit');
 const { safeDownloadName } = require('./source-files');
 
 const TARGET_API_NAMESPACE = '/api/v2';
@@ -32,18 +33,28 @@ const TARGET_MODULE_ASSETS = Object.freeze([
 
 function createTargetApiApp(options = {}) {
   const services = createTargetServices(options);
+  const logger = options.logger && typeof options.logger.error === 'function'
+    ? options.logger
+    : Object.freeze({ error: () => {} });
   const app = express();
   const wrap = handler => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
   app.disable('x-powered-by');
   app.use(targetSecurityHeaders);
   app.use(targetRequestProvenance);
+  app.use(createTargetRateLimiter(options.rateLimit));
   app.use(targetRequestLimit);
+  app.get('/', (req, res) => res.redirect(302, '/target/'));
+  app.all('/', (req, res, next) => next(methodNotAllowed()));
   const targetUiRoot = path.join(PUBLIC_ROOT, 'target');
+  app.use('/target', (req, res, next) => {
+    if (!['GET', 'HEAD'].includes(req.method)) return next(methodNotAllowed());
+    return next();
+  });
   app.use('/target', express.static(targetUiRoot, {
     dotfiles: 'deny',
     etag: false,
-    fallthrough: false,
+    fallthrough: true,
     index: 'index.html',
     maxAge: 0,
     redirect: true
@@ -51,6 +62,7 @@ function createTargetApiApp(options = {}) {
   TARGET_MODULE_ASSETS.forEach(asset => {
     app.get(asset.route, (req, res) => res.type('application/javascript').send(asset.source));
   });
+  app.use('/target/*', (req, res, next) => next(notFound()));
   app.use('/target-modules/*', (req, res, next) => next(notFound()));
   app.options(`${TARGET_API_NAMESPACE}/*`, (req, res) => res.status(204).end());
   app.use(TARGET_API_NAMESPACE, express.json({ limit: MAX_TARGET_REQUEST_BYTES, strict: true, type: 'application/json' }));
@@ -186,7 +198,11 @@ function createTargetApiApp(options = {}) {
       const safe = invalidRequest();
       return res.status(safe.statusCode).json(publicErrorBody(safe));
     }
-    console.error(`Target v2 request failed: ${String(error?.code || error?.name || 'UNKNOWN_ERROR')}`);
+    try {
+      logger.error('request_failure', { category: 'unhandled', errorCode: error?.code || error?.name || 'UNKNOWN_ERROR' });
+    } catch (_) {
+      // A bounded private log failure must not change the safe client response.
+    }
     return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
   });
 

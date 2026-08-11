@@ -1,0 +1,154 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const net = require('node:net');
+const path = require('node:path');
+const { execFileSync, spawn } = require('node:child_process');
+
+const { inspectValidatedProcess, stopValidatedProcess } = require('./process-safety');
+const { assertOutsideRepository } = require('./safety');
+
+const MAX_PROCESS_OUTPUT_BYTES = 64 * 1024;
+const LEGACY_DATA_ENV = ['PMDS', 'DATA', 'FILE'].join('_');
+const LEGACY_UPLOADS_ENV = ['PMDS', 'UPLOADS', 'DIR'].join('_');
+const LEGACY_RECOVERY_ENV = ['PMDS', 'RECOVERY', 'DIR'].join('_');
+
+function run(command, args, options = {}) {
+  return execFileSync(command, args, {
+    ...options,
+    encoding: 'utf8',
+    maxBuffer: 2 * 1024 * 1024,
+    stdio: 'pipe'
+  });
+}
+
+async function materializeRollbackApplication({ repositoryRoot, revision, destination, runner = run }) {
+  const checkoutRoot = assertOutsideRepository(destination, repositoryRoot, 'Rollback rehearsal application');
+  await fs.mkdir(checkoutRoot, { recursive: false, mode: 0o700 });
+  const archivePath = path.join(path.dirname(checkoutRoot), `${path.basename(checkoutRoot)}.tar`);
+  try {
+    runner('git', ['cat-file', '-e', `${revision}^{commit}`], { cwd: repositoryRoot });
+    runner('git', ['archive', '--format=tar', `--output=${archivePath}`, revision], { cwd: repositoryRoot });
+    runner('tar', ['-xf', archivePath, '-C', checkoutRoot]);
+  } finally {
+    await fs.unlink(archivePath).catch(() => {});
+  }
+  const expectedServerObject = runner('git', ['rev-parse', `${revision}:server.js`], { cwd: repositoryRoot }).trim();
+  const extractedServerObject = runner('git', ['hash-object', 'server.js'], { cwd: checkoutRoot }).trim();
+  if (expectedServerObject !== extractedServerObject) throw new Error('Rollback application extraction did not match the authorized revision');
+  runner('npm', ['ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'], {
+    cwd: checkoutRoot,
+    env: { ...process.env, npm_config_update_notifier: 'false' }
+  });
+  return Object.freeze({ checkoutRoot: await fs.realpath(checkoutRoot), revision, serverObject: expectedServerObject });
+}
+
+async function reserveLoopbackPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const port = server.address().port;
+  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  return port;
+}
+
+function captureBounded(stream) {
+  let bytes = 0;
+  let overflow = false;
+  const chunks = [];
+  stream.on('data', chunk => {
+    bytes += chunk.length;
+    if (bytes <= MAX_PROCESS_OUTPUT_BYTES) chunks.push(chunk);
+    else overflow = true;
+  });
+  return Object.freeze({
+    overflowed: () => overflow,
+    text: () => Buffer.concat(chunks).toString('utf8')
+  });
+}
+
+async function waitForRollbackReady(child, port, output, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  const origin = `http://127.0.0.1:${port}`;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error('Rollback application exited before becoming ready');
+    if (output.stdout.overflowed() || output.stderr.overflowed()) throw new Error('Rollback application exceeded the bounded log limit');
+    try {
+      const response = await fetch(`${origin}/api/projects`);
+      if (response.status === 200) return origin;
+    } catch (_) {
+      // The exact temporary child is still starting; retry only until the bound.
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('Rollback application did not become ready within the bounded timeout');
+}
+
+async function smokeRollbackApplication({ checkoutRoot, livePath, port = undefined }) {
+  const expectedPort = port || await reserveLoopbackPort();
+  const uploadsRoot = path.join(path.dirname(livePath), 'rollback-uploads');
+  const recoveryRoot = path.join(path.dirname(livePath), 'rollback-recovery');
+  await Promise.all([
+    fs.mkdir(uploadsRoot, { mode: 0o700 }),
+    fs.mkdir(recoveryRoot, { mode: 0o700 })
+  ]);
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: checkoutRoot,
+    env: {
+      ...process.env,
+      PORT: String(expectedPort),
+      [LEGACY_DATA_ENV]: livePath,
+      [LEGACY_UPLOADS_ENV]: uploadsRoot,
+      [LEGACY_RECOVERY_ENV]: recoveryRoot,
+      PRIORENA_DEMO_MODE: '0'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const exit = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
+  const output = { stdout: captureBounded(child.stdout), stderr: captureBounded(child.stderr) };
+  let stopped = false;
+  try {
+    const origin = await waitForRollbackReady(child, expectedPort, output);
+    const processEvidence = inspectValidatedProcess({
+      pid: child.pid,
+      expectedCwd: checkoutRoot,
+      expectedPort,
+      expectedCommandFragment: 'server.js'
+    });
+    const rootResponse = await fetch(`${origin}/`);
+    assert.equal(rootResponse.status, 200);
+    assert.match(await rootResponse.text(), /Priorena/);
+    const projectsResponse = await fetch(`${origin}/api/projects`);
+    assert.equal(projectsResponse.status, 200);
+    assert.deepEqual(await projectsResponse.json(), {});
+    if (output.stdout.overflowed() || output.stderr.overflowed()) throw new Error('Rollback application exceeded the bounded log limit');
+    await stopValidatedProcess({
+      pid: child.pid,
+      expectedCwd: checkoutRoot,
+      expectedPort,
+      expectedCommandFragment: 'server.js'
+    });
+    stopped = true;
+    const ended = await exit;
+    if (ended.signal !== 'SIGTERM' && ended.code !== 0) throw new Error('Rollback application did not stop cleanly');
+    return Object.freeze({ status: 'passed', host: '127.0.0.1', processValidated: processEvidence.commandMatched, legacyRuntimeReadOnly: true });
+  } finally {
+    if (!stopped && child.exitCode === null) {
+      child.kill('SIGTERM');
+      await Promise.race([exit, new Promise(resolve => setTimeout(resolve, 2_000))]);
+    }
+  }
+}
+
+module.exports = {
+  LEGACY_DATA_ENV,
+  MAX_PROCESS_OUTPUT_BYTES,
+  captureBounded,
+  materializeRollbackApplication,
+  reserveLoopbackPort,
+  smokeRollbackApplication,
+  waitForRollbackReady
+};

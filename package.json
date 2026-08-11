@@ -2,22 +2,35 @@
   "name": "priorena",
   "version": "0.1.0",
   "private": true,
-  "main": "server.js",
+  "main": "target-server/app.js",
   "scripts": {
     "build": "node scripts/security/build-check.js",
     "hooks:install": "node scripts/security/install-hooks.js",
     "lint": "node scripts/security/verify-syntax.js",
     "prepare": "node scripts/security/install-hooks.js",
     "security:scan": "node scripts/security/repository-scan.js --head",
-    "start": "node server.js",
-    "target:start": "node target-server/dev.js",
+    "release:legacy-scan": "node scripts/release/legacy-scan.js",
+    "release:bootstrap": "node scripts/release/bootstrap-seed.js",
+    "release:validate-seed": "node scripts/release/validate-seed.js",
+    "release:smoke": "node scripts/release/smoke.js",
+    "release:backup": "node scripts/release/backup.js",
+    "release:restore": "node scripts/release/restore.js",
+    "release:cutover-live": "node scripts/release/cutover.js",
+    "release:process": "node scripts/release/process-control.js",
+    "release:backup-rehearsal": "node scripts/release/rehearse.js --scenario backup",
+    "release:restore-rehearsal": "node scripts/release/rehearse.js --scenario restore",
+    "release:cutover-rehearsal": "node scripts/release/rehearse.js --scenario cutover",
+    "release:rollback-rehearsal": "node scripts/release/rehearse.js --scenario rollback",
+    "release:rehearse": "node scripts/release/rehearse.js --scenario all",
+    "release:validate": "npm test && npm run build && npm run release:legacy-scan && npm run release:rehearse",
+    "start": "node target-server/start.js",
+    "target:start": "node target-server/start.js",
     "test": "node --test",
     "verify:ci": "npm run verify:push",
-    "verify:commit": "node scripts/security/repository-scan.js --staged && npm run lint && npm test",
-    "verify:push": "node scripts/security/repository-scan.js --head && npm run lint && npm test && npm run build && npm audit --audit-level=moderate"
+    "verify:commit": "node scripts/security/repository-scan.js --staged && npm run lint && npm test && npm run release:legacy-scan",
+    "verify:push": "node scripts/security/repository-scan.js --head && npm run lint && npm test && npm run build && npm run release:legacy-scan && npm run release:rehearse && npm audit --audit-level=moderate"
   },
   "dependencies": {
-    "busboy": "^1.6.0",
     "express": "^4.18.4"
   }
 }
