@@ -100,7 +100,29 @@ function publicWorkItem(workItem, scopeIndex) {
   };
 }
 
-function publicMilestone(milestone, scopeIndex) {
+function milestoneTiming(date, options = {}) {
+  const referenceDate = options.referenceDate || new Date().toISOString().slice(0, 10);
+  const dueSoonDays = Number.isInteger(options.dueSoonDays) && options.dueSoonDays >= 0 ? options.dueSoonDays : 14;
+  const dueAt = Date.parse(`${date}T00:00:00.000Z`);
+  const referenceAt = Date.parse(`${referenceDate}T00:00:00.000Z`);
+  const dueInDays = Math.round((dueAt - referenceAt) / 86_400_000);
+  return {
+    referenceDate,
+    dueSoonDays,
+    dueInDays,
+    pressure: dueInDays < 0 ? 'overdue' : (dueInDays <= dueSoonDays ? 'due-soon' : 'scheduled')
+  };
+}
+
+function milestoneOptions(workspace, options = {}) {
+  const configuredDays = workspace?.settings?.milestoneDueSoonDays;
+  const dueSoonDays = Number.isInteger(configuredDays) && configuredDays >= 0 && configuredDays <= 365
+    ? configuredDays
+    : 14;
+  return { ...options, dueSoonDays };
+}
+
+function publicMilestone(milestone, scopeIndex, options = {}) {
   const scope = milestone.scopeId === null ? null : scopeIndex.get(milestone.scopeId);
   return {
     id: milestone.id,
@@ -108,8 +130,10 @@ function publicMilestone(milestone, scopeIndex) {
     workspaceId: milestone.workspaceId,
     scopeId: milestone.scopeId,
     scope: scope ? { id: scope.id, name: scope.name } : null,
+    applicability: scope ? { kind: 'scope', scopeId: scope.id, label: scope.name } : { kind: 'workspace', scopeId: null, label: 'Entire workspace' },
     title: milestone.title,
     date: milestone.date,
+    timing: milestoneTiming(milestone.date, options),
     status: milestone.status,
     notes: milestone.notes,
     linkedWorkItemIds: [...milestone.linkedWorkItemIds]
@@ -414,7 +438,7 @@ function buildToday(document, organizationId, workspaceId) {
       followUps: workItems
         .filter(item => ['open', 'waiting'].includes(item.followUp.state))
         .map(item => publicWorkItem(item, scopeIndex)),
-      milestones: milestones.map(milestone => publicMilestone(milestone, scopeIndex)),
+      milestones: milestones.map(milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace))),
       findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').map(publicFinding)
     }
   };
@@ -470,7 +494,7 @@ function listWorkspaceCollection(document, collection, organizationId, workspace
     scopes: publicScope,
     jiraEpicMappings: publicJiraEpicMapping,
     workItems: item => publicWorkItem(item, scopeIndex),
-    milestones: milestone => publicMilestone(milestone, scopeIndex),
+    milestones: milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace)),
     sources: source => publicSource(source),
     findings: publicFinding,
     evidence: publicEvidence,
@@ -481,13 +505,14 @@ function listWorkspaceCollection(document, collection, organizationId, workspace
 
 function getWorkspaceChild(document, collection, organizationId, workspaceId, childId) {
   const resolvers = createTargetResolvers(document);
+  const workspace = resolvers.resolveWorkspace(organizationId, workspaceId);
   const child = resolvers.resolveWorkspaceChild(collection, organizationId, workspaceId, childId);
   const scopeIndex = resolvers.indexes.scopes;
   const serializers = {
     scopes: publicScope,
     jiraEpicMappings: publicJiraEpicMapping,
     workItems: item => publicWorkItem(item, scopeIndex),
-    milestones: milestone => publicMilestone(milestone, scopeIndex),
+    milestones: milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace)),
     sources: source => publicSource(source, { includeContent: true }),
     findings: publicFinding,
     evidence: publicEvidence,
@@ -631,7 +656,8 @@ function buildAiContext(document, organizationId, workspaceId) {
     },
     scopes: scopes.map(publicScope),
     workItems: recordsForWorkspace(document, 'workItems', organization.id, workspace.id).map(item => publicWorkItem(item, scopeIndex)),
-    milestones: recordsForWorkspace(document, 'milestones', organization.id, workspace.id).map(milestone => publicMilestone(milestone, scopeIndex)),
+    milestones: recordsForWorkspace(document, 'milestones', organization.id, workspace.id)
+      .map(milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace))),
     sources: recordsForWorkspace(document, 'sources', organization.id, workspace.id).map(source => publicSource(source, { includeContent: true })),
     evidence: recordsForWorkspace(document, 'evidence', organization.id, workspace.id).map(publicEvidence),
     briefings,
@@ -663,8 +689,11 @@ module.exports = {
   listWorkspaces,
   normalizeSearchQuery,
   publicOrganization,
+  publicMilestone,
   publicSource,
+  publicWorkItem,
   publicWorkspace,
+  milestoneTiming,
   recordsForOrganization,
   recordsForWorkspace,
   resolveActiveContext,

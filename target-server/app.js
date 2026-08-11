@@ -2,8 +2,17 @@
 
 const express = require('express');
 
-const { methodNotAllowed, notFound, publicErrorBody, TargetApiError } = require('./errors');
+const { TargetResourceLimitError, TargetValidationError } = require('../target-model/schema');
 const {
+  invalidRequest,
+  methodNotAllowed,
+  notFound,
+  outputTooLarge,
+  publicErrorBody,
+  TargetApiError
+} = require('./errors');
+const {
+  MAX_TARGET_REQUEST_BYTES,
   targetRequestLimit,
   targetRequestProvenance,
   targetSecurityHeaders
@@ -23,10 +32,7 @@ function createTargetApiApp(options = {}) {
   app.use(targetRequestProvenance);
   app.use(targetRequestLimit);
   app.options(`${TARGET_API_NAMESPACE}/*`, (req, res) => res.status(204).end());
-  app.use(TARGET_API_NAMESPACE, (req, res, next) => {
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) throw methodNotAllowed();
-    next();
-  });
+  app.use(TARGET_API_NAMESPACE, express.json({ limit: MAX_TARGET_REQUEST_BYTES, strict: true, type: 'application/json' }));
 
   function send(result, res) {
     res.set('X-Priorena-Target-Revision', result.revision);
@@ -35,6 +41,10 @@ function createTargetApiApp(options = {}) {
 
   function jsonRoute(route, handler) {
     app.get(route, wrap(async (req, res) => send(await handler(req), res)));
+  }
+
+  function mutationRoute(method, route, handler) {
+    app[method](route, wrap(async (req, res) => send(await handler(req), res)));
   }
 
   jsonRoute(`${TARGET_API_NAMESPACE}/organizations`, () => services.listOrganizations());
@@ -47,6 +57,34 @@ function createTargetApiApp(options = {}) {
   const workspaceBase = `${TARGET_API_NAMESPACE}/organizations/:organizationId/workspaces/:workspaceId`;
   jsonRoute(`${workspaceBase}/today`, req => services.today(req.params.organizationId, req.params.workspaceId));
   jsonRoute(`${workspaceBase}/search`, req => services.search(req.params.organizationId, req.params.workspaceId, req.query.q));
+
+  mutationRoute('post', `${workspaceBase}/scopes`, req => services.createScope(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('patch', `${workspaceBase}/scopes/:scopeId`, req => services.updateScope(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
+  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/archive`, req => services.setScopeArchived(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
+  jsonRoute(`${workspaceBase}/scopes/:scopeId/jira-epic-mappings`, req => services.listScopeMappings(req.params.organizationId, req.params.workspaceId, req.params.scopeId));
+  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/jira-epic-mappings`, req => services.createJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
+  mutationRoute('patch', `${workspaceBase}/scopes/:scopeId/jira-epic-mappings/:mappingId`, req => services.updateJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.mappingId, req.body));
+
+  mutationRoute('post', `${workspaceBase}/work-items`, req => services.createWorkItem(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/work-items/bulk/preview`, req => services.previewBulkWorkItems(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/work-items/bulk/apply`, req => services.applyBulkWorkItems(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('patch', `${workspaceBase}/work-items/:workItemId`, req => services.updateWorkItem(req.params.organizationId, req.params.workspaceId, req.params.workItemId, req.body));
+  mutationRoute('post', `${workspaceBase}/work-items/:workItemId/preview`, req => services.previewWorkItemAction(req.params.organizationId, req.params.workspaceId, req.params.workItemId, req.body));
+  mutationRoute('post', `${workspaceBase}/work-items/:workItemId/apply`, req => services.applyWorkItemAction(req.params.organizationId, req.params.workspaceId, req.params.workItemId, req.body));
+
+  mutationRoute('post', `${workspaceBase}/milestones`, req => services.createMilestone(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('patch', `${workspaceBase}/milestones/:milestoneId`, req => services.updateMilestone(req.params.organizationId, req.params.workspaceId, req.params.milestoneId, req.body));
+
+  mutationRoute('post', `${workspaceBase}/sources`, req => services.captureSource(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/imports/preview`, req => services.previewImport(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/imports/apply`, req => services.applyImport(req.params.organizationId, req.params.workspaceId, req.body));
+  jsonRoute(`${workspaceBase}/findings`, req => services.listFindings(req.params.organizationId, req.params.workspaceId, req.query));
+  mutationRoute('post', `${workspaceBase}/findings/bulk-review`, req => services.reviewFindingsBulk(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/findings/:findingId/review`, req => services.reviewFinding(req.params.organizationId, req.params.workspaceId, req.params.findingId, req.body));
+  mutationRoute('post', `${workspaceBase}/proposed-changes/preview`, req => services.previewProposedChange(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/proposed-changes`, req => services.createProposedChange(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/proposed-changes/:proposedChangeId/review`, req => services.reviewProposedChange(req.params.organizationId, req.params.workspaceId, req.params.proposedChangeId, req.body));
+  mutationRoute('post', `${workspaceBase}/proposed-changes/:proposedChangeId/apply`, req => services.applyProposedChange(req.params.organizationId, req.params.workspaceId, req.params.proposedChangeId, req.body));
 
   const collections = Object.freeze({
     scopes: 'scopes',
@@ -94,10 +132,24 @@ function createTargetApiApp(options = {}) {
     }));
   }
 
-  app.use(`${TARGET_API_NAMESPACE}/*`, (req, res, next) => next(notFound()));
+  app.use(`${TARGET_API_NAMESPACE}/*`, (req, res, next) => {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next(methodNotAllowed());
+    return next(notFound());
+  });
   app.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
     if (error instanceof TargetApiError) return res.status(error.statusCode).json(publicErrorBody(error));
+    if (error instanceof TargetResourceLimitError) {
+      const safe = outputTooLarge();
+      return res.status(safe.statusCode).json(publicErrorBody(safe));
+    }
+    if (error?.type === 'entity.too.large') {
+      return res.status(413).json({ error: { code: 'REQUEST_TOO_LARGE', message: 'Request body is too large' } });
+    }
+    if (error instanceof TargetValidationError || error?.type === 'entity.parse.failed' || error instanceof SyntaxError) {
+      const safe = invalidRequest();
+      return res.status(safe.statusCode).json(publicErrorBody(safe));
+    }
     console.error(`Target v2 request failed: ${String(error?.code || error?.name || 'UNKNOWN_ERROR')}`);
     return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
   });

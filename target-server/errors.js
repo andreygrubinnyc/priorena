@@ -3,9 +3,12 @@
 const PUBLIC_ERRORS = Object.freeze({
   INVALID_ID: Object.freeze({ statusCode: 400, message: 'A valid stable identifier is required' }),
   INVALID_QUERY: Object.freeze({ statusCode: 400, message: 'The request query is invalid' }),
+  INVALID_REQUEST: Object.freeze({ statusCode: 400, message: 'The request body is invalid' }),
   METHOD_NOT_ALLOWED: Object.freeze({ statusCode: 405, message: 'The request method is not allowed' }),
   NOT_FOUND: Object.freeze({ statusCode: 404, message: 'The requested target resource was not found' }),
-  OUTPUT_TOO_LARGE: Object.freeze({ statusCode: 413, message: 'The requested target output is too large' })
+  OUTPUT_TOO_LARGE: Object.freeze({ statusCode: 413, message: 'The requested target output is too large' }),
+  PREVIEW_CONFLICT: Object.freeze({ statusCode: 409, message: 'The approved preview no longer matches the target state' }),
+  REVISION_CONFLICT: Object.freeze({ statusCode: 409, message: 'The target data changed; refresh and try again' })
 });
 
 class TargetApiError extends Error {
@@ -27,6 +30,10 @@ function invalidQuery() {
   return new TargetApiError('INVALID_QUERY');
 }
 
+function invalidRequest() {
+  return new TargetApiError('INVALID_REQUEST');
+}
+
 function notFound() {
   return new TargetApiError('NOT_FOUND');
 }
@@ -39,6 +46,14 @@ function outputTooLarge() {
   return new TargetApiError('OUTPUT_TOO_LARGE');
 }
 
+function previewConflict() {
+  return new TargetApiError('PREVIEW_CONFLICT');
+}
+
+function revisionConflict() {
+  return new TargetApiError('REVISION_CONFLICT');
+}
+
 function publicErrorBody(error) {
   const safe = error instanceof TargetApiError ? error : new TargetApiError('NOT_FOUND');
   return { error: { code: safe.code, message: safe.message } };
@@ -49,8 +64,11 @@ module.exports = {
   TargetApiError,
   invalidId,
   invalidQuery,
+  invalidRequest,
   methodNotAllowed,
   notFound,
   outputTooLarge,
-  publicErrorBody
+  previewConflict,
+  publicErrorBody,
+  revisionConflict
 };
