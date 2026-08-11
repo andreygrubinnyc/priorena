@@ -201,6 +201,8 @@ function publicBriefing(briefing, resolvers) {
     workspaces: workspaces.map(workspace => ({ id: workspace.id, name: workspace.name })),
     scopes: scopes.map(scope => ({ id: scope.id, workspaceId: scope.workspaceId, name: scope.name })),
     audienceProfile: briefing.audienceProfile,
+    briefingType: briefing.briefingType || 'status-update',
+    draftingGuidance: briefing.draftingGuidance || '',
     preferredFormats: [...briefing.preferredFormats],
     defaultSections: [...briefing.defaultSections],
     lastCommunicatedVersionId: briefing.lastCommunicatedVersionId,
@@ -301,6 +303,7 @@ function publicBriefingVersion(document, version, options = {}) {
     finalizedAt: version.finalizedAt,
     communicatedAt: version.communicatedAt
   };
+  if (version.communication) result.communication = clone(version.communication);
   if (options.includeFrozenContent) {
     result.frozenSnapshot = clone(version.frozenSnapshot);
     result.facts = clone(version.facts);
@@ -673,6 +676,7 @@ module.exports = {
   buildOrganizationArchive,
   buildPortfolio,
   buildToday,
+  assertBriefingVersionContentIsolation,
   getBriefing,
   getBriefingVersion,
   getEvidenceForSource,
@@ -689,6 +693,8 @@ module.exports = {
   listWorkspaces,
   normalizeSearchQuery,
   publicOrganization,
+  publicBriefing,
+  publicBriefingVersion,
   publicMilestone,
   publicSource,
   publicWorkItem,

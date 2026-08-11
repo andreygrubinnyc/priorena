@@ -491,9 +491,13 @@ function validateProposedChange(record, path) {
 function validateBriefing(record, path) {
   const fields = new Set([
     'id', 'organizationId', 'name', 'workspaceIds', 'scopeIds', 'audienceProfile', 'preferredFormats',
+    'defaultSections', 'briefingType', 'draftingGuidance', 'lastCommunicatedVersionId', 'archived', 'createdAt', 'updatedAt'
+  ]);
+  const required = new Set([
+    'id', 'organizationId', 'name', 'workspaceIds', 'scopeIds', 'audienceProfile', 'preferredFormats',
     'defaultSections', 'lastCommunicatedVersionId', 'archived', 'createdAt', 'updatedAt'
   ]);
-  assertAllowedKeys(record, path, fields);
+  assertAllowedKeys(record, path, fields, required);
   assertId(record.id, `${path}.id`);
   assertId(record.organizationId, `${path}.organizationId`);
   assertString(record.name, `${path}.name`, { max: 300 });
@@ -502,18 +506,33 @@ function validateBriefing(record, path) {
   assertString(record.audienceProfile, `${path}.audienceProfile`, { max: 500 });
   assertUniqueStrings(record.preferredFormats, `${path}.preferredFormats`, { allowEmpty: false, accepted: BRIEFING_FORMATS });
   assertUniqueStrings(record.defaultSections, `${path}.defaultSections`);
+  if (Object.prototype.hasOwnProperty.call(record, 'briefingType')) assertString(record.briefingType, `${path}.briefingType`, { max: 100 });
+  if (Object.prototype.hasOwnProperty.call(record, 'draftingGuidance')) assertString(record.draftingGuidance, `${path}.draftingGuidance`, { allowEmpty: true, max: 4_000 });
   assertNullableId(record.lastCommunicatedVersionId, `${path}.lastCommunicatedVersionId`);
   assertBoolean(record.archived, `${path}.archived`);
   assertTimestamp(record.createdAt, `${path}.createdAt`);
   assertTimestamp(record.updatedAt, `${path}.updatedAt`);
 }
 
+function validateBriefingCommunication(value, path) {
+  const fields = new Set(['channel', 'outputFormat', 'referenceNote', 'actor']);
+  assertAllowedKeys(value, path, fields);
+  assertString(value.channel, `${path}.channel`, { max: 100 });
+  assertEnum(value.outputFormat, `${path}.outputFormat`, BRIEFING_FORMATS);
+  assertString(value.referenceNote, `${path}.referenceNote`, { allowEmpty: true, max: 2_000 });
+  assertString(value.actor, `${path}.actor`, { max: 300 });
+}
+
 function validateBriefingVersion(record, path) {
   const fields = new Set([
     'id', 'organizationId', 'briefingId', 'workspaceIds', 'scopeIds', 'status', 'comparisonVersionId',
+    'frozenSnapshot', 'facts', 'outputs', 'createdAt', 'finalizedAt', 'communicatedAt', 'communication'
+  ]);
+  const required = new Set([
+    'id', 'organizationId', 'briefingId', 'workspaceIds', 'scopeIds', 'status', 'comparisonVersionId',
     'frozenSnapshot', 'facts', 'outputs', 'createdAt', 'finalizedAt', 'communicatedAt'
   ]);
-  assertAllowedKeys(record, path, fields);
+  assertAllowedKeys(record, path, fields, required);
   assertId(record.id, `${path}.id`);
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.briefingId, `${path}.briefingId`);
@@ -529,6 +548,10 @@ function validateBriefingVersion(record, path) {
   assertTimestamp(record.createdAt, `${path}.createdAt`);
   assertNullableTimestamp(record.finalizedAt, `${path}.finalizedAt`);
   assertNullableTimestamp(record.communicatedAt, `${path}.communicatedAt`);
+  if (Object.prototype.hasOwnProperty.call(record, 'communication') && record.communication !== null) {
+    validateBriefingCommunication(record.communication, `${path}.communication`);
+    if (record.status !== 'communicated') fail(`${path}.communication`, 'is allowed only for a Communicated Briefing Version');
+  }
   if (record.status === 'draft' && (record.finalizedAt !== null || record.communicatedAt !== null)) {
     fail(path, 'draft Briefing Versions cannot have finalized or communicated timestamps');
   }

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Priorena target workspace</title>
+  <link rel="stylesheet" href="/target/styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#target-main">Skip to operational content</a>
+  <section id="target-start" class="start-screen" aria-labelledby="target-start-title">
+    <div class="start-card">
+      <p class="eyebrow">Isolated target development entry</p>
+      <h1 id="target-start-title">Priorena</h1>
+      <p>Open the version-2 target workspace explicitly. This entry is local-only and does not use the legacy runtime.</p>
+      <button id="initialize-target" class="button primary" type="button">Initialize target</button>
+      <p class="quiet">No operational request runs before initialization.</p>
+    </div>
+  </section>
+
+  <div id="target-shell" class="shell" hidden>
+    <aside class="sidebar" aria-label="Target navigation">
+      <div class="brand" aria-label="Priorena target application">
+        <span class="brand-mark" aria-hidden="true">P</span>
+        <span><strong>Priorena</strong><small>LOCAL · TARGET</small></span>
+      </div>
+
+      <div class="context-selectors">
+        <label for="organization-select">Organization</label>
+        <select id="organization-select" disabled></select>
+        <label for="workspace-select">PM Workspace</label>
+        <select id="workspace-select" disabled></select>
+      </div>
+
+      <nav id="target-navigation" class="navigation" aria-label="Operational destinations">
+        <p class="nav-heading">Global</p>
+        <button type="button" data-view="portfolio">Portfolio</button>
+        <p class="nav-heading">Workspace</p>
+        <button type="button" data-view="today">Today</button>
+        <details open>
+          <summary>Work</summary>
+          <button type="button" data-view="work-items">Work Items</button>
+          <button type="button" data-view="follow-up">Follow-Up</button>
+          <button type="button" data-view="milestones">Milestones</button>
+        </details>
+        <details open>
+          <summary>Capture</summary>
+          <button type="button" data-view="add-source">Add Source</button>
+          <button type="button" data-view="source-library">Source Library</button>
+          <button type="button" data-view="review">Review</button>
+        </details>
+        <button type="button" data-view="search">Search</button>
+        <p class="nav-heading">Communicate</p>
+        <button type="button" data-view="briefings">Briefings</button>
+        <p class="nav-heading">Configure</p>
+        <button type="button" data-view="settings">Settings</button>
+      </nav>
+
+      <p class="local-boundary">Single-user · 127.0.0.1 · no automatic external action</p>
+    </aside>
+
+    <main id="target-main" class="main" tabindex="-1">
+      <header class="page-header">
+        <div>
+          <p id="context-breadcrumb" class="breadcrumb" aria-label="Active Organization, PM Workspace, and Scope"></p>
+          <h1 id="page-title">Portfolio</h1>
+          <p id="page-description" class="page-description"></p>
+        </div>
+        <span id="scope-indicator" class="scope-chip">All scopes</span>
+      </header>
+      <div id="target-status" class="status" role="status" aria-live="polite"></div>
+      <section id="target-view" class="view" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <dialog id="target-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+    <form method="dialog" class="dialog-card">
+      <h2 id="dialog-title">Confirm action</h2>
+      <div id="dialog-description"></div>
+      <div class="dialog-actions">
+        <button id="dialog-cancel" class="button secondary" value="cancel">Cancel</button>
+        <button id="dialog-confirm" class="button primary" value="confirm">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/target-modules/target-context-state.js"></script>
+  <script src="/target-modules/target-workflow-state.js"></script>
+  <script src="/target-modules/target-briefing-state.js"></script>
+  <script src="/target/app.js"></script>
+</body>
+</html>

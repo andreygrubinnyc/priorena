@@ -10,6 +10,7 @@
     "prepare": "node scripts/security/install-hooks.js",
     "security:scan": "node scripts/security/repository-scan.js --head",
     "start": "node server.js",
+    "target:start": "node target-server/dev.js",
     "test": "node --test",
     "verify:ci": "npm run verify:push",
     "verify:commit": "node scripts/security/repository-scan.js --staged && npm run lint && npm test",
