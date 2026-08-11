@@ -27,6 +27,16 @@ try {
   assert.equal(typeof app?.handle, 'function');
   assert.equal(isLoopbackHost('127.0.0.1:3000'), true);
   assert.equal(isLoopbackHost('example.test:3000'), false);
+
+  const targetDataFile = path.join(tempRoot, 'target-v2.json');
+  const targetSourceFilesRoot = path.join(tempRoot, 'target-source-files');
+  const { createCleanSeed } = require('../../target-model/clean-seed');
+  const { serializeTargetData } = require('../../target-model/persistence');
+  const { createTargetApiApp } = require('../../target-server/app');
+  fs.mkdirSync(targetSourceFilesRoot, { mode: 0o700 });
+  fs.writeFileSync(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });
+  const target = createTargetApiApp({ targetDataFile, sourceFilesRoot: targetSourceFilesRoot });
+  assert.equal(typeof target.app?.handle, 'function');
   console.log('Production validation build passed.');
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
