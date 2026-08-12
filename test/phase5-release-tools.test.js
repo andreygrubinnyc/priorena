@@ -16,7 +16,7 @@ const {
   restoreVerifiedBackup,
   writePrivateJson
 } = require('../scripts/release/file-operations');
-const { assertNoLiveWriter, inspectValidatedProcess } = require('../scripts/release/process-safety');
+const { MAX_PROCESS_COMMAND_BYTES, assertNoLiveWriter, inspectValidatedProcess } = require('../scripts/release/process-safety');
 const { waitForRollbackReady } = require('../scripts/release/rollback-application');
 const { executeCutoverLifecycle, safeRehearsalErrorCategory } = require('../scripts/release/rehearse');
 
@@ -339,6 +339,7 @@ test('process identity inspection requires command, working directory, PID, and 
     expectedCwd: '/tmp/fictional-release',
     expectedPort: 3100,
     expectedCommandFragment: 'target-server/start.js',
+    platform: 'darwin',
     runner
   });
   assert.equal(evidence.pid, 321);
@@ -347,8 +348,93 @@ test('process identity inspection requires command, working directory, PID, and 
     expectedCwd: '/tmp/other-release',
     expectedPort: 3100,
     expectedCommandFragment: 'target-server/start.js',
+    platform: 'darwin',
     runner
   }), /working directory/);
+
+  const linuxRunner = (name, args) => {
+    assert.notEqual(name, 'ps');
+    if (args.includes('cwd')) return { status: 0, stdout: 'p321\nfcwd\nn/tmp/fictional-release\n' };
+    return { status: 0, stdout: 'p321\nf10\nn127.0.0.1:3100\n' };
+  };
+  let procPath;
+  let maximumRequestedBytes = 0;
+  let closed = false;
+  const commandBytes = Buffer.from('/usr/bin/node\0target-server/start.js\0');
+  const linuxEvidence = inspectValidatedProcess({
+    pid: 321,
+    expectedCwd: '/tmp/fictional-release',
+    expectedPort: 3100,
+    expectedCommandFragment: 'target-server/start.js',
+    platform: 'linux',
+    processCommandIo: {
+      openSync: file => { procPath = file; return 7; },
+      readSync: (descriptor, buffer, offset, length) => {
+        assert.equal(descriptor, 7);
+        maximumRequestedBytes = Math.max(maximumRequestedBytes, length);
+        if (offset >= commandBytes.length) return 0;
+        return commandBytes.copy(buffer, offset, offset, Math.min(commandBytes.length, offset + length));
+      },
+      closeSync: descriptor => { assert.equal(descriptor, 7); closed = true; }
+    },
+    runner: linuxRunner
+  });
+  assert.equal(procPath, '/proc/321/cmdline');
+  assert.equal(maximumRequestedBytes, MAX_PROCESS_COMMAND_BYTES + 1);
+  assert.equal(closed, true);
+  assert.equal(linuxEvidence.commandMatched, true);
+  let mismatchRead = false;
+  assert.throws(() => inspectValidatedProcess({
+    pid: 321,
+    expectedCwd: '/tmp/fictional-release',
+    expectedPort: 3100,
+    expectedCommandFragment: 'different-server.js',
+    platform: 'linux',
+    processCommandIo: {
+      openSync: () => 7,
+      readSync: (descriptor, buffer, offset, length) => {
+        if (mismatchRead) return 0;
+        mismatchRead = true;
+        return commandBytes.copy(buffer, offset, 0, Math.min(commandBytes.length, length));
+      },
+      closeSync: () => {}
+    },
+    runner: linuxRunner
+  }), error => error.code === 'PROCESS_COMMAND_MISMATCH');
+  let oversizedRequestedBytes = 0;
+  let oversizedClosed = false;
+  assert.throws(() => inspectValidatedProcess({
+    pid: 321,
+    expectedCwd: '/tmp/fictional-release',
+    expectedPort: 3100,
+    expectedCommandFragment: 'target-server/start.js',
+    platform: 'linux',
+    processCommandIo: {
+      openSync: () => 7,
+      readSync: (descriptor, buffer, offset, length) => {
+        oversizedRequestedBytes += length;
+        buffer.fill(97, offset, offset + length);
+        return length;
+      },
+      closeSync: () => { oversizedClosed = true; }
+    },
+    runner: linuxRunner
+  }), error => error.code === 'PROCESS_COMMAND_STATE_UNVERIFIED');
+  assert.equal(oversizedRequestedBytes, MAX_PROCESS_COMMAND_BYTES + 1);
+  assert.equal(oversizedClosed, true);
+  assert.throws(() => inspectValidatedProcess({
+    pid: 321,
+    expectedCwd: '/tmp/fictional-release',
+    expectedPort: 3100,
+    expectedCommandFragment: 'target-server/start.js',
+    platform: 'linux',
+    processCommandIo: {
+      openSync: () => { throw new Error('/private/proc-error'); },
+      readSync: () => 0,
+      closeSync: () => {}
+    },
+    runner: linuxRunner
+  }), error => error.code === 'PROCESS_COMMAND_STATE_UNVERIFIED');
 });
 
 test('rollback diagnostics expose only bounded stage categories without paths or child output', async () => {
@@ -356,7 +442,8 @@ test('rollback diagnostics expose only bounded stage categories without paths or
     pid: 321,
     expectedCwd: '/tmp/fictional-release',
     expectedPort: 3100,
-    expectedCommandFragment: 'server.js'
+    expectedCommandFragment: 'server.js',
+    platform: 'darwin'
   };
   assert.throws(() => inspectValidatedProcess({
     ...processOptions,

@@ -1,7 +1,10 @@
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+
+const MAX_PROCESS_COMMAND_BYTES = 64 * 1024;
 
 function codedError(code, message, cause = undefined) {
   const error = new Error(message, cause ? { cause } : undefined);
@@ -33,6 +36,40 @@ function noLsofResult(result, label) {
   if (result.status !== 1 || output) throw codedError('PROCESS_RESOURCE_STATE_UNVERIFIED', `${label} could not be verified as unused`);
 }
 
+function readLinuxProcessCommand(pid, io = fs) {
+  const buffer = Buffer.allocUnsafe(MAX_PROCESS_COMMAND_BYTES + 1);
+  let descriptor;
+  let bytesRead = 0;
+  try {
+    descriptor = io.openSync(`/proc/${pid}/cmdline`, 'r');
+    while (bytesRead < buffer.length) {
+      const remaining = buffer.length - bytesRead;
+      const count = io.readSync(descriptor, buffer, bytesRead, remaining, null);
+      if (!Number.isInteger(count) || count < 0 || count > remaining) {
+        throw codedError('PROCESS_COMMAND_STATE_UNVERIFIED', 'PID command line could not be verified');
+      }
+      if (count === 0) break;
+      bytesRead += count;
+    }
+  } catch (cause) {
+    throw codedError('PROCESS_COMMAND_STATE_UNVERIFIED', 'PID command line could not be verified', cause);
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        io.closeSync(descriptor);
+      } catch (cause) {
+        throw codedError('PROCESS_COMMAND_STATE_UNVERIFIED', 'PID command line could not be verified', cause);
+      }
+    }
+  }
+  if (bytesRead === 0 || bytesRead > MAX_PROCESS_COMMAND_BYTES) {
+    throw codedError('PROCESS_COMMAND_STATE_UNVERIFIED', 'PID command line could not be verified');
+  }
+  const argv = buffer.subarray(0, bytesRead).toString('utf8').split('\0').filter(Boolean);
+  if (argv.length === 0) throw codedError('PROCESS_COMMAND_STATE_UNVERIFIED', 'PID command line could not be verified');
+  return argv;
+}
+
 function assertNoLiveWriter({ expectedStoppedPid, expectedPort, livePath, runner = command }) {
   if (expectedStoppedPid !== 'none') {
     const pid = requirePid(expectedStoppedPid);
@@ -50,13 +87,26 @@ function assertNoLiveWriter({ expectedStoppedPid, expectedPort, livePath, runner
   return Object.freeze({ expectedStoppedPid, expectedPort: port, livePath: resolvedLive, verifiedStopped: true });
 }
 
-function inspectValidatedProcess({ pid, expectedCwd, expectedPort, expectedCommandFragment, runner = command }) {
+function inspectValidatedProcess({
+  pid,
+  expectedCwd,
+  expectedPort,
+  expectedCommandFragment,
+  platform = process.platform,
+  processCommandIo = fs,
+  runner = command
+}) {
   const validatedPid = requirePid(pid);
   const port = requirePort(expectedPort);
   const expectedDirectory = path.resolve(expectedCwd);
   if (typeof expectedCommandFragment !== 'string' || expectedCommandFragment.length < 3) throw new TypeError('Expected command fragment is required');
-  const processResult = runner('ps', ['-ww', '-p', String(validatedPid), '-o', 'args=', '-o', 'comm=']);
-  if (processResult.status !== 0 || !String(processResult.stdout).includes(expectedCommandFragment)) throw codedError('PROCESS_COMMAND_MISMATCH', 'PID command does not match the expected Priorena command');
+  const commandMatched = platform === 'linux'
+    ? readLinuxProcessCommand(validatedPid, processCommandIo).some(argument => argument.includes(expectedCommandFragment))
+    : (() => {
+      const processResult = runner('ps', ['-ww', '-p', String(validatedPid), '-o', 'args=', '-o', 'comm=']);
+      return processResult.status === 0 && String(processResult.stdout).includes(expectedCommandFragment);
+    })();
+  if (!commandMatched) throw codedError('PROCESS_COMMAND_MISMATCH', 'PID command does not match the expected Priorena command');
   const cwdResult = runner('lsof', ['-a', '-p', String(validatedPid), '-d', 'cwd', '-Fn']);
   if (cwdResult.status !== 0 || !String(cwdResult.stdout).split(/\r?\n/).includes(`n${expectedDirectory}`)) throw codedError('PROCESS_CWD_MISMATCH', 'PID working directory does not match the expected release checkout');
   const portResult = runner('lsof', ['-nP', '-a', '-p', String(validatedPid), `-iTCP:${port}`, '-sTCP:LISTEN', '-Fn']);
@@ -91,11 +141,13 @@ async function stopValidatedProcess(options) {
 }
 
 module.exports = {
+  MAX_PROCESS_COMMAND_BYTES,
   assertNoLiveWriter,
   codedError,
   command,
   inspectValidatedProcess,
   noLsofResult,
+  readLinuxProcessCommand,
   requirePid,
   requirePort,
   stopValidatedProcess
