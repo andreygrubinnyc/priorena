@@ -9,7 +9,7 @@ const test = require('node:test');
 const { createCleanSeed } = require('../target-model/clean-seed');
 const { serializeTargetData } = require('../target-model/persistence');
 const { createTargetApiApp } = require('../target-server/app');
-const { LOOPBACK_HOST, parseArguments } = require('../target-server/dev');
+const { LOOPBACK_HOST, parseArguments } = require('../target-server/start');
 const { requestApp } = require('../test-support/target-api-harness');
 const {
   categorizeVersions,
@@ -32,14 +32,15 @@ function functionSlice(client, name, nextName) {
   return client.slice(start, end);
 }
 
-test('target development launcher requires explicit paths and binds only to loopback', () => {
+test('target release launcher requires explicit private paths and binds only to loopback', () => {
   assert.equal(LOOPBACK_HOST, '127.0.0.1');
   assert.throws(() => parseArguments([]), /requires explicit/);
   assert.throws(() => parseArguments(['--data-file', 'target.json']), /requires explicit/);
-  assert.throws(() => parseArguments(['--data-file', 'target.json', '--source-files-root', 'sources', '--port', '70000']), /port is invalid/);
-  const parsed = parseArguments(['--data-file', 'target.json', '--source-files-root', 'sources', '--port', '0']);
+  assert.throws(() => parseArguments(['--data-file', 'target.json', '--source-files-root', 'sources', '--log-file', 'target.log', '--port', '70000']), /port is invalid/);
+  const parsed = parseArguments(['--data-file', 'target.json', '--source-files-root', 'sources', '--log-file', 'target.log', '--port', '0']);
   assert.equal(parsed.targetDataFile, path.join(process.cwd(), 'target.json'));
   assert.equal(parsed.sourceFilesRoot, path.join(process.cwd(), 'sources'));
+  assert.equal(parsed.logFile, path.join(process.cwd(), 'target.log'));
   assert.equal(parsed.port, 0);
 });
 
@@ -160,7 +161,7 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
   assert.doesNotMatch(css, /min-width:\s*[7-9]\d\dpx/);
 });
 
-test('target UI is registered only on the isolated target app without mutating target data', async t => {
+test('target UI is the release root and does not mutate target data', async t => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase4-shell-'));
   const targetDataFile = path.join(tempRoot, 'target-v2.json');
   const sourceFilesRoot = path.join(tempRoot, 'source-files');
@@ -173,6 +174,9 @@ test('target UI is registered only on the isolated target app without mutating t
   });
   assert.equal(typeof app.handle, 'function');
   assert.equal(app._router.stack.some(layer => String(layer.regexp).includes('target')), true);
+  const rootResponse = await requestApp(app, { url: '/' });
+  assert.equal(rootResponse.status, 302);
+  assert.equal(rootResponse.headers.location, '/target/');
   for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-briefing-state.js']) {
     const response = await requestApp(app, { url: `/target-modules/${moduleName}` });
     assert.equal(response.status, 200);
@@ -182,9 +186,4 @@ test('target UI is registered only on the isolated target app without mutating t
   assert.equal((await requestApp(app, { url: '/target-modules/app.js' })).status, 404);
   assert.doesNotMatch(await source('target-server/app.js'), /\.sendFile\s*\(/);
   assert.deepEqual(await fs.readFile(targetDataFile), before);
-
-  const legacyServer = await source('server.js');
-  const legacyEntry = await source('public/index.html');
-  assert.doesNotMatch(legacyServer, /target-server\/dev|public\/target/);
-  assert.doesNotMatch(legacyEntry, /\/target\//);
 });
