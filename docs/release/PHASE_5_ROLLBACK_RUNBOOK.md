@@ -8,6 +8,7 @@ Rollback is a one-attempt response to a failed authorized cutover. It restores t
 - Confirm the verified backup path, SHA-256, byte count, and mode match the private release manifest.
 - Confirm the current live checksum is the value observed after the failed replacement/start/smoke step.
 - Confirm the rollback application checkout is still the prepared detached copy of `316759d9073a004e8478d027d93df268b3827fdb`.
+- Confirm `ps` and `lsof` are available for fail-closed process, file-holder, and loopback-port validation.
 - Preserve the staged seed, backup, cutover record, and logs.
 
 Abort and request direction if the backup checksum differs, the target process cannot be safely identified, or an unrelated process owns the expected port.

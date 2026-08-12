@@ -24,6 +24,7 @@ Before PR readiness, `npm run release:rollback-rehearsal` separately extracts th
 - Confirm every private path is explicit and outside Git where required.
 - Confirm the backup directory is a private non-symlink directory with sufficient free space.
 - Confirm the rollback checkout is present, clean, and still starts against a temporary legacy-shaped copy.
+- Confirm `ps` and `lsof` are available for fail-closed PID, working-directory, file-holder, and loopback-port validation.
 - Confirm no unexpected process owns the expected port.
 - Abort on any mismatch before stopping or writing.
 

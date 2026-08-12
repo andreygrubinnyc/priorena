@@ -212,3 +212,11 @@ test('CI fetches the known rollback commit history before running the exact-revi
   const workflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'security-gate.yml'), 'utf8');
   assert.match(workflow, /uses: actions\/checkout@[^\n]+[\s\S]{0,200}fetch-depth: 0[\s\S]{0,100}persist-credentials: false/);
 });
+
+test('CI provides fail-closed process inspection before the release rehearsal', async () => {
+  const workflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'security-gate.yml'), 'utf8');
+  const prerequisite = workflow.indexOf('name: Ensure release process inspection is available');
+  const gate = workflow.indexOf('name: Run the complete security gate');
+  assert.ok(prerequisite > -1 && prerequisite < gate);
+  assert.match(workflow, /if ! command -v lsof[^\n]+[\s\S]{0,160}apt-get install --yes --no-install-recommends lsof[\s\S]{0,100}command -v lsof/);
+});
