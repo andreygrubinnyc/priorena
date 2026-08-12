@@ -17,7 +17,8 @@ const {
   writePrivateJson
 } = require('../scripts/release/file-operations');
 const { assertNoLiveWriter, inspectValidatedProcess } = require('../scripts/release/process-safety');
-const { executeCutoverLifecycle } = require('../scripts/release/rehearse');
+const { waitForRollbackReady } = require('../scripts/release/rollback-application');
+const { executeCutoverLifecycle, safeRehearsalErrorCategory } = require('../scripts/release/rehearse');
 
 const FIXED_TIME = new Date('2026-08-11T12:00:00.000Z');
 const RELEASE_COMMIT = 'a'.repeat(40);
@@ -348,4 +349,54 @@ test('process identity inspection requires command, working directory, PID, and 
     expectedCommandFragment: 'target-server/start.js',
     runner
   }), /working directory/);
+});
+
+test('rollback diagnostics expose only bounded stage categories without paths or child output', async () => {
+  const processOptions = {
+    pid: 321,
+    expectedCwd: '/tmp/fictional-release',
+    expectedPort: 3100,
+    expectedCommandFragment: 'server.js'
+  };
+  assert.throws(() => inspectValidatedProcess({
+    ...processOptions,
+    runner: () => ({ status: 1, stdout: '', stderr: '/private/runner-output' })
+  }), error => error.code === 'PROCESS_COMMAND_MISMATCH');
+  assert.throws(() => inspectValidatedProcess({
+    ...processOptions,
+    runner: (name, args) => name === 'ps'
+      ? { status: 0, stdout: 'node server.js' }
+      : args.includes('cwd')
+        ? { status: 1, stdout: 'n/private/cwd' }
+        : { status: 0, stdout: 'p321\nn127.0.0.1:3100' }
+  }), error => error.code === 'PROCESS_CWD_MISMATCH');
+  assert.throws(() => inspectValidatedProcess({
+    ...processOptions,
+    runner: (name, args) => name === 'ps'
+      ? { status: 0, stdout: 'node server.js' }
+      : args.includes('cwd')
+        ? { status: 0, stdout: 'p321\nn/tmp/fictional-release' }
+        : { status: 1, stdout: 'n/private/socket' }
+  }), error => error.code === 'PROCESS_LOOPBACK_PORT_MISMATCH');
+
+  const output = {
+    stdout: { overflowed: () => false },
+    stderr: { overflowed: () => false },
+    spawnError: () => undefined
+  };
+  await assert.rejects(waitForRollbackReady({ exitCode: 1 }, 3100, output, 1), error => error.code === 'ROLLBACK_START_EXITED');
+  assert.equal(safeRehearsalErrorCategory(Object.assign(new Error('/private/path'), { code: 'PROCESS_CWD_MISMATCH' })), 'PROCESS_CWD_MISMATCH');
+  assert.equal(safeRehearsalErrorCategory(Object.assign(new Error('/private/path'), { code: 'ROLLBACK_PRIVATE_RUNTIME_CHECKSUM_ABC123' })), 'REHEARSAL_ERROR');
+  assert.equal(safeRehearsalErrorCategory(Object.assign(new Error('/private/path'), { code: 'ENOENT' })), 'REHEARSAL_ERROR');
+
+  const lifecycle = await executeCutoverLifecycle({
+    smokeStaged: async () => ({ status: 'passed' }),
+    replace: async () => ({ backupPath: '/fictional/backup' }),
+    startTarget: async () => { throw Object.assign(new Error('/private/path'), { code: 'ROLLBACK_PRIVATE_RUNTIME_CHECKSUM_ABC123' }); },
+    smokeTarget: async () => ({ status: 'passed' }),
+    stopTarget: async () => {},
+    restore: async () => ({ status: 'verified' }),
+    smokeRollback: async () => ({ status: 'passed' })
+  });
+  assert.equal(lifecycle.failureCategory, 'REHEARSAL_ERROR');
 });

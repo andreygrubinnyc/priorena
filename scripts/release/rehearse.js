@@ -17,11 +17,15 @@ const {
   restoreVerifiedBackup
 } = require('./file-operations');
 const { materializeRollbackApplication, smokeRollbackApplication } = require('./rollback-application');
+const { safeReleaseErrorCategory } = require('./release-diagnostics');
 const { smokeStartedTarget, smokeTarget, stopStartedTarget } = require('./smoke');
 
 const ROLLBACK_REVISION = '316759d9073a004e8478d027d93df268b3827fdb';
 const REHEARSAL_TIMESTAMP = new Date('2026-08-11T12:00:00.000Z');
 const SCENARIOS = new Set(['all', 'backup', 'restore', 'cutover', 'rollback']);
+function safeRehearsalErrorCategory(error) {
+  return safeReleaseErrorCategory(error);
+}
 
 function parseScenario(argv) {
   if (argv.length === 0) return 'all';
@@ -66,7 +70,7 @@ async function executeCutoverLifecycle(steps, options = {}) {
       cutoverAttempts,
       rollbackAttempts,
       secondAutomaticCutoverAttempts: 0,
-      failureCategory: error.code || error.name || 'POST_CUTOVER_FAILURE',
+      failureCategory: safeRehearsalErrorCategory(error),
       rollback,
       rollbackSmoke
     });
@@ -226,7 +230,7 @@ async function run(argv = process.argv.slice(2)) {
 
 if (require.main === module) {
   run().catch(error => {
-    process.stderr.write(`Release rehearsal failed: ${String(error?.code || error?.name || 'REHEARSAL_ERROR')}\n`);
+    process.stderr.write(`Release rehearsal failed: ${safeRehearsalErrorCategory(error)}\n`);
     process.exitCode = 1;
   });
 }
@@ -238,5 +242,6 @@ module.exports = {
   executeCutoverLifecycle,
   parseScenario,
   run,
-  runRehearsal
+  runRehearsal,
+  safeRehearsalErrorCategory
 };
