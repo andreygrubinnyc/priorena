@@ -31,6 +31,6 @@
     "verify:push": "node scripts/security/repository-scan.js --head && npm run lint && npm test && npm run build && npm run release:legacy-scan && npm run release:rehearse && npm audit --audit-level=moderate"
   },
   "dependencies": {
-    "express": "^4.18.4"
+    "express": "^5.2.1"
   }
 }
