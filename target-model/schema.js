@@ -1,12 +1,13 @@
 const crypto = require('node:crypto');
 
-const TARGET_SCHEMA_VERSION = 2;
+const TARGET_SCHEMA_VERSION = 3;
 const UNASSIGNED_SCOPE = Object.freeze({ scopeId: null, label: 'Unassigned' });
 
 const ROOT_COLLECTIONS = Object.freeze([
   'organizations',
   'workspaces',
   'scopes',
+  'features',
   'jiraEpicMappings',
   'workItems',
   'milestones',
@@ -32,7 +33,7 @@ const ROOT_FIELDS = new Set([
 ]);
 
 const RESERVED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-const ITEM_TYPES = new Set(['Story', 'Feature', 'Task', 'Bug', 'Other', 'Unknown']);
+const ITEM_TYPES = new Set(['Story', 'Task', 'Bug', 'Other', 'Unknown']);
 const FOLLOW_UP_STATES = new Set(['none', 'open', 'waiting', 'resolved']);
 const MAPPING_STATUSES = new Set(['pending', 'verified', 'inactive']);
 const FINDING_REVIEW_STATUSES = new Set(['pending', 'accepted', 'rejected']);
@@ -48,6 +49,7 @@ const FORBIDDEN_SCOPE_NAMES = new Set(['unassigned', 'miscellaneous / no epic', 
 const WORKSPACE_OWNED_AUDIT_ENTITY_TYPES = new Set([
   'workspace',
   'scope',
+  'feature',
   'jiraEpicMapping',
   'workItem',
   'milestone',
@@ -61,6 +63,7 @@ const ENTITY_PREFIXES = Object.freeze({
   organization: 'org',
   workspace: 'workspace',
   scope: 'scope',
+  feature: 'feature',
   jiraEpicMapping: 'jira-mapping',
   workItem: 'work-item',
   milestone: 'milestone',
@@ -319,6 +322,17 @@ function validateScope(record, path) {
   assertTimestamp(record.updatedAt, `${path}.updatedAt`);
 }
 
+function validateFeature(record, path) {
+  const fields = new Set(['id', 'organizationId', 'workspaceId', 'scopeId', 'name', 'description']);
+  assertAllowedKeys(record, path, fields);
+  assertId(record.id, `${path}.id`);
+  assertId(record.organizationId, `${path}.organizationId`);
+  assertId(record.workspaceId, `${path}.workspaceId`);
+  assertId(record.scopeId, `${path}.scopeId`);
+  assertString(record.name, `${path}.name`, { max: 200 });
+  assertString(record.description, `${path}.description`, { allowEmpty: true, max: 4_000 });
+}
+
 function validateJiraEpicMapping(record, path) {
   const fields = new Set([
     'id', 'organizationId', 'workspaceId', 'scopeId', 'jiraProjectKey', 'jiraEpicKey',
@@ -356,7 +370,7 @@ function validateFollowUp(value, path) {
 
 function validateWorkItem(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'workspaceId', 'scopeId', 'jiraId', 'jiraKey', 'itemType',
+    'id', 'organizationId', 'workspaceId', 'scopeId', 'featureId', 'jiraId', 'jiraKey', 'itemType',
     'summary', 'description', 'canonicalStatus', 'currentStateProvenance', 'currentStateConfidence',
     'lastCapturedCommentAt', 'sourceStatus', 'assignee', 'sprint', 'labels', 'dependencies',
     'notes', 'archived', 'followUp', 'createdAt', 'updatedAt'
@@ -366,6 +380,7 @@ function validateWorkItem(record, path) {
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.workspaceId, `${path}.workspaceId`);
   assertNullableId(record.scopeId, `${path}.scopeId`);
+  assertNullableId(record.featureId, `${path}.featureId`);
   assertNullableString(record.jiraId, `${path}.jiraId`, { max: 200 });
   assertNullableString(record.jiraKey, `${path}.jiraKey`, { max: 100 });
   assertEnum(record.itemType, `${path}.itemType`, ITEM_TYPES);
@@ -600,6 +615,7 @@ const VALIDATORS = Object.freeze({
   organizations: validateOrganization,
   workspaces: validateWorkspace,
   scopes: validateScope,
+  features: validateFeature,
   jiraEpicMappings: validateJiraEpicMapping,
   workItems: validateWorkItem,
   milestones: validateMilestone,
@@ -651,6 +667,14 @@ function requireScope(indexes, organizationId, workspaceId, scopeId, path) {
   return scope;
 }
 
+function requireFeature(indexes, organizationId, workspaceId, scopeId, featureId, path) {
+  const feature = indexes.features.get(featureId);
+  if (!feature || feature.organizationId !== organizationId || feature.workspaceId !== workspaceId || feature.scopeId !== scopeId) {
+    fail(path, 'must reference a Feature with matching Organization, Workspace, and Scope parents');
+  }
+  return feature;
+}
+
 function requireWorkItem(indexes, organizationId, workspaceId, workItemId, path) {
   const workItem = indexes.workItems.get(workItemId);
   if (!workItem || workItem.organizationId !== organizationId || workItem.workspaceId !== workspaceId) {
@@ -676,6 +700,12 @@ function validateParentRelationships(document, indexes) {
     requireWorkspace(indexes, scope.organizationId, scope.workspaceId, `scopes[${index}].workspaceId`);
   });
 
+  document.features.forEach((feature, index) => {
+    const path = `features[${index}]`;
+    requireWorkspace(indexes, feature.organizationId, feature.workspaceId, `${path}.workspaceId`);
+    requireScope(indexes, feature.organizationId, feature.workspaceId, feature.scopeId, `${path}.scopeId`);
+  });
+
   const activeJiraMappings = new Set();
   document.jiraEpicMappings.forEach((mapping, index) => {
     const path = `jiraEpicMappings[${index}]`;
@@ -695,6 +725,10 @@ function validateParentRelationships(document, indexes) {
     requireWorkspace(indexes, workItem.organizationId, workItem.workspaceId, `${path}.workspaceId`);
     if (workItem.scopeId !== null) {
       requireScope(indexes, workItem.organizationId, workItem.workspaceId, workItem.scopeId, `${path}.scopeId`);
+    }
+    if (workItem.featureId !== null) {
+      if (workItem.scopeId === null) fail(`${path}.featureId`, 'requires a non-null Scope');
+      requireFeature(indexes, workItem.organizationId, workItem.workspaceId, workItem.scopeId, workItem.featureId, `${path}.featureId`);
     }
     workItem.dependencies.forEach((dependencyId, dependencyIndex) => {
       if (dependencyId === workItem.id) fail(`${path}.dependencies[${dependencyIndex}]`, 'must not reference the Work Item itself');
@@ -831,6 +865,7 @@ function validateParentRelationships(document, indexes) {
     organization: indexes.organizations,
     workspace: indexes.workspaces,
     scope: indexes.scopes,
+    feature: indexes.features,
     jiraEpicMapping: indexes.jiraEpicMappings,
     workItem: indexes.workItems,
     milestone: indexes.milestones,

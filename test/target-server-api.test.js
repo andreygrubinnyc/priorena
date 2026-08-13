@@ -14,7 +14,7 @@ const { PUBLIC_ERRORS } = require('../target-server/errors');
 const { MAX_SOURCE_FILE_BYTES } = require('../target-server/source-files');
 const { EXPECT_TARGET_ABSENT, writeTargetData } = require('../target-model/persistence');
 const { validateTargetData } = require('../target-model/schema');
-const { createMultiOrganizationFixture } = require('../test-support/target-v2-fixtures');
+const { createMultiOrganizationFixture } = require('../test-support/target-v3-fixtures');
 
 const ALPHA = Object.freeze({
   organizationId: 'org-fixture-alpha',
@@ -115,7 +115,7 @@ function prepareInitialFixture() {
 async function createHarness(t, mutate = () => {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-api-'));
   const sourceFilesRoot = path.join(root, 'source-files');
-  const targetDataFile = path.join(root, 'target-v2.json');
+  const targetDataFile = path.join(root, 'target-v3.json');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   const document = prepareInitialFixture();
 
@@ -154,8 +154,8 @@ function assertNoSentinel(value, sentinels) {
 }
 
 test('target services require explicit isolated data and Source-file paths', () => {
-  assert.throws(() => createTargetApiApp({}), /explicit version-2 data-file path/);
-  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v2.json' }), /explicit safe root/);
+  assert.throws(() => createTargetApiApp({}), /explicit schema-v3 data-file path/);
+  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v3.json' }), /explicit safe root/);
   const source = require('node:fs').readFileSync(path.join(__dirname, '..', 'target-server', 'services.js'), 'utf8');
   assert.doesNotMatch(source, /PMDS_DATA_FILE|PMDS_UPLOADS_DIR|\.priorena-data|pilot-data\.json/);
   assert.doesNotMatch(source, /require\(['"]\.\.\/server['"]\)/);
@@ -765,7 +765,7 @@ test('target API retains loopback, headers, method, request-size, and revision p
   assert.equal(response.status, 413);
 });
 
-test('all Phase 2 API and service reads leave the version-2 target file unchanged', async t => {
+test('all read-only API and service operations leave the schema-v3 target file unchanged', async t => {
   const { app, services, targetDataFile } = await createHarness(t);
   const before = await fs.readFile(targetDataFile);
   await requestApp(app, { url: `${TARGET_API_NAMESPACE}/organizations/${ALPHA.organizationId}/portfolio` });

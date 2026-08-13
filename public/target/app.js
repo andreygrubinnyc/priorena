@@ -50,6 +50,8 @@
     briefings: { tab: 'prepare', definitions: [], revision: null, scopesByWorkspace: new Map(), activeDefinitionId: null, activeVersionId: null, renderGeneration: 0 },
     activeView: 'portfolio',
     scopeFilter: 'all',
+    featureFilter: 'all',
+    itemTypeFilter: 'all',
     selectedWorkItemIds: new Set(),
     generation: 0
   };
@@ -174,9 +176,20 @@
     return state.workflow?.scopes?.find(item => item.id === scopeId)?.name || 'Scope unavailable';
   }
 
+  function featureName(featureId) {
+    if (featureId === null) return 'No Feature';
+    return state.workflow?.features?.find(item => item.id === featureId)?.name || 'Feature unavailable';
+  }
+
+  function featureOptionLabel(feature) {
+    return `${feature.name} · ${feature.id}`;
+  }
+
   function clearOperationalUi(message = 'Select a valid context to continue.') {
     state.workflow = null;
     state.scopeFilter = 'all';
+    state.featureFilter = 'all';
+    state.itemTypeFilter = 'all';
     state.selectedWorkItemIds.clear();
     elements.view.replaceChildren(empty(message));
     elements.scope.textContent = 'All scopes';
@@ -345,8 +358,14 @@
 
   function visibleWorkItems() {
     const items = state.workflow?.workItems || [];
-    return items.filter(item => state.scopeFilter === 'all' ||
-      (state.scopeFilter === 'unassigned' ? item.scopeId === null : item.scopeId === state.scopeFilter));
+    return items.filter(item => {
+      const scopeMatches = state.scopeFilter === 'all' ||
+        (state.scopeFilter === 'unassigned' ? item.scopeId === null : item.scopeId === state.scopeFilter);
+      const featureMatches = state.featureFilter === 'all' ||
+        (state.featureFilter === 'none' ? item.featureId === null : item.featureId === state.featureFilter);
+      const typeMatches = state.itemTypeFilter === 'all' || item.itemType === state.itemTypeFilter;
+      return scopeMatches && featureMatches && typeMatches;
+    });
   }
 
   function scopeFilterControl(renderFilteredView = renderWorkItems) {
@@ -354,6 +373,10 @@
       id: 'scope-filter',
       on: { change: event => {
         state.scopeFilter = event.target.value;
+        if (state.scopeFilter === 'unassigned' || (state.featureFilter !== 'all' && state.featureFilter !== 'none' &&
+          state.workflow?.features?.find(feature => feature.id === state.featureFilter)?.scopeId !== state.scopeFilter && state.scopeFilter !== 'all')) {
+          state.featureFilter = 'all';
+        }
         state.selectedWorkItemIds.clear();
         updateBreadcrumb();
         renderFilteredView();
@@ -366,14 +389,47 @@
     return node('label', {}, [node('span', { text: 'Scope' }), select]);
   }
 
-  async function previewScopeAssignment(scopeId) {
+  function featureFilterControl() {
+    const features = (state.workflow?.features || []).filter(feature => state.scopeFilter === 'all' || feature.scopeId === state.scopeFilter);
+    const select = node('select', {
+      id: 'feature-filter',
+      on: { change: event => {
+        state.featureFilter = event.target.value;
+        state.selectedWorkItemIds.clear();
+        renderWorkItems();
+      } }
+    }, [
+      option('all', 'All Features', state.featureFilter === 'all'),
+      option('none', 'No Feature', state.featureFilter === 'none'),
+      ...features.map(feature => option(feature.id, featureOptionLabel(feature), state.featureFilter === feature.id))
+    ]);
+    return node('label', {}, [node('span', { text: 'Feature' }), select]);
+  }
+
+  function itemTypeFilterControl() {
+    const select = node('select', {
+      id: 'item-type-filter',
+      on: { change: event => {
+        state.itemTypeFilter = event.target.value;
+        state.selectedWorkItemIds.clear();
+        renderWorkItems();
+      } }
+    }, ['all', 'Story', 'Task', 'Bug', 'Other', 'Unknown'].map(value => option(value, value === 'all' ? 'All Work Item types' : value, state.itemTypeFilter === value)));
+    return node('label', {}, [node('span', { text: 'Type' }), select]);
+  }
+
+  async function previewScopeAssignment(scopeId, featureId = 'none') {
     if (!state.selectedWorkItemIds.size) {
       setStatus('Select at least one Work Item.', 'error');
       return;
     }
     const token = workspaceOperationToken();
     const selectedWorkItemIds = [...state.selectedWorkItemIds];
-    const action = { type: 'assign-scope', scopeId: scopeId === 'unassigned' ? null : scopeId };
+    const action = {
+      type: 'assign-scope',
+      scopeId: scopeId === 'unassigned' ? null : scopeId,
+      featureId: featureId === 'none' || scopeId === 'unassigned' ? null : featureId
+    };
     setStatus('Preparing exact Scope changes…');
     try {
       const result = await workflowApi.previewBulkWorkItems(token.organizationId, token.workspaceId, {
@@ -382,12 +438,12 @@
       });
       if (!workspaceOperationCurrent(token)) return;
       const rows = result.preview.rows.map(row => node('p', {
-        text: `${row.workItemId}: ${row.before === null ? 'Unassigned' : scopeName(row.before)} → ${row.after === null ? 'Unassigned' : scopeName(row.after)}`
+        text: `${row.workItemId}: ${row.before === null ? 'Unassigned' : scopeName(row.before)} → ${row.after === null ? 'Unassigned' : scopeName(row.after)}; Feature ${featureName(row.featureChange?.beforeFeatureId || null)} → ${featureName(row.featureChange?.afterFeatureId || null)} (${row.featureChange?.effect || 'unchanged'})`
       }));
       const approved = await confirmAction(
-        'Confirm Scope assignment',
+        'Confirm Scope and Feature assignment',
         [node('p', { text: 'The server reconstructed these exact current values. No change is applied until confirmation.' }), ...rows],
-        'Assign scope'
+        'Assign Scope and Feature'
       );
       if (!approved || !workspaceOperationCurrent(token)) {
         if (!workspaceOperationCurrent(token)) return;
@@ -421,12 +477,26 @@
       option('unassigned', 'Unassigned'),
       ...(state.workflow?.scopes || []).filter(scope => !scope.archived).map(scope => option(scope.id, scope.name))
     ]);
+    const featureAssignment = node('select', { id: 'feature-assignment' });
+    const refreshFeatureAssignment = () => {
+      const scopeId = assignment.value;
+      featureAssignment.replaceChildren(
+        option('none', 'No Feature'),
+        ...(state.workflow?.features || []).filter(feature => feature.scopeId === scopeId).map(feature => option(feature.id, featureOptionLabel(feature)))
+      );
+      featureAssignment.disabled = scopeId === 'unassigned';
+    };
+    assignment.addEventListener('change', refreshFeatureAssignment);
+    refreshFeatureAssignment();
     const items = visibleWorkItems();
     elements.view.replaceChildren(
       node('div', { className: 'filters' }, [
         scopeFilterControl(),
-        node('label', {}, [node('span', { text: 'Assign selected to' }), assignment]),
-        node('button', { className: 'button primary', type: 'button', text: 'Preview Scope assignment', on: { click: () => previewScopeAssignment(assignment.value) } })
+        featureFilterControl(),
+        itemTypeFilterControl(),
+        node('label', {}, [node('span', { text: 'Assign selected Scope' }), assignment]),
+        node('label', {}, [node('span', { text: 'Assign selected Feature' }), featureAssignment]),
+        node('button', { className: 'button primary', type: 'button', text: 'Preview Scope and Feature assignment', on: { click: () => previewScopeAssignment(assignment.value, featureAssignment.value) } })
       ]),
       recordList(items, item => {
         const checkbox = node('input', {
@@ -439,8 +509,8 @@
           } }
         });
         return [
-          node('div', { className: 'row-head' }, [node('span', {}, [checkbox, ' ', node('strong', { text: item.summary })]), badge(item.scope?.name || 'Unassigned')]),
-          node('p', { className: 'meta', text: `${item.itemType} · ${item.canonicalStatus} · ${item.assignee || 'No assignee captured'}` }),
+          node('div', { className: 'row-head' }, [node('span', {}, [checkbox, ' ', node('strong', { text: item.summary })]), node('span', {}, [badge(item.scope?.name || 'Unassigned'), ' ', badge(item.feature?.name || 'No Feature')])]),
+          node('p', { className: 'meta', text: `${item.itemType} · ${item.canonicalStatus} · ${item.assignee || 'No assignee captured'} · Feature: ${item.feature?.name || 'No Feature'}` }),
           node('p', { className: 'meta', text: `Current-state provenance: ${item.currentStateProvenance}` })
         ];
       }, 'No Work Items match this Scope filter.')
@@ -1110,16 +1180,125 @@
     else await renderVersionPlacement(state.briefings.tab === 'history', renderGeneration);
   }
 
+  async function controlledRename(route, entityLabel, currentName, nextName, onApplied) {
+    const name = nextName.trim();
+    if (!name || name === currentName) {
+      setStatus(`Enter a different ${entityLabel} name.`, 'error');
+      return;
+    }
+    const token = workspaceOperationToken();
+    try {
+      const preview = await requestJson(`${route}/rename/preview`, mutationOptions({ name }));
+      if (!workspaceOperationCurrent(token)) return;
+      const approved = await confirmAction(
+        `Rename ${entityLabel}`,
+        [node('p', { text: `${preview.body.preview.oldName} → ${preview.body.preview.newName}` }), node('p', { className: 'notice', text: 'Stable IDs and relationships are preserved. Existing frozen Briefing snapshots are not rewritten.' })],
+        `Rename ${entityLabel}`
+      );
+      if (!approved || !workspaceOperationCurrent(token)) return;
+      const result = await requestJson(`${route}/rename/apply`, mutationOptions({
+        expectedRevision: preview.body.preview.expectedRevision,
+        actor: 'local-target-ui',
+        name,
+        previewHash: preview.body.preview.previewHash
+      }));
+      if (!workspaceOperationCurrent(token)) return;
+      onApplied(result.body);
+      state.workflow = null;
+      await loadWorkflow();
+      if (!workspaceOperationCurrent(token)) return;
+      fillOrganizations();
+      fillWorkspaces();
+      renderSettings();
+      setStatus(`${entityLabel} renamed. Stable IDs and frozen Briefing history were preserved.`, 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      setStatus(error.code === 'PREVIEW_CONFLICT' || error.code === 'REVISION_CONFLICT'
+        ? 'The target data changed. Refresh and preview the rename again.'
+        : error.message, 'error');
+    }
+  }
+
+  function renameControl(entityLabel, currentName, route, onApplied) {
+    const input = node('input', { value: currentName, attrs: { maxlength: '200', 'aria-label': `${entityLabel} name` } });
+    return node('div', { className: 'actions' }, [
+      input,
+      node('button', { className: 'button secondary', type: 'button', text: `Preview ${entityLabel} rename`, on: { click: () => controlledRename(route, entityLabel, currentName, input.value, onApplied) } })
+    ]);
+  }
+
+  async function createFeatureFromSettings(scopeId, name, description) {
+    const token = workspaceOperationToken();
+    if (!name.trim()) {
+      setStatus('Feature name is required.', 'error');
+      return;
+    }
+    try {
+      await requestJson(`/api/v2/organizations/${encoded(token.organizationId)}/workspaces/${encoded(token.workspaceId)}/scopes/${encoded(scopeId)}/features`, mutationOptions({
+        expectedRevision: state.workflow.revision,
+        actor: 'local-target-ui',
+        feature: { name: name.trim(), description: description.trim() }
+      }));
+      if (!workspaceOperationCurrent(token)) return;
+      state.workflow = null;
+      await loadWorkflow();
+      if (!workspaceOperationCurrent(token)) return;
+      renderSettings();
+      setStatus('Feature created under the selected Scope. No Jira mapping was created.', 'success');
+    } catch (error) {
+      if (workspaceOperationCurrent(token)) setStatus(error.message, 'error');
+    }
+  }
+
+  function featureSettingsCard(scopes, features) {
+    const scopeSelect = node('select', {}, scopes.filter(scope => !scope.archived).map(scope => option(scope.id, scope.name)));
+    const name = node('input', { attrs: { maxlength: '200', 'aria-label': 'New Feature name' }, placeholder: 'Feature name' });
+    const description = node('input', { attrs: { maxlength: '4000', 'aria-label': 'New Feature description' }, placeholder: 'Optional Feature description' });
+    const rows = recordList(features, feature => {
+      const route = `/api/v2/organizations/${encoded(state.context.activeOrganizationId)}/workspaces/${encoded(state.context.activeWorkspaceId)}`;
+      const featureRoute = `${route}/scopes/${encoded(feature.scopeId)}/features/${encoded(feature.id)}`;
+      return [
+        node('strong', { text: feature.name }),
+        node('p', { className: 'meta', text: `Stable ID: ${feature.id} · Scope: ${scopeName(feature.scopeId)} · ${feature.description || 'No description'}` }),
+        renameControl('Feature', feature.name, featureRoute, body => {
+          const current = state.workflow.features.find(item => item.id === feature.id);
+          if (current) current.name = body.feature.name;
+        })
+      ];
+    }, 'No Features configured. Jira Epic mappings remain a separate Scope integration.');
+    return node('section', { className: 'card' }, [
+      node('h2', { text: 'Features' }),
+      node('p', { className: 'meta', text: 'Features are internal Scope children. Creating or renaming one does not call Jira or change Jira Epic mappings.' }),
+      node('div', { className: 'field-group' }, [
+        node('label', { className: 'field' }, [node('span', { text: 'Parent Scope' }), scopeSelect]),
+        node('label', { className: 'field' }, [node('span', { text: 'Feature name' }), name]),
+        node('label', { className: 'field' }, [node('span', { text: 'Description' }), description])
+      ]),
+      node('button', { className: 'button primary', type: 'button', text: 'Create Feature', disabled: scopes.length === 0, on: { click: () => createFeatureFromSettings(scopeSelect.value, name.value, description.value) } }),
+      rows
+    ]);
+  }
+
   function renderSettings() {
     const scopes = state.workflow?.scopes || [];
+    const features = state.workflow?.features || [];
+    const organization = selectedOrganization();
+    const workspace = selectedWorkspace();
+    const organizationRoute = `/api/v2/organizations/${encoded(organization.id)}`;
+    const workspaceRoute = `${organizationRoute}/workspaces/${encoded(workspace.id)}`;
     elements.view.replaceChildren(node('div', { className: 'card-grid' }, [
       node('section', { className: 'card' }, [node('h2', { text: 'User preferences' }), node('p', { text: 'Active Organization and PM Workspace preferences use stable IDs and are revalidated before use.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Organization' }), node('p', { text: selectedOrganization()?.name || 'Organization required' }), node('p', { className: 'meta', text: 'Only truly Organization-wide settings belong here.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Workspace' }), node('p', { text: selectedWorkspace()?.name || 'PM Workspace required' }), node('p', { className: 'meta', text: 'Sprint vocabulary, behavior thresholds, and drafting guidance remain Workspace-owned.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Scopes & Jira mappings' }), recordList(scopes, scope => [node('strong', { text: scope.name }), node('p', { className: 'meta', text: scope.archived ? 'Archived Scope' : 'Active Scope' })], 'No Scopes configured.')]),
+      node('section', { className: 'card' }, [node('h2', { text: 'Organization' }), node('p', { text: organization?.name || 'Organization required' }), node('p', { className: 'meta', text: 'Only truly Organization-wide settings belong here.' }), renameControl('Organization', organization.name, organizationRoute, body => { organization.name = body.organization.name; })]),
+      node('section', { className: 'card' }, [node('h2', { text: 'Workspace' }), node('p', { text: workspace?.name || 'PM Workspace required' }), node('p', { className: 'meta', text: 'Sprint vocabulary, behavior thresholds, and drafting guidance remain Workspace-owned.' }), renameControl('PM Workspace', workspace.name, workspaceRoute, body => { workspace.name = body.workspace.name; })]),
+      node('section', { className: 'card' }, [node('h2', { text: 'Scopes & Jira mappings' }), node('p', { className: 'meta', text: 'Scope names are managed here. Jira Epic mappings are independent integration records.' }), recordList(scopes, scope => [
+        node('strong', { text: scope.name }),
+        node('p', { className: 'meta', text: scope.archived ? 'Archived Scope' : 'Active Scope' }),
+        renameControl('Scope', scope.name, `${workspaceRoute}/scopes/${encoded(scope.id)}`, body => { scope.name = body.scope.name; })
+      ], 'No Scopes configured.')]),
+      featureSettingsCard(scopes, features),
       node('section', { className: 'card' }, [node('h2', { text: 'Behavior' }), node('p', { text: 'Deterministic status and milestone logic is system-defined unless a schema-supported Workspace threshold is explicitly edited.' })]),
       node('section', { className: 'card' }, [node('h2', { text: 'AI — Advanced' }), node('p', { text: 'Optional AI enhancement is disabled in the target UI. Deterministic Briefings remain fully available without it.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Data & Privacy' }), node('p', { text: 'Target data stays in the explicitly selected local version-2 file. There is no analytics, telemetry, automatic publishing, or cross-Organization view.' })])
+      node('section', { className: 'card' }, [node('h2', { text: 'Data & Privacy' }), node('p', { text: 'Target data stays in the explicitly selected local schema-v3 file. There is no analytics, telemetry, automatic publishing, or cross-Organization view.' })])
     ]));
   }
 
@@ -1277,6 +1456,8 @@
     if (!button) return;
     state.activeView = button.dataset.view;
     state.scopeFilter = 'all';
+    state.featureFilter = 'all';
+    state.itemTypeFilter = 'all';
     state.selectedWorkItemIds.clear();
     renderActiveView();
   });

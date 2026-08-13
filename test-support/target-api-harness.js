@@ -9,7 +9,7 @@ const { PassThrough, Readable } = require('node:stream');
 const { createTargetApiApp } = require('../target-server/app');
 const { EXPECT_TARGET_ABSENT, readTargetDataWithRevision, writeTargetData } = require('../target-model/persistence');
 const { validateTargetData } = require('../target-model/schema');
-const { createMultiOrganizationFixture } = require('./target-v2-fixtures');
+const { createMultiOrganizationFixture } = require('./target-v3-fixtures');
 
 const ALPHA = Object.freeze({ organizationId: 'org-fixture-alpha', workspaceId: 'workspace-alpha-shared' });
 const BETA = Object.freeze({ organizationId: 'org-fixture-beta', workspaceId: 'workspace-beta-shared' });
@@ -95,7 +95,7 @@ function prepareWritableFixture(factory = createMultiOrganizationFixture) {
 async function createTargetApiHarness(t, mutate = () => {}, options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase3-api-'));
   const sourceFilesRoot = path.join(root, 'source-files');
-  const targetDataFile = path.join(root, 'target-v2.json');
+  const targetDataFile = path.join(root, 'target-v3.json');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   const document = prepareWritableFixture(options.fixtureFactory || createMultiOrganizationFixture);
   await mutate({ document, root, sourceFilesRoot, targetDataFile });

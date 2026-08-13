@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const { ITEM_TYPES } = require('../target-model/schema');
 const { invalidRequest, notFound, previewConflict } = require('./errors');
+const { publicWorkItem } = require('./projections');
 const { createTargetResolvers } = require('./resolvers');
 const {
   appendAudit,
@@ -27,12 +28,12 @@ const {
 } = require('./workflow-utils');
 
 const MAX_BULK_WORK_ITEMS = 100;
-const WORK_ITEM_ACTIONS = Object.freeze(['assign-scope', 'assign-sprint', 'follow-up', 'archive']);
+const WORK_ITEM_ACTIONS = Object.freeze(['assign-scope', 'assign-feature', 'assign-sprint', 'follow-up', 'archive']);
 const MAPPING_STATUSES = Object.freeze(['pending', 'verified', 'inactive']);
 const FOLLOW_UP_STATES = Object.freeze(['none', 'open', 'waiting', 'resolved']);
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target work services require an explicit version-2 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target work services require an explicit schema-v3 data-file path');
   return path.resolve(filePath);
 }
 
@@ -96,6 +97,29 @@ function scopeCreateInput(value) {
   };
 }
 
+function featureCreateInput(value) {
+  exactKeys(value, ['name', 'description'], ['name']);
+  return {
+    name: requireText(value.name, { max: 200 }),
+    description: optionalText(value.description, '', { allowEmpty: true, max: 4_000 })
+  };
+}
+
+function buildRenamePreview(target, context, entityType, nextName, revision) {
+  const oldName = target.name;
+  if (oldName === nextName) throw invalidRequest();
+  const value = {
+    organizationId: context.organizationId,
+    workspaceId: context.workspaceId,
+    entityType,
+    entityId: target.id,
+    oldName,
+    newName: nextName,
+    expectedRevision: revision
+  };
+  return { ...value, previewHash: stateHash(value) };
+}
+
 function mappingInput(value, existing = null) {
   const allowed = ['jiraProjectKey', 'jiraEpicKey', 'jiraEpicName', 'mappingStatus', 'provenance', 'verifiedAt'];
   exactKeys(value, allowed, existing ? [] : ['jiraProjectKey', 'jiraEpicKey', 'jiraEpicName', 'mappingStatus', 'provenance']);
@@ -126,13 +150,14 @@ function rejectDuplicateActiveMapping(document, mapping, ownId = null) {
 
 function workItemCreateInput(value) {
   const allowed = [
-    'scopeId', 'jiraId', 'jiraKey', 'itemType', 'summary', 'description', 'canonicalStatus',
+    'scopeId', 'featureId', 'jiraId', 'jiraKey', 'itemType', 'summary', 'description', 'canonicalStatus',
     'currentStateProvenance', 'currentStateConfidence', 'lastCapturedCommentAt', 'sourceStatus',
     'assignee', 'sprint', 'labels', 'dependencies', 'notes'
   ];
   exactKeys(value, allowed, ['scopeId', 'itemType', 'summary', 'canonicalStatus', 'currentStateProvenance', 'currentStateConfidence']);
   return {
     scopeId: nullableStableId(value.scopeId),
+    featureId: value.featureId === undefined ? null : nullableStableId(value.featureId),
     jiraId: optionalNullableText(value.jiraId, null, { max: 200 }),
     jiraKey: value.jiraKey === undefined || value.jiraKey === null ? null : requireJiraKey(value.jiraKey),
     itemType: requireEnum(value.itemType, [...ITEM_TYPES]),
@@ -196,13 +221,40 @@ function normalizeWorkItemAction(document, resolvers, context, workItem, value) 
   requireObject(value);
   requireEnum(value.type, WORK_ITEM_ACTIONS);
   if (value.type === 'assign-scope') {
-    exactKeys(value, ['type', 'scopeId'], ['type', 'scopeId']);
+    exactKeys(value, ['type', 'scopeId', 'featureId'], ['type', 'scopeId']);
     const scopeId = nullableStableId(value.scopeId);
     if (scopeId !== null) resolvers.resolveWorkspaceChild('scopes', context.organizationId, context.workspaceId, scopeId);
+    let featureId;
+    if (Object.hasOwn(value, 'featureId')) featureId = nullableStableId(value.featureId);
+    else if (workItem.featureId !== null && resolvers.indexes.features.get(workItem.featureId)?.scopeId === scopeId) featureId = workItem.featureId;
+    else featureId = null;
+    if (featureId !== null) {
+      if (scopeId === null) throw invalidRequest();
+      const feature = resolvers.resolveWorkspaceChild('features', context.organizationId, context.workspaceId, featureId);
+      if (feature.scopeId !== scopeId) throw notFound();
+    }
     const evidenceChanges = document.evidence
       .filter(evidence => evidence.workItemId === workItem.id && evidence.scopeId !== scopeId)
       .map(evidence => ({ evidenceId: evidence.id, beforeScopeId: evidence.scopeId, afterScopeId: scopeId }));
-    return { type: value.type, field: 'scopeId', before: workItem.scopeId, after: scopeId, evidenceChanges };
+    const featureEffect = featureId === workItem.featureId ? 'retained' : (featureId === null ? 'cleared' : 'replaced');
+    return {
+      type: value.type,
+      field: 'scopeId',
+      before: workItem.scopeId,
+      after: scopeId,
+      featureChange: { effect: featureEffect, beforeFeatureId: workItem.featureId, afterFeatureId: featureId },
+      evidenceChanges
+    };
+  }
+  if (value.type === 'assign-feature') {
+    exactKeys(value, ['type', 'featureId'], ['type', 'featureId']);
+    const featureId = nullableStableId(value.featureId);
+    if (featureId !== null) {
+      if (workItem.scopeId === null) throw invalidRequest();
+      const feature = resolvers.resolveWorkspaceChild('features', context.organizationId, context.workspaceId, featureId);
+      if (feature.scopeId !== workItem.scopeId) throw notFound();
+    }
+    return { type: value.type, field: 'featureId', before: workItem.featureId, after: featureId };
   }
   if (value.type === 'assign-sprint') {
     exactKeys(value, ['type', 'sprint'], ['type', 'sprint']);
@@ -217,7 +269,8 @@ function normalizeWorkItemAction(document, resolvers, context, workItem, value) 
 }
 
 function actionPreview(context, workItemId, normalized, revision) {
-  if (stateHash(normalized.before) === stateHash(normalized.after)) throw invalidRequest();
+  if (stateHash({ value: normalized.before, featureId: normalized.featureChange?.beforeFeatureId }) ===
+    stateHash({ value: normalized.after, featureId: normalized.featureChange?.afterFeatureId })) throw invalidRequest();
   const preview = {
     organizationId: context.organizationId,
     workspaceId: context.workspaceId,
@@ -228,6 +281,7 @@ function actionPreview(context, workItemId, normalized, revision) {
     after: clone(normalized.after)
   };
   if (normalized.evidenceChanges) preview.evidenceChanges = clone(normalized.evidenceChanges);
+  if (normalized.featureChange) preview.featureChange = clone(normalized.featureChange);
   const revisionBoundPreview = { ...preview, expectedRevision: revision };
   return { ...revisionBoundPreview, previewHash: stateHash(revisionBoundPreview) };
 }
@@ -236,10 +290,16 @@ function normalizeBulkAction(document, resolvers, context, value) {
   requireObject(value);
   requireEnum(value.type, ['assign-scope', 'assign-sprint']);
   if (value.type === 'assign-scope') {
-    exactKeys(value, ['type', 'scopeId'], ['type', 'scopeId']);
+    exactKeys(value, ['type', 'scopeId', 'featureId'], ['type', 'scopeId']);
     const scopeId = nullableStableId(value.scopeId);
     if (scopeId !== null) resolvers.resolveWorkspaceChild('scopes', context.organizationId, context.workspaceId, scopeId);
-    return { type: value.type, field: 'scopeId', after: scopeId };
+    const featureId = Object.hasOwn(value, 'featureId') ? nullableStableId(value.featureId) : undefined;
+    if (featureId !== undefined && featureId !== null) {
+      if (scopeId === null) throw invalidRequest();
+      const feature = resolvers.resolveWorkspaceChild('features', context.organizationId, context.workspaceId, featureId);
+      if (feature.scopeId !== scopeId) throw notFound();
+    }
+    return { type: value.type, field: 'scopeId', after: scopeId, featureId };
   }
   exactKeys(value, ['type', 'sprint'], ['type', 'sprint']);
   return { type: value.type, field: 'sprint', after: nullableText(value.sprint, { max: 300 }) };
@@ -251,13 +311,21 @@ function buildBulkPreview(document, resolvers, context, workItemIds, rawAction, 
     const item = resolvers.resolveWorkspaceChild('workItems', context.organizationId, context.workspaceId, workItemId);
     const row = { workItemId: item.id, before: clone(item[normalized.field]), after: clone(normalized.after) };
     if (normalized.field === 'scopeId') {
+      const compatibleExisting = item.featureId !== null && resolvers.indexes.features.get(item.featureId)?.scopeId === normalized.after;
+      const afterFeatureId = normalized.featureId === undefined ? (compatibleExisting ? item.featureId : null) : normalized.featureId;
+      row.featureChange = {
+        effect: afterFeatureId === item.featureId ? 'retained' : (afterFeatureId === null ? 'cleared' : 'replaced'),
+        beforeFeatureId: item.featureId,
+        afterFeatureId
+      };
       row.evidenceChanges = document.evidence
         .filter(evidence => evidence.workItemId === item.id && evidence.scopeId !== normalized.after)
         .map(evidence => ({ evidenceId: evidence.id, beforeScopeId: evidence.scopeId, afterScopeId: normalized.after }));
     }
     return row;
   });
-  if (rows.every(row => stateHash(row.before) === stateHash(row.after))) throw invalidRequest();
+  if (rows.every(row => stateHash({ scopeId: row.before, featureId: row.featureChange?.beforeFeatureId }) ===
+    stateHash({ scopeId: row.after, featureId: row.featureChange?.afterFeatureId }))) throw invalidRequest();
   const preview = {
     organizationId: context.organizationId,
     workspaceId: context.workspaceId,
@@ -302,7 +370,72 @@ function createWorkServices(options = {}) {
     return { resolvers, context: { organizationId: workspace.organizationId, workspaceId: workspace.id } };
   }
 
+  function renameTarget(document, entityType, ids) {
+    const resolvers = createTargetResolvers(document);
+    if (entityType === 'organization') {
+      const target = resolvers.resolveOrganization(ids.organizationId);
+      return { target, context: { organizationId: target.id, workspaceId: null } };
+    }
+    const workspace = resolvers.resolveWorkspace(ids.organizationId, ids.workspaceId);
+    const context = { organizationId: workspace.organizationId, workspaceId: workspace.id };
+    if (entityType === 'workspace') return { target: workspace, context };
+    const collection = entityType === 'scope' ? 'scopes' : 'features';
+    const entityId = entityType === 'scope' ? ids.scopeId : ids.featureId;
+    const target = resolvers.resolveWorkspaceChild(collection, ids.organizationId, ids.workspaceId, entityId);
+    if (entityType === 'feature' && target.scopeId !== ids.scopeId) throw notFound();
+    return { target, context };
+  }
+
+  function previewRename(entityType, ids, body) {
+    exactKeys(body, ['name'], ['name']);
+    const name = requireText(body.name, { max: 200 });
+    return readWorkflow(targetDataFile, (document, revision) => {
+      const { target, context } = renameTarget(document, entityType, ids);
+      return { preview: buildRenamePreview(target, context, entityType, name, revision) };
+    });
+  }
+
+  function applyRename(entityType, ids, body) {
+    const request = baseRequest(body, ['name', 'previewHash'], ['name', 'previewHash']);
+    const name = requireText(body.name, { max: 200 });
+    const approvedHash = requireText(body.previewHash, { max: 64 });
+    return writeWorkflow(targetDataFile, request.expectedRevision, (document, revision) => {
+      const { target, context } = renameTarget(document, entityType, ids);
+      const preview = buildRenamePreview(target, context, entityType, name, revision);
+      if (preview.previewHash !== approvedHash) throw previewConflict();
+      const before = clone(target);
+      target.name = name;
+      if (Object.hasOwn(target, 'updatedAt')) target.updatedAt = runtime.timestamp();
+      const timestamp = Object.hasOwn(target, 'updatedAt') ? target.updatedAt : runtime.timestamp();
+      appendEntityAudit(document, runtime, context, entityType, target.id, `${entityType}-renamed`, request.actor, timestamp, before, target);
+      return { [entityType]: clone(target), appliedPreviewHash: approvedHash };
+    });
+  }
+
   return Object.freeze({
+    previewOrganizationRename(organizationId, body) {
+      return previewRename('organization', { organizationId }, body);
+    },
+
+    applyOrganizationRename(organizationId, body) {
+      return applyRename('organization', { organizationId }, body);
+    },
+
+    previewWorkspaceRename(organizationId, workspaceId, body) {
+      return previewRename('workspace', { organizationId, workspaceId }, body);
+    },
+
+    applyWorkspaceRename(organizationId, workspaceId, body) {
+      return applyRename('workspace', { organizationId, workspaceId }, body);
+    },
+
+    previewScopeRename(organizationId, workspaceId, scopeId, body) {
+      return previewRename('scope', { organizationId, workspaceId, scopeId }, body);
+    },
+
+    applyScopeRename(organizationId, workspaceId, scopeId, body) {
+      return applyRename('scope', { organizationId, workspaceId, scopeId }, body);
+    },
     createScope(organizationId, workspaceId, body) {
       const request = baseRequest(body, ['scope'], ['scope']);
       const input = scopeCreateInput(body.scope);
@@ -326,13 +459,12 @@ function createWorkServices(options = {}) {
 
     updateScope(organizationId, workspaceId, scopeId, body) {
       const request = baseRequest(body, ['changes'], ['changes']);
-      exactKeys(body.changes, ['name', 'description', 'owner']);
+      exactKeys(body.changes, ['description', 'owner']);
       if (Object.keys(body.changes).length === 0) throw invalidRequest();
       return writeWorkflow(targetDataFile, request.expectedRevision, (document) => {
         const { resolvers, context } = contextFor(document, organizationId, workspaceId);
         const record = resolvers.resolveWorkspaceChild('scopes', organizationId, workspaceId, scopeId);
         const before = clone(record);
-        if (Object.hasOwn(body.changes, 'name')) record.name = requireText(body.changes.name, { max: 200 });
         if (Object.hasOwn(body.changes, 'description')) record.description = requireText(body.changes.description, { allowEmpty: true, max: 4_000 });
         if (Object.hasOwn(body.changes, 'owner')) record.owner = nullableText(body.changes.owner, { max: 300 });
         record.updatedAt = runtime.timestamp();
@@ -352,6 +484,79 @@ function createWorkServices(options = {}) {
         record.updatedAt = runtime.timestamp();
         appendEntityAudit(document, runtime, context, 'scope', record.id, archived ? 'scope-archived' : 'scope-restored', request.actor, record.updatedAt, before, record);
         return { scope: clone(record) };
+      });
+    },
+
+    listScopeFeatures(organizationId, workspaceId, scopeId) {
+      return readWorkflow(targetDataFile, document => {
+        const { resolvers } = contextFor(document, organizationId, workspaceId);
+        const scope = resolvers.resolveWorkspaceChild('scopes', organizationId, workspaceId, scopeId);
+        return { features: document.features.filter(feature => feature.organizationId === organizationId && feature.workspaceId === workspaceId && feature.scopeId === scope.id).map(clone) };
+      });
+    },
+
+    getScopeFeature(organizationId, workspaceId, scopeId, featureId) {
+      return readWorkflow(targetDataFile, document => {
+        const { resolvers } = contextFor(document, organizationId, workspaceId);
+        const scope = resolvers.resolveWorkspaceChild('scopes', organizationId, workspaceId, scopeId);
+        const feature = resolvers.resolveWorkspaceChild('features', organizationId, workspaceId, featureId);
+        if (feature.scopeId !== scope.id) throw notFound();
+        return { feature: clone(feature) };
+      });
+    },
+
+    createFeature(organizationId, workspaceId, scopeId, body) {
+      const request = baseRequest(body, ['feature'], ['feature']);
+      const input = featureCreateInput(body.feature);
+      return writeWorkflow(targetDataFile, request.expectedRevision, document => {
+        const { resolvers, context } = contextFor(document, organizationId, workspaceId);
+        const scope = resolvers.resolveWorkspaceChild('scopes', organizationId, workspaceId, scopeId);
+        const record = { id: runtime.id('feature'), ...context, scopeId: scope.id, ...input };
+        document.features.push(record);
+        const timestamp = runtime.timestamp();
+        appendEntityAudit(document, runtime, context, 'feature', record.id, 'feature-created', request.actor, timestamp, null, record);
+        return { feature: clone(record) };
+      });
+    },
+
+    updateFeature(organizationId, workspaceId, scopeId, featureId, body) {
+      const request = baseRequest(body, ['changes'], ['changes']);
+      exactKeys(body.changes, ['description']);
+      if (!Object.hasOwn(body.changes, 'description')) throw invalidRequest();
+      const description = requireText(body.changes.description, { allowEmpty: true, max: 4_000 });
+      return writeWorkflow(targetDataFile, request.expectedRevision, document => {
+        const { resolvers, context } = contextFor(document, organizationId, workspaceId);
+        const scope = resolvers.resolveWorkspaceChild('scopes', organizationId, workspaceId, scopeId);
+        const record = resolvers.resolveWorkspaceChild('features', organizationId, workspaceId, featureId);
+        if (record.scopeId !== scope.id) throw notFound();
+        const before = clone(record);
+        record.description = description;
+        const timestamp = runtime.timestamp();
+        appendEntityAudit(document, runtime, context, 'feature', record.id, 'feature-updated', request.actor, timestamp, before, record);
+        return { feature: clone(record) };
+      });
+    },
+
+    previewFeatureRename(organizationId, workspaceId, scopeId, featureId, body) {
+      return previewRename('feature', { organizationId, workspaceId, scopeId, featureId }, body);
+    },
+
+    applyFeatureRename(organizationId, workspaceId, scopeId, featureId, body) {
+      return applyRename('feature', { organizationId, workspaceId, scopeId, featureId }, body);
+    },
+
+    listFeatureWorkItems(organizationId, workspaceId, scopeId, featureId) {
+      return readWorkflow(targetDataFile, document => {
+        const { resolvers } = contextFor(document, organizationId, workspaceId);
+        const scope = resolvers.resolveWorkspaceChild('scopes', organizationId, workspaceId, scopeId);
+        const feature = resolvers.resolveWorkspaceChild('features', organizationId, workspaceId, featureId);
+        if (feature.scopeId !== scope.id) throw notFound();
+        return {
+          feature: clone(feature),
+          workItems: document.workItems
+            .filter(item => item.organizationId === organizationId && item.workspaceId === workspaceId && item.featureId === feature.id)
+            .map(item => publicWorkItem(item, resolvers.indexes.scopes, resolvers.indexes.features))
+        };
       });
     },
 
@@ -400,6 +605,11 @@ function createWorkServices(options = {}) {
       return writeWorkflow(targetDataFile, request.expectedRevision, document => {
         const { resolvers, context } = contextFor(document, organizationId, workspaceId);
         if (input.scopeId !== null) resolvers.resolveWorkspaceChild('scopes', organizationId, workspaceId, input.scopeId);
+        if (input.featureId !== null) {
+          if (input.scopeId === null) throw invalidRequest();
+          const feature = resolvers.resolveWorkspaceChild('features', organizationId, workspaceId, input.featureId);
+          if (feature.scopeId !== input.scopeId) throw notFound();
+        }
         input.dependencies.forEach(id => resolvers.resolveWorkspaceChild('workItems', organizationId, workspaceId, id));
         rejectDuplicateWorkItemJiraKey(document, context, input.jiraKey);
         const timestamp = runtime.timestamp();
@@ -456,8 +666,15 @@ function createWorkServices(options = {}) {
         const preview = actionPreview(context, item.id, normalized, revision);
         if (preview.previewHash !== approvedHash) throw previewConflict();
         item[normalized.field] = clone(normalized.after);
+        if (normalized.featureChange) item.featureId = normalized.featureChange.afterFeatureId;
         item.updatedAt = runtime.timestamp();
-        appendEntityAudit(document, runtime, context, 'workItem', item.id, `work-item-${normalized.type}-applied`, request.actor, item.updatedAt, normalized.before, normalized.after);
+        const auditBefore = normalized.featureChange
+          ? { [normalized.field]: normalized.before, featureId: normalized.featureChange.beforeFeatureId }
+          : normalized.before;
+        const auditAfter = normalized.featureChange
+          ? { [normalized.field]: normalized.after, featureId: normalized.featureChange.afterFeatureId }
+          : normalized.after;
+        appendEntityAudit(document, runtime, context, 'workItem', item.id, `work-item-${normalized.type}-applied`, request.actor, item.updatedAt, auditBefore, auditAfter);
         (normalized.evidenceChanges || []).forEach(change => {
           const evidence = resolvers.resolveWorkspaceChild('evidence', organizationId, workspaceId, change.evidenceId);
           evidence.scopeId = normalized.after;
@@ -488,10 +705,18 @@ function createWorkServices(options = {}) {
         const changed = [];
         preview.rows.forEach(row => {
           const item = resolvers.resolveWorkspaceChild('workItems', organizationId, workspaceId, row.workItemId);
-          if (stateHash(row.before) === stateHash(row.after)) return;
+          if (stateHash({ value: row.before, featureId: row.featureChange?.beforeFeatureId }) ===
+            stateHash({ value: row.after, featureId: row.featureChange?.afterFeatureId })) return;
           item[preview.field] = clone(row.after);
+          if (row.featureChange) item.featureId = row.featureChange.afterFeatureId;
           item.updatedAt = timestamp;
-          appendEntityAudit(document, runtime, context, 'workItem', item.id, `bulk-${preview.action}-applied`, request.actor, timestamp, row.before, row.after);
+          const auditBefore = row.featureChange
+            ? { [preview.field]: row.before, featureId: row.featureChange.beforeFeatureId }
+            : row.before;
+          const auditAfter = row.featureChange
+            ? { [preview.field]: row.after, featureId: row.featureChange.afterFeatureId }
+            : row.after;
+          appendEntityAudit(document, runtime, context, 'workItem', item.id, `bulk-${preview.action}-applied`, request.actor, timestamp, auditBefore, auditAfter);
           (row.evidenceChanges || []).forEach(change => {
             const evidence = resolvers.resolveWorkspaceChild('evidence', organizationId, workspaceId, change.evidenceId);
             evidence.scopeId = row.after;

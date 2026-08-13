@@ -39,13 +39,26 @@ test('Scope lifecycle and optional Jira mappings are parent-scoped, independent,
   assert.match(scopeId, /^scope-/);
   revision = revisionOf(response);
 
-  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/scopes/${scopeId}`, {
+  const renamePreview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/rename/preview`, {
+    name: 'Fictional Release Coordination'
+  });
+  assert.equal(renamePreview.status, 200);
+  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/rename/apply`, {
     expectedRevision: revision,
     actor: ACTOR,
-    changes: { name: 'Fictional Release Coordination', owner: 'Fictional owner' }
+    name: 'Fictional Release Coordination',
+    previewHash: renamePreview.json().preview.previewHash
   });
   assert.equal(response.status, 200);
   assert.equal(response.json().scope.id, scopeId);
+  revision = revisionOf(response);
+
+  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/scopes/${scopeId}`, {
+    expectedRevision: revision,
+    actor: ACTOR,
+    changes: { owner: 'Fictional owner' }
+  });
+  assert.equal(response.status, 200);
   revision = revisionOf(response);
 
   response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/archive`, {
@@ -90,8 +103,8 @@ test('Scope lifecycle and optional Jira mappings are parent-scoped, independent,
   const stored = await persisted(targetDataFile);
   assert.equal(stored.document.scopes.find(scope => scope.id === scopeId).name, 'Fictional Release Coordination');
   assert.deepEqual(
-    stored.document.auditEvents.slice(-6).map(event => event.action),
-    ['scope-created', 'scope-updated', 'scope-archived', 'scope-restored', 'jira-epic-mapping-created', 'jira-epic-mapping-updated']
+    stored.document.auditEvents.slice(-7).map(event => event.action),
+    ['scope-created', 'scope-renamed', 'scope-updated', 'scope-archived', 'scope-restored', 'jira-epic-mapping-created', 'jira-epic-mapping-updated']
   );
 
   const foreign = await jsonRequest(app, 'PATCH', `${workspaceBase(BETA)}/scopes/${scopeId}`, {
@@ -340,6 +353,9 @@ test('bulk Scope, Unassigned, and Sprint assignment is bounded, atomic, and stal
   response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/bulk/preview`, {
     workItemIds: ids,
     action: { type: 'assign-scope', scopeId: null }
+  });
+  assert.deepEqual(response.json().preview.rows.find(row => row.workItemId === ids[0]).featureChange, {
+    effect: 'cleared', beforeFeatureId: 'feature-alpha-mapped', afterFeatureId: null
   });
   const stalePreview = response.json().preview;
   const individualPreview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${ids[1]}/preview`, {

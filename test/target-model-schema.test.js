@@ -17,11 +17,12 @@ const {
   validateTargetData
 } = require('../target-model/schema');
 const {
+  createFeatureIndependenceFixture,
   createInvalidCrossOrganizationFixture,
   createInvalidCrossWorkspaceFixture,
   createMultiOrganizationFixture,
   followUp
-} = require('../test-support/target-v2-fixtures');
+} = require('../test-support/target-v3-fixtures');
 
 function clonedFixture() {
   return createMultiOrganizationFixture();
@@ -60,7 +61,7 @@ function documentWithAggregateRootCount(count) {
   return document;
 }
 
-test('the deterministic clean seed is a valid complete version-2 document', () => {
+test('the deterministic clean seed is a valid complete schema-v3 document', () => {
   const first = createCleanSeed();
   const second = createCleanSeed();
   assert.equal(first.schemaVersion, TARGET_SCHEMA_VERSION);
@@ -79,27 +80,32 @@ test('the deterministic clean seed is a valid complete version-2 document', () =
 test('the clean seed contains exactly the approved fictional hierarchy', () => {
   const seed = createCleanSeed();
   assert.deepEqual(seed.organizations.map(({ id, name }) => ({ id, name })), [
-    { id: 'org-example', name: 'Example Organization' }
+    { id: 'org-1', name: 'Organization 1' }
   ]);
   assert.deepEqual(seed.workspaces.map(({ id, organizationId, name }) => ({ id, organizationId, name })), [
     {
-      id: 'workspace-example-data-analytics-delivery',
-      organizationId: 'org-example',
-      name: 'Data & Analytics Delivery'
+      id: 'workspace-1',
+      organizationId: 'org-1',
+      name: 'PM Workspace 1'
     }
   ]);
   assert.deepEqual(seed.scopes.map(({ id, name }) => ({ id, name })), [
-    { id: 'scope-example-regulatory-reporting', name: 'Regulatory Reporting' },
-    { id: 'scope-example-capacity-planning', name: 'Capacity Planning' },
-    { id: 'scope-example-bi-modernization', name: 'BI Modernization' },
-    { id: 'scope-example-master-data-management', name: 'Master Data Management' }
+    { id: 'scope-1', name: 'Scope 1' },
+    { id: 'scope-2', name: 'Scope 2' },
+    { id: 'scope-3', name: 'Scope 3' },
+    { id: 'scope-4', name: 'Scope 4' }
   ]);
+  assert.ok(seed.scopes.every(scope => scope.organizationId === 'org-1' && scope.workspaceId === 'workspace-1'));
+  assert.deepEqual(seed.userPreferences, {
+    activeOrganizationId: 'org-1',
+    activeWorkspaceIdsByOrganization: { 'org-1': 'workspace-1' }
+  });
 });
 
 test('the clean seed contains none of the prohibited data collections or catch-all records', () => {
   const seed = createCleanSeed();
   [
-    'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence',
+    'features', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence',
     'proposedChanges', 'briefings', 'briefingVersions', 'auditEvents'
   ].forEach(collection => assert.deepEqual(seed[collection], []));
   assert.equal('projects' in seed, false);
@@ -118,7 +124,7 @@ test('schemaVersion is mandatory', () => {
 
 test('unsupported past schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 1;
+  document.schemaVersion = 2;
   assert.throws(() => validateTargetData(document), error => {
     assert.equal(error instanceof TargetSchemaVersionError, true);
     assert.equal(error.code, 'UNSUPPORTED_TARGET_SCHEMA_VERSION');
@@ -128,9 +134,9 @@ test('unsupported past schema versions fail closed', () => {
 
 test('unknown future schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 3;
+  document.schemaVersion = 4;
   assert.throws(() => validateTargetData(document), TargetSchemaVersionError);
-  assert.equal(document.schemaVersion, 3);
+  assert.equal(document.schemaVersion, 4);
 });
 
 test('every root collection is mandatory and must be an array', () => {
@@ -209,6 +215,56 @@ test('duplicate Scope names are valid in different Workspaces and Organizations'
   validateTargetData(document);
 });
 
+test('Features are first-class Scope children and duplicate display names remain ID-scoped', () => {
+  const document = clonedFixture();
+  assert.equal(document.features.length, 4);
+  assert.equal(new Set(document.features.map(item => item.name)).size, 1);
+  assert.equal(new Set(document.features.map(item => item.id)).size, 4);
+  validateTargetData(document);
+
+  const wrongScope = clonedFixture();
+  wrongScope.features.find(item => item.id === 'feature-alpha-mapped').scopeId = 'scope-beta-shared';
+  assertInvalid(wrongScope, /Scope with matching Organization and Workspace/);
+
+  const extraField = clonedFixture();
+  extraField.features[0].archived = false;
+  assertInvalid(extraField, /unsupported field "archived"/);
+});
+
+test('Work Item Feature references require an exact Organization, Workspace, and Scope match', () => {
+  const document = clonedFixture();
+  const featured = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
+  assert.equal(featured.featureId, 'feature-alpha-mapped');
+  validateTargetData(document);
+
+  const unscoped = clonedFixture();
+  const unassigned = unscoped.workItems.find(item => item.id === 'work-item-alpha-unassigned');
+  unassigned.featureId = 'feature-alpha-mapped';
+  assertInvalid(unscoped, /requires a non-null Scope/);
+
+  const wrongScope = clonedFixture();
+  wrongScope.workItems.find(item => item.id === 'work-item-alpha-assigned').featureId = 'feature-alpha-zero';
+  assertInvalid(wrongScope, /Feature with matching Organization, Workspace, and Scope/);
+
+  const foreign = clonedFixture();
+  foreign.workItems.find(item => item.id === 'work-item-alpha-assigned').featureId = 'feature-beta-shared';
+  assertInvalid(foreign, /Feature with matching Organization, Workspace, and Scope/);
+});
+
+test('Feature is not a Work Item type and old type values fail closed', () => {
+  const document = clonedFixture();
+  document.workItems[0].itemType = 'Feature';
+  assertInvalid(document, /Story, Task, Bug, Other, Unknown/);
+});
+
+test('the complete schema-v3 Work Item type set is accepted', () => {
+  for (const itemType of ['Story', 'Task', 'Bug', 'Other', 'Unknown']) {
+    const document = clonedFixture();
+    document.workItems[0].itemType = itemType;
+    assert.equal(validateTargetData(document), document);
+  }
+});
+
 test('Scopes support zero, one, and multiple Jira Epic mappings', () => {
   const document = clonedFixture();
   const counts = Object.fromEntries(document.scopes.map(scope => [
@@ -219,6 +275,24 @@ test('Scopes support zero, one, and multiple Jira Epic mappings', () => {
   assert.equal(counts['scope-alpha-secondary'], 1);
   assert.equal(counts['scope-alpha-multiple-mappings'], 2);
   validateTargetData(document);
+});
+
+test('Jira mappings and Features remain independent for mapped Scopes and scoped Work Items', () => {
+  const document = createFeatureIndependenceFixture();
+  const scopeId = 'scope-alpha-mapping-only';
+  const mapping = document.jiraEpicMappings.find(item => item.scopeId === scopeId);
+  const assigned = document.workItems.find(item => item.id === 'work-item-alpha-scoped-no-feature');
+  assert.ok(mapping);
+  assert.equal(document.features.some(item => item.scopeId === scopeId), false);
+  assert.equal(assigned.scopeId, scopeId);
+  assert.equal(assigned.featureId, null);
+  validateTargetData(document);
+
+  const featuresBefore = structuredClone(document.features);
+  mapping.jiraEpicName = 'Fictional Renamed Mapping Without Feature';
+  mapping.jiraEpicKey = 'FICTA-302';
+  validateTargetData(document);
+  assert.deepEqual(document.features, featuresBefore);
 });
 
 test('a Jira Epic mapping rejects missing or foreign Scope parents', () => {
@@ -451,7 +525,7 @@ test('Finding extraction method and version preserve explicit extraction provena
   const document = clonedFixture();
   const finding = document.findings[0];
   assert.equal(finding.extractionMethod, 'deterministic-test-extraction');
-  assert.equal(finding.extractionVersion, 'target-v2-fixture-1');
+  assert.equal(finding.extractionVersion, 'target-v3-fixture-1');
   validateTargetData(document);
 });
 

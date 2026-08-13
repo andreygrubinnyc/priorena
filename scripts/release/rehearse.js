@@ -81,7 +81,7 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
   if (!SCENARIOS.has(scenario)) throw new Error('Unknown release rehearsal scenario');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-release-rehearsal-'));
   const livePath = path.join(root, 'fictional-live.json');
-  const stagedSeedPath = path.join(root, 'fictional-staged-v2.json');
+  const stagedSeedPath = path.join(root, 'fictional-staged-v3.json');
   const sourceFilesRoot = path.join(root, 'source-files');
   const backupDirectory = path.join(root, 'verified-backups');
   const legacyBytes = Buffer.from('{"projects": {}}\n');

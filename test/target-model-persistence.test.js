@@ -33,10 +33,10 @@ const {
   createInvalidCrossOrganizationFixture,
   createMultiOrganizationFixture,
   workItem
-} = require('../test-support/target-v2-fixtures');
+} = require('../test-support/target-v3-fixtures');
 
 async function temporaryDirectory(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v2-test-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v3-test-'));
   t.after(async () => fs.rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -1357,7 +1357,7 @@ test('unsupported-version reads fail without rewriting the supplied file', async
   const directory = await temporaryDirectory(t);
   const filePath = path.join(directory, 'target-data.json');
   const document = createCleanSeed();
-  document.schemaVersion = 3;
+  document.schemaVersion = 4;
   const originalBytes = Buffer.from(JSON.stringify(document));
   await fs.writeFile(filePath, originalBytes, { mode: 0o600 });
 

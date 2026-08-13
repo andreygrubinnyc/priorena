@@ -1,7 +1,7 @@
 'use strict';
 
 const WORKFLOW_COLLECTIONS = Object.freeze([
-  'scopes', 'workItems', 'milestones', 'sources', 'findings', 'evidence', 'proposedChanges'
+  'scopes', 'features', 'workItems', 'milestones', 'sources', 'findings', 'evidence', 'proposedChanges'
 ]);
 
 function stableId(value) {
@@ -19,6 +19,7 @@ function emptyWorkflowData() {
   return {
     revision: null,
     scopes: [],
+    features: [],
     workItems: [],
     milestones: [],
     sources: [],
@@ -26,7 +27,7 @@ function emptyWorkflowData() {
     evidence: [],
     proposedChanges: [],
     selectedWorkItemIds: [],
-    filters: { scopeId: 'all', search: '' },
+    filters: { scopeId: 'all', featureId: 'all', itemType: 'all', search: '' },
     preview: null,
     confirmation: null,
     status: { kind: 'idle', message: '' },
@@ -84,6 +85,7 @@ function createTargetWorkflowApiClient(options = {}) {
       const root = base(organizationId, workspaceId);
       const routes = {
         scopes: `${root}/scopes`,
+        features: `${root}/features`,
         workItems: `${root}/work-items`,
         milestones: `${root}/milestones`,
         sources: `${root}/sources`,
@@ -173,9 +175,12 @@ function filterWorkItems(workItems, filters) {
   return workItems.filter(item => {
     const scopeMatch = filters.scopeId === 'all' ||
       (filters.scopeId === 'unassigned' ? item.scopeId === null : item.scopeId === filters.scopeId);
-    const searchMatch = !search || [item.summary, item.jiraKey, item.canonicalStatus, item.assignee, item.sprint]
+    const featureMatch = !filters.featureId || filters.featureId === 'all' ||
+      (filters.featureId === 'none' ? item.featureId === null : item.featureId === filters.featureId);
+    const typeMatch = !filters.itemType || filters.itemType === 'all' || item.itemType === filters.itemType;
+    const searchMatch = !search || [item.summary, item.jiraKey, item.canonicalStatus, item.assignee, item.sprint, item.feature?.name]
       .some(value => String(value || '').toLocaleLowerCase('en-US').includes(search));
-    return scopeMatch && searchMatch;
+    return scopeMatch && featureMatch && typeMatch && searchMatch;
   });
 }
 

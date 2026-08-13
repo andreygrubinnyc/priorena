@@ -6,9 +6,9 @@ const CLEAN_SEED = {
   schemaVersion: TARGET_SCHEMA_VERSION,
   organizations: [
     {
-      id: 'org-example',
-      name: 'Example Organization',
-      description: 'Fictional organization for the repository-safe Priorena example.',
+      id: 'org-1',
+      name: 'Organization 1',
+      description: 'Fictional Organization for the repository-safe Priorena seed.',
       archived: false,
       createdAt: SEED_TIMESTAMP,
       updatedAt: SEED_TIMESTAMP
@@ -16,10 +16,10 @@ const CLEAN_SEED = {
   ],
   workspaces: [
     {
-      id: 'workspace-example-data-analytics-delivery',
-      organizationId: 'org-example',
-      name: 'Data & Analytics Delivery',
-      description: 'Fictional PM Workspace for repository-safe delivery examples.',
+      id: 'workspace-1',
+      organizationId: 'org-1',
+      name: 'PM Workspace 1',
+      description: 'Fictional PM Workspace for the repository-safe Priorena seed.',
       archived: false,
       createdAt: SEED_TIMESTAMP,
       updatedAt: SEED_TIMESTAMP,
@@ -38,10 +38,10 @@ const CLEAN_SEED = {
   ],
   scopes: [
     {
-      id: 'scope-example-regulatory-reporting',
-      organizationId: 'org-example',
-      workspaceId: 'workspace-example-data-analytics-delivery',
-      name: 'Regulatory Reporting',
+      id: 'scope-1',
+      organizationId: 'org-1',
+      workspaceId: 'workspace-1',
+      name: 'Scope 1',
       description: '',
       owner: null,
       archived: false,
@@ -50,10 +50,10 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     },
     {
-      id: 'scope-example-capacity-planning',
-      organizationId: 'org-example',
-      workspaceId: 'workspace-example-data-analytics-delivery',
-      name: 'Capacity Planning',
+      id: 'scope-2',
+      organizationId: 'org-1',
+      workspaceId: 'workspace-1',
+      name: 'Scope 2',
       description: '',
       owner: null,
       archived: false,
@@ -62,10 +62,10 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     },
     {
-      id: 'scope-example-bi-modernization',
-      organizationId: 'org-example',
-      workspaceId: 'workspace-example-data-analytics-delivery',
-      name: 'BI Modernization',
+      id: 'scope-3',
+      organizationId: 'org-1',
+      workspaceId: 'workspace-1',
+      name: 'Scope 3',
       description: '',
       owner: null,
       archived: false,
@@ -74,10 +74,10 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     },
     {
-      id: 'scope-example-master-data-management',
-      organizationId: 'org-example',
-      workspaceId: 'workspace-example-data-analytics-delivery',
-      name: 'Master Data Management',
+      id: 'scope-4',
+      organizationId: 'org-1',
+      workspaceId: 'workspace-1',
+      name: 'Scope 4',
       description: '',
       owner: null,
       archived: false,
@@ -86,6 +86,7 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     }
   ],
+  features: [],
   jiraEpicMappings: [],
   workItems: [],
   milestones: [],
@@ -97,9 +98,9 @@ const CLEAN_SEED = {
   briefingVersions: [],
   auditEvents: [],
   userPreferences: {
-    activeOrganizationId: 'org-example',
+    activeOrganizationId: 'org-1',
     activeWorkspaceIdsByOrganization: {
-      'org-example': 'workspace-example-data-analytics-delivery'
+      'org-1': 'workspace-1'
     }
   },
   globalTechnicalSettings: {}

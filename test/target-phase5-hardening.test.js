@@ -19,7 +19,7 @@ const { scanText: scanLegacyText } = require('../scripts/release/legacy-scan');
 
 async function harness(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase5-hardening-'));
-  const targetDataFile = path.join(root, 'target-v2.json');
+  const targetDataFile = path.join(root, 'target-v3.json');
   const sourceFilesRoot = path.join(root, 'sources');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });
@@ -27,7 +27,7 @@ async function harness(t) {
   return { root, sourceFilesRoot, targetDataFile };
 }
 
-test('release startup validates strict version-2 bytes before listening', async t => {
+test('release startup validates strict schema-v3 bytes before listening', async t => {
   const context = await harness(t);
   const before = await fs.readFile(context.targetDataFile);
   const validated = await validateTargetStartup(context);
@@ -157,11 +157,13 @@ test('bounded-log failures cannot replace the safe client error response', async
 
 test('generic private bootstrap is deterministic, strict, and target-only', () => {
   const definition = {
-    organization: { name: 'Fictional Local Organization', description: 'Private-input example used only in this test.' },
-    workspace: { name: 'Fictional Delivery Workspace' },
+    organization: { name: 'Organization 1' },
+    workspace: { name: 'PM Workspace 1' },
     scopes: [
-      { name: 'Fictional Scope One' },
-      { name: 'Fictional Scope Two', owner: 'Example Owner' }
+      { name: 'Scope 1' },
+      { name: 'Scope 2' },
+      { name: 'Scope 3' },
+      { name: 'Scope 4' }
     ]
   };
   const first = createBootstrapSeed(definition);
@@ -170,9 +172,13 @@ test('generic private bootstrap is deterministic, strict, and target-only', () =
   assert.equal(serializeTargetData(first), serializeTargetData(second));
   assertBootstrapOnly(first);
   assert.equal(first.workItems.length, 0);
+  assert.equal(first.features.length, 0);
   assert.equal(first.jiraEpicMappings.length, 0);
   assert.equal(first.briefings.length, 0);
   assert.doesNotMatch(JSON.stringify(first), /Miscellaneous|No Epic/i);
+  assert.deepEqual(first.organizations.map(item => item.id), ['org-1']);
+  assert.deepEqual(first.workspaces.map(item => item.id), ['workspace-1']);
+  assert.deepEqual(first.scopes.map(item => item.id), ['scope-1', 'scope-2', 'scope-3', 'scope-4']);
   assert.throws(() => normalizeBootstrapDefinition({ ...definition, unexpected: true }), /unsupported fields/);
   assert.throws(() => normalizeBootstrapDefinition({ ...definition, scopes: [{ name: 'Same' }, { name: 'same' }] }), /unique/);
 });
@@ -180,7 +186,7 @@ test('generic private bootstrap is deterministic, strict, and target-only', () =
 test('staged-seed validation rejects operational history and permissive modes', async t => {
   const context = await harness(t);
   const result = await validateSeed(context.targetDataFile);
-  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.schemaVersion, 3);
   assert.equal(result.counts.operationalRecords, 0);
 
   const withHistory = createCleanSeed();

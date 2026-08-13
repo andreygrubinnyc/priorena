@@ -50,7 +50,7 @@ const PROPOSED_CHANGE_FIELDS = Object.freeze([
 ]);
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target capture services require an explicit version-2 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target capture services require an explicit schema-v3 data-file path');
   return path.resolve(filePath);
 }
 
@@ -132,10 +132,12 @@ function evidenceAssociations(document, workItemId, nextScopeId) {
 
 function reassignWorkItemAndEvidence(document, runtime, resolvers, context, workItem, scopeId, actor, timestamp, action) {
   if (scopeId !== null) resolvers.resolveWorkspaceChild('scopes', context.organizationId, context.workspaceId, scopeId);
-  const before = workItem.scopeId;
+  const before = { scopeId: workItem.scopeId, featureId: workItem.featureId };
+  const currentFeature = workItem.featureId === null ? null : resolvers.indexes.features.get(workItem.featureId);
   workItem.scopeId = scopeId;
+  if (!currentFeature || currentFeature.scopeId !== scopeId) workItem.featureId = null;
   workItem.updatedAt = timestamp;
-  audit(document, runtime, context, 'workItem', workItem.id, action, actor, timestamp, before, scopeId);
+  audit(document, runtime, context, 'workItem', workItem.id, action, actor, timestamp, before, { scopeId, featureId: workItem.featureId });
   const evidenceChanges = evidenceAssociations(document, workItem.id, scopeId);
   evidenceChanges.forEach(change => {
     const evidence = resolvers.resolveWorkspaceChild('evidence', context.organizationId, context.workspaceId, change.evidenceId);
@@ -161,7 +163,7 @@ function applyImportProposals(document, runtime, context, resolvers, inputValue,
   });
   const approved = preview.proposals.filter(proposal => approvedIds.includes(proposal.id));
   const timestamp = runtime.timestamp();
-  const created = { sources: [], scopes: [], jiraEpicMappings: [], workItems: [], findings: [], assignments: [], deferredCurrentStateChanges: [] };
+  const created = { sources: [], scopes: [], jiraEpicMappings: [], workItems: [], findings: [], assignments: [], deferredCurrentStateChanges: [], externalItemTypeReviews: [] };
   const createdIdsByProposal = new Map();
 
   approved.filter(proposal => proposal.type === 'source-create').forEach(proposal => {
@@ -216,7 +218,7 @@ function applyImportProposals(document, runtime, context, resolvers, inputValue,
   approved.filter(proposal => proposal.type === 'work-item-create').forEach(proposal => {
     const payload = proposal.payload;
     const record = {
-      id: runtime.id('workItem'), ...context, scopeId: null, jiraId: null, jiraKey: payload.jiraKey,
+      id: runtime.id('workItem'), ...context, scopeId: null, featureId: null, jiraId: null, jiraKey: payload.jiraKey,
       itemType: payload.itemType, summary: payload.summary, description: payload.description,
       canonicalStatus: payload.canonicalStatus, currentStateProvenance: 'approved-target-import-proposal',
       currentStateConfidence: 'confirmed', lastCapturedCommentAt: null, sourceStatus: null, assignee: null,
@@ -239,6 +241,10 @@ function applyImportProposals(document, runtime, context, resolvers, inputValue,
       'work-item-scope-assigned-from-approved-import-proposal'
     );
     created.assignments.push({ workItemId: item.id, scopeId: item.scopeId, evidenceChanges });
+  });
+
+  approved.filter(proposal => proposal.type === 'external-item-type-review').forEach(proposal => {
+    created.externalItemTypeReviews.push(clone(proposal.payload));
   });
 
   approved.filter(proposal => proposal.type === 'finding-create').forEach(proposal => {

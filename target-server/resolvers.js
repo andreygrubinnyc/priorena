@@ -5,6 +5,7 @@ const { invalidId, notFound } = require('./errors');
 const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const WORKSPACE_COLLECTIONS = Object.freeze([
   'scopes',
+  'features',
   'jiraEpicMappings',
   'workItems',
   'milestones',

@@ -41,6 +41,7 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .navigation button, .navigation summary { width: 100%; border: 0; border-radius: .45rem; padding: .6rem .7rem; background: transparent; color: #e9edf5; text-align: left; cursor: pointer; }
 .navigation button:hover, .navigation button[aria-current="page"] { background: #293750; color: white; }
 .navigation details button { padding-left: 1.5rem; }
+.navigation .nav-hint { display: block; padding: 0 .7rem .35rem 1.5rem; color: #9aa7bc; font-size: .72rem; }
 .navigation summary { list-style-position: inside; }
 .nav-heading { margin: .8rem .7rem .25rem; color: #9aa7bc; text-transform: uppercase; }
 .local-boundary { margin-top: 1.5rem; color: #9aa7bc; line-height: 1.5; }

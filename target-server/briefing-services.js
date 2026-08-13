@@ -37,7 +37,7 @@ const MAX_MANUAL_INPUTS = 50;
 const MAX_OUTPUT_BYTES = 128 * 1024;
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit version-2 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit schema-v3 data-file path');
   return path.resolve(filePath);
 }
 
@@ -152,6 +152,7 @@ function candidateBase(selection, record, values) {
 function buildCandidateFacts(document, selection) {
   const map = selectionMap(document, selection);
   const scopeNames = new Map(document.scopes.map(scope => [scope.id, scope.name]));
+  const featureNames = new Map(document.features.map(feature => [feature.id, feature.name]));
   const sourceNames = new Map(document.sources.map(source => [source.id, source.title]));
   const findingIndex = new Map(document.findings.map(finding => [finding.id, finding]));
   const candidates = [];
@@ -160,15 +161,18 @@ function buildCandidateFacts(document, selection) {
     .filter(item => item.organizationId === selection.organizationId && !item.archived && includesRecord(item, map))
     .forEach(item => {
       const scopeLabel = item.scopeId === null ? 'Unassigned' : scopeNames.get(item.scopeId);
+      const featureLabel = item.featureId === null ? 'No Feature' : featureNames.get(item.featureId);
       candidates.push(candidateBase(selection, item, {
         id: `fact:current-state:${item.id}`,
         kind: 'current-state',
         section: ['Blocked', 'At risk'].includes(item.canonicalStatus) ? 'risk' : 'progress',
         title: item.summary,
-        text: `Status: ${item.canonicalStatus}. Scope: ${scopeLabel}.`,
+        text: `Status: ${item.canonicalStatus}. Scope: ${scopeLabel}. Feature: ${featureLabel}.`,
         currentness: 'current',
         provenance: { type: 'direct-work-item-state', workItemId: item.id, label: item.currentStateProvenance }
       }));
+      candidates.at(-1).featureId = item.featureId;
+      candidates.at(-1).featureName = featureLabel;
       if (['open', 'waiting'].includes(item.followUp.state)) {
         candidates.push(candidateBase(selection, item, {
           id: `fact:follow-up:${item.id}`,
@@ -224,12 +228,14 @@ function buildCandidateFacts(document, selection) {
 
 function definitionSnapshot(document, briefing) {
   const resolvers = createTargetResolvers(document);
+  const organization = resolvers.resolveOrganization(briefing.organizationId);
   const workspaces = briefing.workspaceIds.map(workspaceId => resolvers.resolveWorkspace(briefing.organizationId, workspaceId));
   const scopes = briefing.scopeIds.map(scopeId => resolvers.indexes.scopes.get(scopeId));
   return {
     briefingId: briefing.id,
     name: briefing.name,
     briefingType: briefing.briefingType || 'status-update',
+    organization: { id: organization.id, name: organization.name },
     audienceProfile: briefing.audienceProfile,
     preferredFormats: [...briefing.preferredFormats],
     defaultSections: [...briefing.defaultSections],
@@ -370,6 +376,7 @@ function canonicalContentModel(version) {
     briefingId: version.briefingId,
     versionId: version.id,
     name: definition.name,
+    organization: clone(definition.organization),
     briefingType: definition.briefingType,
     audienceProfile: definition.audienceProfile,
     sections: [...definition.defaultSections],

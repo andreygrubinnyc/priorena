@@ -116,9 +116,11 @@ function rawRecords(format, content) {
 
 function normalizeImportRecord(value) {
   exactKeys(value, RECORD_FIELDS);
+  const externalItemType = value.itemType === 'Feature' ? 'Feature' : null;
   const record = {
     externalKey: value.externalKey === undefined || value.externalKey === null ? null : requireCanonicalJiraKey(value.externalKey),
-    itemType: value.itemType === undefined ? 'Unknown' : requireEnum(value.itemType, [...ITEM_TYPES]),
+    itemType: value.itemType === undefined ? 'Unknown' : (externalItemType === null ? requireEnum(value.itemType, [...ITEM_TYPES]) : null),
+    externalItemType,
     summary: value.summary === undefined ? null : nullableText(value.summary, { max: 1_000 }),
     description: value.description === undefined ? '' : requireText(value.description, { allowEmpty: true, max: MAX_IMPORT_CELL_CHARACTERS }),
     jiraProjectKey: value.jiraProjectKey === undefined ? null : requireCanonicalJiraKey(value.jiraProjectKey),
@@ -191,6 +193,15 @@ function buildImportPreview(document, organizationId, workspaceId, value, revisi
   });
 
   input.records.forEach((record, index) => {
+    if (record.externalItemType === 'Feature') {
+      add('external-item-type-review', index, {
+        externalItemType: 'Feature',
+        externalKey: record.externalKey,
+        summary: record.summary,
+        requiresExplicitMapping: true
+      });
+      return;
+    }
     const exactWorkItem = exactWorkItemForRecord(document, workspace.organizationId, workspace.id, record);
     let exactScopeId = exactScopeForMapping(document, workspace.organizationId, workspace.id, record);
     if (record.requestedScopeId !== null) {
@@ -225,10 +236,19 @@ function buildImportPreview(document, organizationId, workspaceId, value, revisi
     }
 
     if (exactScopeId !== null && ((exactWorkItem && exactWorkItem.scopeId !== exactScopeId) || workItemProposal)) {
+      const currentFeature = exactWorkItem?.featureId === null || exactWorkItem?.featureId === undefined
+        ? null
+        : document.features.find(feature => feature.id === exactWorkItem.featureId);
+      const afterFeatureId = currentFeature?.scopeId === exactScopeId ? currentFeature.id : null;
       add('work-item-assign', index, {
         workItemId: exactWorkItem?.id || null,
         workItemProposalId: workItemProposal?.id || null,
-        scopeId: exactScopeId
+        scopeId: exactScopeId,
+        featureChange: {
+          effect: afterFeatureId === exactWorkItem?.featureId ? 'retained' : 'cleared',
+          beforeFeatureId: exactWorkItem?.featureId || null,
+          afterFeatureId
+        }
       }, workItemProposal ? [workItemProposal.id] : []);
     }
 
