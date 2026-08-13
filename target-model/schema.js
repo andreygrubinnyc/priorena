@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const TARGET_SCHEMA_VERSION = 3;
+const TARGET_SCHEMA_VERSION = 4;
 const UNASSIGNED_SCOPE = Object.freeze({ scopeId: null, label: 'Unassigned' });
 
 const ROOT_COLLECTIONS = Object.freeze([
@@ -370,7 +370,7 @@ function validateFollowUp(value, path) {
 
 function validateWorkItem(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'workspaceId', 'scopeId', 'featureId', 'jiraId', 'jiraKey', 'itemType',
+    'id', 'organizationId', 'workspaceId', 'scopeId', 'featureId', 'jiraEpicMappingId', 'jiraId', 'jiraKey', 'itemType',
     'summary', 'description', 'canonicalStatus', 'currentStateProvenance', 'currentStateConfidence',
     'lastCapturedCommentAt', 'sourceStatus', 'assignee', 'sprint', 'labels', 'dependencies',
     'notes', 'archived', 'followUp', 'createdAt', 'updatedAt'
@@ -381,6 +381,7 @@ function validateWorkItem(record, path) {
   assertId(record.workspaceId, `${path}.workspaceId`);
   assertNullableId(record.scopeId, `${path}.scopeId`);
   assertNullableId(record.featureId, `${path}.featureId`);
+  assertNullableId(record.jiraEpicMappingId, `${path}.jiraEpicMappingId`);
   assertNullableString(record.jiraId, `${path}.jiraId`, { max: 200 });
   assertNullableString(record.jiraKey, `${path}.jiraKey`, { max: 100 });
   assertEnum(record.itemType, `${path}.itemType`, ITEM_TYPES);
@@ -675,6 +676,14 @@ function requireFeature(indexes, organizationId, workspaceId, scopeId, featureId
   return feature;
 }
 
+function requireJiraEpicMapping(indexes, organizationId, workspaceId, scopeId, mappingId, path) {
+  const mapping = indexes.jiraEpicMappings.get(mappingId);
+  if (!mapping || mapping.organizationId !== organizationId || mapping.workspaceId !== workspaceId || mapping.scopeId !== scopeId) {
+    fail(path, 'must reference a Jira Epic mapping with matching Organization, Workspace, and Scope parents');
+  }
+  return mapping;
+}
+
 function requireWorkItem(indexes, organizationId, workspaceId, workItemId, path) {
   const workItem = indexes.workItems.get(workItemId);
   if (!workItem || workItem.organizationId !== organizationId || workItem.workspaceId !== workspaceId) {
@@ -729,6 +738,17 @@ function validateParentRelationships(document, indexes) {
     if (workItem.featureId !== null) {
       if (workItem.scopeId === null) fail(`${path}.featureId`, 'requires a non-null Scope');
       requireFeature(indexes, workItem.organizationId, workItem.workspaceId, workItem.scopeId, workItem.featureId, `${path}.featureId`);
+    }
+    if (workItem.jiraEpicMappingId !== null) {
+      if (workItem.scopeId === null) fail(`${path}.jiraEpicMappingId`, 'requires a non-null Scope');
+      requireJiraEpicMapping(
+        indexes,
+        workItem.organizationId,
+        workItem.workspaceId,
+        workItem.scopeId,
+        workItem.jiraEpicMappingId,
+        `${path}.jiraEpicMappingId`
+      );
     }
     workItem.dependencies.forEach((dependencyId, dependencyIndex) => {
       if (dependencyId === workItem.id) fail(`${path}.dependencies[${dependencyIndex}]`, 'must not reference the Work Item itself');

@@ -26,13 +26,24 @@ function payload(organizationId, workspaceId, marker = '', revision = REVISION_A
       { id: `${workspaceId}-feature-one`, organizationId, workspaceId, scopeId: `${workspaceId}-scope-one`, name: 'Duplicate Feature' },
       { id: `${workspaceId}-feature-two`, organizationId, workspaceId, scopeId: `${workspaceId}-scope-two`, name: 'Duplicate Feature' }
     ],
+    jiraEpicMappings: [
+      {
+        id: `${workspaceId}-jira-epic-one`, organizationId, workspaceId,
+        scopeId: `${workspaceId}-scope-one`, jiraEpicKey: 'FICT-101', jiraEpicName: 'Duplicate Epic', mappingStatus: 'verified'
+      },
+      {
+        id: `${workspaceId}-jira-epic-two`, organizationId, workspaceId,
+        scopeId: `${workspaceId}-scope-two`, jiraEpicKey: 'FICT-102', jiraEpicName: 'Duplicate Epic', mappingStatus: 'pending'
+      }
+    ],
     workItems: [
       {
         id: `${workspaceId}-assigned`, organizationId, workspaceId, scopeId: `${workspaceId}-scope-two`, featureId: `${workspaceId}-feature-two`,
+        jiraEpicMappingId: `${workspaceId}-jira-epic-two`, jiraEpic: { jiraEpicKey: 'FICT-102', jiraEpicName: 'Duplicate Epic' },
         summary: `${marker} assigned fictional item`, jiraKey: null, itemType: 'Task', canonicalStatus: 'Planned', assignee: null, sprint: null
       },
       {
-        id: `${workspaceId}-unassigned`, organizationId, workspaceId, scopeId: null, featureId: null,
+        id: `${workspaceId}-unassigned`, organizationId, workspaceId, scopeId: null, featureId: null, jiraEpicMappingId: null, jiraEpic: null,
         summary: `${marker} Unassigned fictional item`, jiraKey: null, itemType: 'Task', canonicalStatus: 'Planned', assignee: null, sprint: null
       }
     ],
@@ -63,6 +74,14 @@ test('workflow filtering uses stable Scope IDs and preserves Unassigned semantic
     filterWorkItems(data.workItems, { scopeId: 'all', featureId: 'none', itemType: 'Task', search: '' }).map(item => item.id),
     ['workspace-client-unassigned']
   );
+  assert.deepEqual(
+    filterWorkItems(data.workItems, { scopeId: 'all', featureId: 'all', jiraEpicMappingId: 'workspace-client-jira-epic-two', itemType: 'all', search: '' }).map(item => item.id),
+    ['workspace-client-assigned']
+  );
+  assert.deepEqual(
+    filterWorkItems(data.workItems, { scopeId: 'all', featureId: 'all', jiraEpicMappingId: 'none', itemType: 'all', search: '' }).map(item => item.id),
+    ['workspace-client-unassigned']
+  );
   assert.equal(commentCaptureLabel(null), 'No comment date captured');
   assert.equal(commentCaptureLabel('2026-08-11T12:00:00.000Z'), '2026-08-11T12:00:00.000Z');
 });
@@ -76,6 +95,7 @@ test('workflow API client uses only stable parent-scoped routes and explicit JSO
       const bodies = {
         scopes: { scopes: [] },
         features: { features: [] },
+        'jira-epic-mappings': { jiraEpicMappings: [] },
         'work-items': { workItems: [] },
         milestones: { milestones: [] },
         sources: { sources: [] },
@@ -101,7 +121,7 @@ test('workflow API client uses only stable parent-scoped routes and explicit JSO
     action: { type: 'assign-scope', scopeId: null },
     previewHash: REVISION_A
   });
-  assert.equal(calls.length, 10);
+  assert.equal(calls.length, 11);
   assert.ok(calls.every(call => call.url.startsWith('/api/v2/organizations/org-client/workspaces/workspace-client/')));
   assert.equal(calls.at(-1).options.method, 'POST');
   assert.match(calls.at(-1).options.body, /expectedRevision/);

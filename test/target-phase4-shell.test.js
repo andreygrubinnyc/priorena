@@ -87,7 +87,13 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.match(client, /function featureOptionLabel\(feature\)/);
   assert.match(client, /Stable ID: \$\{feature\.id\}/);
   assert.match(client, /Create Feature/);
-  assert.match(client, /Preview Scope and Feature assignment/);
+  assert.match(client, /Preview association changes/);
+  assert.match(client, /All Jira Epics/);
+  assert.match(client, /No Jira Epic/);
+  assert.match(client, /function jiraEpicOptionLabel\(mapping\)/);
+  assert.match(client, /jiraEpicAssignment\.disabled = scopeId === 'unassigned'/);
+  assert.match(client, /result\.kind === 'workItem'/);
+  assert.match(client, /Work Item Jira key/);
   assert.match(client, /Preview \$\{entityLabel\} rename/);
   assert.match(client, /onApplied\(result\.body\);[\s\S]*state\.workflow = null;[\s\S]*await loadWorkflow\(\);[\s\S]*renderSettings\(\);/);
   assert.match(client, /Existing frozen Briefing snapshots are not rewritten/);
@@ -171,7 +177,7 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
 
 test('target UI is the release root and does not mutate target data', async t => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase4-shell-'));
-  const targetDataFile = path.join(tempRoot, 'target-v3.json');
+  const targetDataFile = path.join(tempRoot, 'target-v4.json');
   const sourceFilesRoot = path.join(tempRoot, 'source-files');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });

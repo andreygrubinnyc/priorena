@@ -37,7 +37,7 @@ const MAX_MANUAL_INPUTS = 50;
 const MAX_OUTPUT_BYTES = 128 * 1024;
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit schema-v3 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit schema-v4 data-file path');
   return path.resolve(filePath);
 }
 
@@ -153,6 +153,7 @@ function buildCandidateFacts(document, selection) {
   const map = selectionMap(document, selection);
   const scopeNames = new Map(document.scopes.map(scope => [scope.id, scope.name]));
   const featureNames = new Map(document.features.map(feature => [feature.id, feature.name]));
+  const jiraEpicMappings = new Map(document.jiraEpicMappings.map(mapping => [mapping.id, mapping]));
   const sourceNames = new Map(document.sources.map(source => [source.id, source.title]));
   const findingIndex = new Map(document.findings.map(finding => [finding.id, finding]));
   const candidates = [];
@@ -162,17 +163,27 @@ function buildCandidateFacts(document, selection) {
     .forEach(item => {
       const scopeLabel = item.scopeId === null ? 'Unassigned' : scopeNames.get(item.scopeId);
       const featureLabel = item.featureId === null ? 'No Feature' : featureNames.get(item.featureId);
+      const jiraEpicMapping = item.jiraEpicMappingId === null ? null : jiraEpicMappings.get(item.jiraEpicMappingId);
+      const jiraEpicLabel = jiraEpicMapping === null
+        ? 'No Jira Epic'
+        : `${jiraEpicMapping.jiraEpicKey} — ${jiraEpicMapping.jiraEpicName} (${jiraEpicMapping.mappingStatus})`;
+      const workItemJiraLabel = item.jiraKey === null ? 'No Work Item Jira key' : item.jiraKey;
       candidates.push(candidateBase(selection, item, {
         id: `fact:current-state:${item.id}`,
         kind: 'current-state',
         section: ['Blocked', 'At risk'].includes(item.canonicalStatus) ? 'risk' : 'progress',
         title: item.summary,
-        text: `Status: ${item.canonicalStatus}. Scope: ${scopeLabel}. Feature: ${featureLabel}.`,
+        text: `Status: ${item.canonicalStatus}. Scope: ${scopeLabel}. Feature: ${featureLabel}. Jira Epic: ${jiraEpicLabel}. Work Item Jira key: ${workItemJiraLabel}.`,
         currentness: 'current',
         provenance: { type: 'direct-work-item-state', workItemId: item.id, label: item.currentStateProvenance }
       }));
       candidates.at(-1).featureId = item.featureId;
       candidates.at(-1).featureName = featureLabel;
+      candidates.at(-1).jiraEpicMappingId = item.jiraEpicMappingId;
+      candidates.at(-1).jiraEpicKey = jiraEpicMapping?.jiraEpicKey || null;
+      candidates.at(-1).jiraEpicName = jiraEpicMapping?.jiraEpicName || null;
+      candidates.at(-1).jiraEpicMappingStatus = jiraEpicMapping?.mappingStatus || null;
+      candidates.at(-1).workItemJiraKey = item.jiraKey;
       if (['open', 'waiting'].includes(item.followUp.state)) {
         candidates.push(candidateBase(selection, item, {
           id: `fact:follow-up:${item.id}`,

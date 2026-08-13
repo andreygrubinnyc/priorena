@@ -31,7 +31,7 @@
   const pageDefinitions = Object.freeze({
     portfolio: ['Portfolio', 'Organization-scoped delivery attention across PM Workspaces.'],
     today: ['Today', 'Attention-first current state for the selected PM Workspace.'],
-    'work-items': ['Work Items', 'Review and update Work Items with visible Scope context.'],
+    'work-items': ['Work Items', 'Review independent Scope, Feature, and Jira Epic associations.'],
     'follow-up': ['Follow-Up', 'PM attention attached to Work Items in this PM Workspace.'],
     milestones: ['Milestones', 'Workspace and Scope delivery checkpoints.'],
     'add-source': ['Add Source', 'Capture bounded local material for explicit Finding review.'],
@@ -51,6 +51,7 @@
     activeView: 'portfolio',
     scopeFilter: 'all',
     featureFilter: 'all',
+    jiraEpicFilter: 'all',
     itemTypeFilter: 'all',
     selectedWorkItemIds: new Set(),
     generation: 0
@@ -185,10 +186,21 @@
     return `${feature.name} · ${feature.id}`;
   }
 
+  function jiraEpicName(mappingId) {
+    if (mappingId === null) return 'No Jira Epic';
+    const mapping = state.workflow?.jiraEpicMappings?.find(item => item.id === mappingId);
+    return mapping ? `${mapping.jiraEpicKey} — ${mapping.jiraEpicName}` : 'Jira Epic unavailable';
+  }
+
+  function jiraEpicOptionLabel(mapping) {
+    return `${mapping.jiraEpicKey} — ${mapping.jiraEpicName} · ${mapping.mappingStatus} · ${mapping.id}`;
+  }
+
   function clearOperationalUi(message = 'Select a valid context to continue.') {
     state.workflow = null;
     state.scopeFilter = 'all';
     state.featureFilter = 'all';
+    state.jiraEpicFilter = 'all';
     state.itemTypeFilter = 'all';
     state.selectedWorkItemIds.clear();
     elements.view.replaceChildren(empty(message));
@@ -363,8 +375,12 @@
         (state.scopeFilter === 'unassigned' ? item.scopeId === null : item.scopeId === state.scopeFilter);
       const featureMatches = state.featureFilter === 'all' ||
         (state.featureFilter === 'none' ? item.featureId === null : item.featureId === state.featureFilter);
+      const jiraEpicMatches = state.jiraEpicFilter === 'all' ||
+        (state.jiraEpicFilter === 'none'
+          ? item.jiraEpicMappingId === null
+          : item.jiraEpicMappingId === state.jiraEpicFilter);
       const typeMatches = state.itemTypeFilter === 'all' || item.itemType === state.itemTypeFilter;
-      return scopeMatches && featureMatches && typeMatches;
+      return scopeMatches && featureMatches && jiraEpicMatches && typeMatches;
     });
   }
 
@@ -376,6 +392,10 @@
         if (state.scopeFilter === 'unassigned' || (state.featureFilter !== 'all' && state.featureFilter !== 'none' &&
           state.workflow?.features?.find(feature => feature.id === state.featureFilter)?.scopeId !== state.scopeFilter && state.scopeFilter !== 'all')) {
           state.featureFilter = 'all';
+        }
+        if (state.scopeFilter === 'unassigned' || (state.jiraEpicFilter !== 'all' && state.jiraEpicFilter !== 'none' &&
+          state.workflow?.jiraEpicMappings?.find(mapping => mapping.id === state.jiraEpicFilter)?.scopeId !== state.scopeFilter && state.scopeFilter !== 'all')) {
+          state.jiraEpicFilter = 'all';
         }
         state.selectedWorkItemIds.clear();
         updateBreadcrumb();
@@ -406,6 +426,24 @@
     return node('label', {}, [node('span', { text: 'Feature' }), select]);
   }
 
+  function jiraEpicFilterControl() {
+    const mappings = (state.workflow?.jiraEpicMappings || [])
+      .filter(mapping => state.scopeFilter === 'all' || mapping.scopeId === state.scopeFilter);
+    const select = node('select', {
+      id: 'jira-epic-filter',
+      on: { change: event => {
+        state.jiraEpicFilter = event.target.value;
+        state.selectedWorkItemIds.clear();
+        renderWorkItems();
+      } }
+    }, [
+      option('all', 'All Jira Epics', state.jiraEpicFilter === 'all'),
+      option('none', 'No Jira Epic', state.jiraEpicFilter === 'none'),
+      ...mappings.map(mapping => option(mapping.id, jiraEpicOptionLabel(mapping), state.jiraEpicFilter === mapping.id))
+    ]);
+    return node('label', {}, [node('span', { text: 'Jira Epic' }), select]);
+  }
+
   function itemTypeFilterControl() {
     const select = node('select', {
       id: 'item-type-filter',
@@ -418,7 +456,7 @@
     return node('label', {}, [node('span', { text: 'Type' }), select]);
   }
 
-  async function previewScopeAssignment(scopeId, featureId = 'none') {
+  async function previewScopeAssignment(scopeId, featureId = 'keep', jiraEpicMappingId = 'keep') {
     if (!state.selectedWorkItemIds.size) {
       setStatus('Select at least one Work Item.', 'error');
       return;
@@ -427,9 +465,14 @@
     const selectedWorkItemIds = [...state.selectedWorkItemIds];
     const action = {
       type: 'assign-scope',
-      scopeId: scopeId === 'unassigned' ? null : scopeId,
-      featureId: featureId === 'none' || scopeId === 'unassigned' ? null : featureId
+      scopeId: scopeId === 'unassigned' ? null : scopeId
     };
+    if (scopeId === 'unassigned' || featureId !== 'keep') {
+      action.featureId = featureId === 'none' || scopeId === 'unassigned' ? null : featureId;
+    }
+    if (scopeId === 'unassigned' || jiraEpicMappingId !== 'keep') {
+      action.jiraEpicMappingId = jiraEpicMappingId === 'none' || scopeId === 'unassigned' ? null : jiraEpicMappingId;
+    }
     setStatus('Preparing exact Scope changes…');
     try {
       const result = await workflowApi.previewBulkWorkItems(token.organizationId, token.workspaceId, {
@@ -438,12 +481,12 @@
       });
       if (!workspaceOperationCurrent(token)) return;
       const rows = result.preview.rows.map(row => node('p', {
-        text: `${row.workItemId}: ${row.before === null ? 'Unassigned' : scopeName(row.before)} → ${row.after === null ? 'Unassigned' : scopeName(row.after)}; Feature ${featureName(row.featureChange?.beforeFeatureId || null)} → ${featureName(row.featureChange?.afterFeatureId || null)} (${row.featureChange?.effect || 'unchanged'})`
+        text: `${row.workItemId}: Scope ${row.before === null ? 'Unassigned' : scopeName(row.before)} → ${row.after === null ? 'Unassigned' : scopeName(row.after)}; Feature ${featureName(row.featureChange?.beforeFeatureId || null)} → ${featureName(row.featureChange?.afterFeatureId || null)} (${row.featureChange?.effect || 'unchanged'}); Jira Epic ${jiraEpicName(row.jiraEpicChange?.beforeJiraEpicMappingId || null)} → ${jiraEpicName(row.jiraEpicChange?.afterJiraEpicMappingId || null)} (${row.jiraEpicChange?.effect || 'unchanged'})`
       }));
       const approved = await confirmAction(
-        'Confirm Scope and Feature assignment',
+        'Confirm Scope, Feature, and Jira Epic assignment',
         [node('p', { text: 'The server reconstructed these exact current values. No change is applied until confirmation.' }), ...rows],
-        'Assign Scope and Feature'
+        'Apply associations'
       );
       if (!approved || !workspaceOperationCurrent(token)) {
         if (!workspaceOperationCurrent(token)) return;
@@ -478,25 +521,37 @@
       ...(state.workflow?.scopes || []).filter(scope => !scope.archived).map(scope => option(scope.id, scope.name))
     ]);
     const featureAssignment = node('select', { id: 'feature-assignment' });
-    const refreshFeatureAssignment = () => {
+    const jiraEpicAssignment = node('select', { id: 'jira-epic-assignment' });
+    const refreshRelationshipAssignments = () => {
       const scopeId = assignment.value;
       featureAssignment.replaceChildren(
-        option('none', 'No Feature'),
+        option(scopeId === 'unassigned' ? 'none' : 'keep', scopeId === 'unassigned' ? 'No Feature' : 'Keep compatible Feature'),
+        ...(scopeId === 'unassigned' ? [] : [option('none', 'No Feature')]),
         ...(state.workflow?.features || []).filter(feature => feature.scopeId === scopeId).map(feature => option(feature.id, featureOptionLabel(feature)))
       );
+      jiraEpicAssignment.replaceChildren(
+        option(scopeId === 'unassigned' ? 'none' : 'keep', scopeId === 'unassigned' ? 'No Jira Epic' : 'Keep compatible Jira Epic'),
+        ...(scopeId === 'unassigned' ? [] : [option('none', 'No Jira Epic')]),
+        ...(state.workflow?.jiraEpicMappings || [])
+          .filter(mapping => mapping.scopeId === scopeId)
+          .map(mapping => option(mapping.id, jiraEpicOptionLabel(mapping)))
+      );
       featureAssignment.disabled = scopeId === 'unassigned';
+      jiraEpicAssignment.disabled = scopeId === 'unassigned';
     };
-    assignment.addEventListener('change', refreshFeatureAssignment);
-    refreshFeatureAssignment();
+    assignment.addEventListener('change', refreshRelationshipAssignments);
+    refreshRelationshipAssignments();
     const items = visibleWorkItems();
     elements.view.replaceChildren(
       node('div', { className: 'filters' }, [
         scopeFilterControl(),
         featureFilterControl(),
+        jiraEpicFilterControl(),
         itemTypeFilterControl(),
         node('label', {}, [node('span', { text: 'Assign selected Scope' }), assignment]),
         node('label', {}, [node('span', { text: 'Assign selected Feature' }), featureAssignment]),
-        node('button', { className: 'button primary', type: 'button', text: 'Preview Scope and Feature assignment', on: { click: () => previewScopeAssignment(assignment.value, featureAssignment.value) } })
+        node('label', {}, [node('span', { text: 'Assign selected Jira Epic' }), jiraEpicAssignment]),
+        node('button', { className: 'button primary', type: 'button', text: 'Preview association changes', on: { click: () => previewScopeAssignment(assignment.value, featureAssignment.value, jiraEpicAssignment.value) } })
       ]),
       recordList(items, item => {
         const checkbox = node('input', {
@@ -509,8 +564,8 @@
           } }
         });
         return [
-          node('div', { className: 'row-head' }, [node('span', {}, [checkbox, ' ', node('strong', { text: item.summary })]), node('span', {}, [badge(item.scope?.name || 'Unassigned'), ' ', badge(item.feature?.name || 'No Feature')])]),
-          node('p', { className: 'meta', text: `${item.itemType} · ${item.canonicalStatus} · ${item.assignee || 'No assignee captured'} · Feature: ${item.feature?.name || 'No Feature'}` }),
+          node('div', { className: 'row-head' }, [node('span', {}, [checkbox, ' ', node('strong', { text: item.summary })]), node('span', {}, [badge(item.scope?.name || 'Unassigned'), ' ', badge(item.feature?.name || 'No Feature'), ' ', badge(item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} · ${item.jiraEpic.mappingStatus}` : 'No Jira Epic')])]),
+          node('p', { className: 'meta', text: `${item.itemType} · ${item.canonicalStatus} · ${item.assignee || 'No assignee captured'} · Feature: ${item.feature?.name || 'No Feature'} · Jira Epic: ${item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} — ${item.jiraEpic.jiraEpicName} (${item.jiraEpic.mappingStatus})` : 'No Jira Epic'} · Work Item Jira key: ${item.workItemJiraKey || 'None'}` }),
           node('p', { className: 'meta', text: `Current-state provenance: ${item.currentStateProvenance}` })
         ];
       }, 'No Work Items match this Scope filter.')
@@ -662,7 +717,7 @@
   }
 
   function renderSearch() {
-    const input = node('input', { attrs: { minlength: '2', maxlength: '200', 'aria-label': 'Search selected PM Workspace' }, placeholder: 'Search Work Items, Sources, Evidence, Milestones, or Scopes' });
+    const input = node('input', { attrs: { minlength: '2', maxlength: '200', 'aria-label': 'Search selected PM Workspace' }, placeholder: 'Search Work Items, Features, Jira Epics, Sources, Evidence, Milestones, or Scopes' });
     const results = node('div');
     const form = node('form', { className: 'filters' }, [input, node('button', { className: 'button primary', type: 'submit', text: 'Search' })]);
     form.addEventListener('submit', async event => {
@@ -678,7 +733,11 @@
         if (!workspaceOperationCurrent(token) || !results.isConnected) return;
         results.replaceChildren(recordList(response.body.results, result => [
           node('div', { className: 'row-head' }, [node('strong', { text: result.title }), badge(result.kind)]),
-          node('p', { className: 'meta', text: result.scopeName || (result.scopeId === null ? 'Unassigned or Workspace-level' : `Scope ${result.scopeId}`) })
+          node('p', { className: 'meta', text: result.scopeName || (result.scopeId === null ? 'Unassigned or Workspace-level' : `Scope ${result.scopeId}`) }),
+          result.kind === 'workItem' ? node('p', {
+            className: 'meta',
+            text: `Feature: ${result.featureName || 'No Feature'} · Jira Epic: ${result.jiraEpicKey ? `${result.jiraEpicKey} — ${result.jiraEpicName} (${result.jiraEpicMappingStatus})` : 'No Jira Epic'} · Work Item Jira key: ${result.workItemJiraKey || 'None'}`
+          }) : null
         ], 'No matching records in this PM Workspace.'));
         setStatus(`${response.body.results.length} search result${response.body.results.length === 1 ? '' : 's'}.`, 'success');
       } catch (error) {
@@ -1279,9 +1338,21 @@
     ]);
   }
 
+  function jiraEpicSettingsCard(mappings) {
+    return node('section', { className: 'card' }, [
+      node('h2', { text: 'Jira Epic mappings' }),
+      node('p', { className: 'meta', text: 'Jira Epic mappings are independent integration records. Metadata and status never rename a Scope or Feature, and this view makes no Jira calls.' }),
+      recordList(mappings, mapping => [
+        node('strong', { text: `${mapping.jiraEpicKey} — ${mapping.jiraEpicName}` }),
+        node('p', { className: 'meta', text: `Stable ID: ${mapping.id} · Scope: ${scopeName(mapping.scopeId)} · Project: ${mapping.jiraProjectKey} · Status: ${mapping.mappingStatus}` })
+      ], 'No Jira Epic mappings configured.')
+    ]);
+  }
+
   function renderSettings() {
     const scopes = state.workflow?.scopes || [];
     const features = state.workflow?.features || [];
+    const jiraEpicMappings = state.workflow?.jiraEpicMappings || [];
     const organization = selectedOrganization();
     const workspace = selectedWorkspace();
     const organizationRoute = `/api/v2/organizations/${encoded(organization.id)}`;
@@ -1290,15 +1361,16 @@
       node('section', { className: 'card' }, [node('h2', { text: 'User preferences' }), node('p', { text: 'Active Organization and PM Workspace preferences use stable IDs and are revalidated before use.' })]),
       node('section', { className: 'card' }, [node('h2', { text: 'Organization' }), node('p', { text: organization?.name || 'Organization required' }), node('p', { className: 'meta', text: 'Only truly Organization-wide settings belong here.' }), renameControl('Organization', organization.name, organizationRoute, body => { organization.name = body.organization.name; })]),
       node('section', { className: 'card' }, [node('h2', { text: 'Workspace' }), node('p', { text: workspace?.name || 'PM Workspace required' }), node('p', { className: 'meta', text: 'Sprint vocabulary, behavior thresholds, and drafting guidance remain Workspace-owned.' }), renameControl('PM Workspace', workspace.name, workspaceRoute, body => { workspace.name = body.workspace.name; })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Scopes & Jira mappings' }), node('p', { className: 'meta', text: 'Scope names are managed here. Jira Epic mappings are independent integration records.' }), recordList(scopes, scope => [
+      node('section', { className: 'card' }, [node('h2', { text: 'Scopes' }), node('p', { className: 'meta', text: 'Scope names are managed independently from Features and Jira Epic mappings.' }), recordList(scopes, scope => [
         node('strong', { text: scope.name }),
         node('p', { className: 'meta', text: scope.archived ? 'Archived Scope' : 'Active Scope' }),
         renameControl('Scope', scope.name, `${workspaceRoute}/scopes/${encoded(scope.id)}`, body => { scope.name = body.scope.name; })
       ], 'No Scopes configured.')]),
       featureSettingsCard(scopes, features),
+      jiraEpicSettingsCard(jiraEpicMappings),
       node('section', { className: 'card' }, [node('h2', { text: 'Behavior' }), node('p', { text: 'Deterministic status and milestone logic is system-defined unless a schema-supported Workspace threshold is explicitly edited.' })]),
       node('section', { className: 'card' }, [node('h2', { text: 'AI — Advanced' }), node('p', { text: 'Optional AI enhancement is disabled in the target UI. Deterministic Briefings remain fully available without it.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Data & Privacy' }), node('p', { text: 'Target data stays in the explicitly selected local schema-v3 file. There is no analytics, telemetry, automatic publishing, or cross-Organization view.' })])
+      node('section', { className: 'card' }, [node('h2', { text: 'Data & Privacy' }), node('p', { text: 'Target data stays in the explicitly selected local schema-v4 file. There is no analytics, telemetry, automatic publishing, or cross-Organization view.' })])
     ]));
   }
 
@@ -1457,6 +1529,7 @@
     state.activeView = button.dataset.view;
     state.scopeFilter = 'all';
     state.featureFilter = 'all';
+    state.jiraEpicFilter = 'all';
     state.itemTypeFilter = 'all';
     state.selectedWorkItemIds.clear();
     renderActiveView();

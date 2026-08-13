@@ -50,7 +50,7 @@ const PROPOSED_CHANGE_FIELDS = Object.freeze([
 ]);
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target capture services require an explicit schema-v3 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target capture services require an explicit schema-v4 data-file path');
   return path.resolve(filePath);
 }
 
@@ -130,14 +130,48 @@ function evidenceAssociations(document, workItemId, nextScopeId) {
     .map(item => ({ evidenceId: item.id, beforeScopeId: item.scopeId, afterScopeId: nextScopeId }));
 }
 
-function reassignWorkItemAndEvidence(document, runtime, resolvers, context, workItem, scopeId, actor, timestamp, action) {
+function reassignWorkItemAndEvidence(
+  document,
+  runtime,
+  resolvers,
+  context,
+  workItem,
+  scopeId,
+  actor,
+  timestamp,
+  action,
+  jiraEpicMappingId = undefined
+) {
   if (scopeId !== null) resolvers.resolveWorkspaceChild('scopes', context.organizationId, context.workspaceId, scopeId);
-  const before = { scopeId: workItem.scopeId, featureId: workItem.featureId };
+  const before = {
+    scopeId: workItem.scopeId,
+    featureId: workItem.featureId,
+    jiraEpicMappingId: workItem.jiraEpicMappingId
+  };
   const currentFeature = workItem.featureId === null ? null : resolvers.indexes.features.get(workItem.featureId);
+  const currentMapping = workItem.jiraEpicMappingId === null ? null : resolvers.indexes.jiraEpicMappings.get(workItem.jiraEpicMappingId);
   workItem.scopeId = scopeId;
   if (!currentFeature || currentFeature.scopeId !== scopeId) workItem.featureId = null;
+  if (jiraEpicMappingId !== undefined) {
+    if (jiraEpicMappingId !== null) {
+      const mapping = resolvers.resolveWorkspaceChild(
+        'jiraEpicMappings',
+        context.organizationId,
+        context.workspaceId,
+        jiraEpicMappingId
+      );
+      if (mapping.scopeId !== scopeId) throw invalidRequest();
+    }
+    workItem.jiraEpicMappingId = jiraEpicMappingId;
+  } else if (!currentMapping || currentMapping.scopeId !== scopeId) {
+    workItem.jiraEpicMappingId = null;
+  }
   workItem.updatedAt = timestamp;
-  audit(document, runtime, context, 'workItem', workItem.id, action, actor, timestamp, before, { scopeId, featureId: workItem.featureId });
+  audit(document, runtime, context, 'workItem', workItem.id, action, actor, timestamp, before, {
+    scopeId,
+    featureId: workItem.featureId,
+    jiraEpicMappingId: workItem.jiraEpicMappingId
+  });
   const evidenceChanges = evidenceAssociations(document, workItem.id, scopeId);
   evidenceChanges.forEach(change => {
     const evidence = resolvers.resolveWorkspaceChild('evidence', context.organizationId, context.workspaceId, change.evidenceId);
@@ -218,7 +252,8 @@ function applyImportProposals(document, runtime, context, resolvers, inputValue,
   approved.filter(proposal => proposal.type === 'work-item-create').forEach(proposal => {
     const payload = proposal.payload;
     const record = {
-      id: runtime.id('workItem'), ...context, scopeId: null, featureId: null, jiraId: null, jiraKey: payload.jiraKey,
+      id: runtime.id('workItem'), ...context, scopeId: null, featureId: null, jiraEpicMappingId: null,
+      jiraId: null, jiraKey: payload.jiraKey,
       itemType: payload.itemType, summary: payload.summary, description: payload.description,
       canonicalStatus: payload.canonicalStatus, currentStateProvenance: 'approved-target-import-proposal',
       currentStateConfidence: 'confirmed', lastCapturedCommentAt: null, sourceStatus: null, assignee: null,
@@ -238,9 +273,16 @@ function applyImportProposals(document, runtime, context, resolvers, inputValue,
     const item = resolvers.resolveWorkspaceChild('workItems', context.organizationId, context.workspaceId, workItemId);
     const evidenceChanges = reassignWorkItemAndEvidence(
       document, runtime, resolvers, context, item, proposal.payload.scopeId, actor, timestamp,
-      'work-item-scope-assigned-from-approved-import-proposal'
+      'work-item-scope-assigned-from-approved-import-proposal',
+      proposal.payload.jiraEpicMappingId
     );
-    created.assignments.push({ workItemId: item.id, scopeId: item.scopeId, evidenceChanges });
+    created.assignments.push({
+      workItemId: item.id,
+      scopeId: item.scopeId,
+      featureId: item.featureId,
+      jiraEpicMappingId: item.jiraEpicMappingId,
+      evidenceChanges
+    });
   });
 
   approved.filter(proposal => proposal.type === 'external-item-type-review').forEach(proposal => {

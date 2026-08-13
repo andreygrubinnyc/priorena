@@ -32,7 +32,7 @@ const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024;
 const MAX_AI_CONTEXT_BYTES = 512 * 1024;
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target services require an explicit schema-v3 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target services require an explicit schema-v4 data-file path');
   return path.resolve(filePath);
 }
 

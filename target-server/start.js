@@ -15,7 +15,7 @@ function parseArguments(argv) {
     const flag = argv[index];
     const value = argv[index + 1];
     if (!['--data-file', '--source-files-root', '--log-file', '--port'].includes(flag) || value === undefined || flag in values) {
-      throw new Error('Usage: node target-server/start.js --data-file <target-v3.json> --source-files-root <directory> --log-file <private-log> [--port <port>]');
+      throw new Error('Usage: node target-server/start.js --data-file <target-v4.json> --source-files-root <directory> --log-file <private-log> [--port <port>]');
     }
     values[flag] = value;
   }

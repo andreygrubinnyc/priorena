@@ -53,7 +53,7 @@ function feature(id, organizationId, workspaceId, scopeId, name = 'Duplicate Fic
     workspaceId,
     scopeId,
     name,
-    description: 'Fictional Feature used only for schema-v3 isolation tests.'
+    description: 'Fictional Feature used only for schema-v4 isolation tests.'
   };
 }
 
@@ -95,18 +95,28 @@ function followUp(state = 'none') {
   return { state, ...values[state] };
 }
 
-function workItem(id, organizationId, workspaceId, scopeId, summary, followUpState = 'none', featureId = null) {
+function workItem(
+  id,
+  organizationId,
+  workspaceId,
+  scopeId,
+  summary,
+  followUpState = 'none',
+  featureId = null,
+  jiraEpicMappingId = null
+) {
   return {
     id,
     organizationId,
     workspaceId,
     scopeId,
     featureId,
+    jiraEpicMappingId,
     jiraId: null,
     jiraKey: null,
     itemType: 'Task',
     summary,
-    description: 'Synthetic Work Item for schema-v3 tests.',
+    description: 'Synthetic Work Item for schema-v4 tests.',
     canonicalStatus: 'Planned',
     currentStateProvenance: 'fictional-manual-review',
     currentStateConfidence: 'confirmed',
@@ -156,7 +166,7 @@ function createMultiOrganizationFixture() {
         scopeId: 'scope-alpha-multiple-mappings',
         jiraProjectKey: 'FICTA',
         jiraEpicKey: 'FICTA-101',
-        jiraEpicName: 'Fictional Epic Alpha One',
+        jiraEpicName: 'Duplicate Fictional Jira Epic',
         mappingStatus: 'verified',
         provenance: 'Synthetic reviewed mapping.',
         verifiedAt: FIXTURE_TIMESTAMP
@@ -168,7 +178,7 @@ function createMultiOrganizationFixture() {
         scopeId: 'scope-alpha-multiple-mappings',
         jiraProjectKey: 'FICTA',
         jiraEpicKey: 'FICTA-102',
-        jiraEpicName: 'Fictional Epic Alpha Two',
+        jiraEpicName: 'Duplicate Fictional Jira Epic',
         mappingStatus: 'verified',
         provenance: 'Synthetic reviewed mapping.',
         verifiedAt: FIXTURE_TIMESTAMP
@@ -180,7 +190,7 @@ function createMultiOrganizationFixture() {
         scopeId: 'scope-alpha-secondary',
         jiraProjectKey: 'FICTA',
         jiraEpicKey: 'FICTA-201',
-        jiraEpicName: 'Fictional Secondary Epic',
+        jiraEpicName: 'Duplicate Fictional Jira Epic',
         mappingStatus: 'verified',
         provenance: 'Synthetic reviewed mapping.',
         verifiedAt: FIXTURE_TIMESTAMP
@@ -192,7 +202,7 @@ function createMultiOrganizationFixture() {
         scopeId: 'scope-beta-shared',
         jiraProjectKey: 'FICTA',
         jiraEpicKey: 'FICTA-101',
-        jiraEpicName: 'Fictional Epic With Cross-Organization Duplicate Key',
+        jiraEpicName: 'Duplicate Fictional Jira Epic',
         mappingStatus: 'verified',
         provenance: 'Synthetic reviewed mapping.',
         verifiedAt: FIXTURE_TIMESTAMP
@@ -206,7 +216,8 @@ function createMultiOrganizationFixture() {
         'scope-alpha-multiple-mappings',
         'ALPHA SENTINEL — assigned fictional work item',
         'open',
-        'feature-alpha-mapped'
+        'feature-alpha-mapped',
+        'jira-mapping-alpha-one'
       ),
       workItem(
         'work-item-alpha-unassigned',
@@ -314,7 +325,7 @@ function createMultiOrganizationFixture() {
         sourceId: 'source-alpha-sentinel',
         exactExcerpt: 'The fictional Alpha dependency is waiting for review.',
         extractionMethod: 'deterministic-test-extraction',
-        extractionVersion: 'target-v3-fixture-1',
+        extractionVersion: 'target-v4-fixture-1',
         category: 'dependency',
         reviewStatus: 'accepted',
         proposedWorkItemId: 'work-item-alpha-assigned',
@@ -329,7 +340,7 @@ function createMultiOrganizationFixture() {
         sourceId: 'source-beta-sentinel',
         exactExcerpt: 'The fictional Beta checkpoint is ready.',
         extractionMethod: 'deterministic-test-extraction',
-        extractionVersion: 'target-v3-fixture-1',
+        extractionVersion: 'target-v4-fixture-1',
         category: 'progress',
         reviewStatus: 'accepted',
         proposedWorkItemId: 'work-item-beta-assigned',
@@ -474,6 +485,9 @@ function createMultiOrganizationFixture() {
   };
 
   const alphaWorkspace = document.workspaces.find(item => item.id === 'workspace-alpha-shared');
+  const alphaAssignedWorkItem = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
+  alphaAssignedWorkItem.jiraId = 'fictional-jira-work-item-900';
+  alphaAssignedWorkItem.jiraKey = 'FICTA-900';
   alphaWorkspace.promptOverrides = { statusDraft: 'ALPHA PROMPT SENTINEL — use only fictional Alpha records.' };
   alphaWorkspace.draftingGuidance = 'ALPHA GUIDANCE SENTINEL — fictional drafting guidance.';
   const betaWorkspace = document.workspaces.find(item => item.id === 'workspace-beta-shared');

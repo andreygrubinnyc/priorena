@@ -61,7 +61,7 @@ function documentWithAggregateRootCount(count) {
   return document;
 }
 
-test('the deterministic clean seed is a valid complete schema-v3 document', () => {
+test('the deterministic clean seed is a valid complete schema-v4 document', () => {
   const first = createCleanSeed();
   const second = createCleanSeed();
   assert.equal(first.schemaVersion, TARGET_SCHEMA_VERSION);
@@ -124,7 +124,7 @@ test('schemaVersion is mandatory', () => {
 
 test('unsupported past schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 2;
+  document.schemaVersion = 3;
   assert.throws(() => validateTargetData(document), error => {
     assert.equal(error instanceof TargetSchemaVersionError, true);
     assert.equal(error.code, 'UNSUPPORTED_TARGET_SCHEMA_VERSION');
@@ -134,9 +134,9 @@ test('unsupported past schema versions fail closed', () => {
 
 test('unknown future schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 4;
+  document.schemaVersion = 5;
   assert.throws(() => validateTargetData(document), TargetSchemaVersionError);
-  assert.equal(document.schemaVersion, 4);
+  assert.equal(document.schemaVersion, 5);
 });
 
 test('every root collection is mandatory and must be an array', () => {
@@ -257,12 +257,72 @@ test('Feature is not a Work Item type and old type values fail closed', () => {
   assertInvalid(document, /Story, Task, Bug, Other, Unknown/);
 });
 
-test('the complete schema-v3 Work Item type set is accepted', () => {
+test('the complete schema-v4 Work Item type set is accepted', () => {
   for (const itemType of ['Story', 'Task', 'Bug', 'Other', 'Unknown']) {
     const document = clonedFixture();
     document.workItems[0].itemType = itemType;
     assert.equal(validateTargetData(document), document);
   }
+});
+
+test('schema-v4 Work Items require an explicit nullable Jira Epic mapping reference', () => {
+  const document = clonedFixture();
+  const assigned = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
+  const unassigned = document.workItems.find(item => item.id === 'work-item-alpha-unassigned');
+  assert.equal(assigned.jiraEpicMappingId, 'jira-mapping-alpha-one');
+  assert.equal(unassigned.jiraEpicMappingId, null);
+  validateTargetData(document);
+
+  const missing = clonedFixture();
+  delete missing.workItems[0].jiraEpicMappingId;
+  assertInvalid(missing, /jiraEpicMappingId.*required/);
+
+  const malformed = clonedFixture();
+  malformed.workItems[0].jiraEpicMappingId = {};
+  assertInvalid(malformed, /jiraEpicMappingId.*must be text/);
+});
+
+test('Work Item Jira Epic references require exact Organization, Workspace, and Scope parents', () => {
+  const unscoped = clonedFixture();
+  const unassigned = unscoped.workItems.find(item => item.id === 'work-item-alpha-unassigned');
+  unassigned.jiraEpicMappingId = 'jira-mapping-alpha-one';
+  assertInvalid(unscoped, /jiraEpicMappingId.*requires a non-null Scope/);
+
+  const wrongScope = clonedFixture();
+  wrongScope.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-alpha-secondary';
+  assertInvalid(wrongScope, /Jira Epic mapping with matching Organization, Workspace, and Scope/);
+
+  const foreign = clonedFixture();
+  foreign.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-beta-shared-key';
+  assertInvalid(foreign, /Jira Epic mapping with matching Organization, Workspace, and Scope/);
+});
+
+test('schema-v4 permits all five independent Scope, Feature, and Jira Epic association states', () => {
+  const document = clonedFixture();
+  const template = structuredClone(document.workItems.find(item => item.id === 'work-item-alpha-assigned'));
+  document.workItems = [
+    { ...structuredClone(template), id: 'work-item-state-unassigned', scopeId: null, featureId: null, jiraEpicMappingId: null },
+    { ...structuredClone(template), id: 'work-item-state-scope', featureId: null, jiraEpicMappingId: null },
+    { ...structuredClone(template), id: 'work-item-state-feature', jiraEpicMappingId: null },
+    { ...structuredClone(template), id: 'work-item-state-jira', featureId: null },
+    { ...structuredClone(template), id: 'work-item-state-both' }
+  ];
+  document.milestones.forEach(milestone => { milestone.linkedWorkItemIds = []; });
+  document.findings.forEach(finding => { finding.proposedWorkItemId = null; });
+  document.evidence.forEach(item => { item.workItemId = null; });
+  document.proposedChanges = [];
+  document.auditEvents = [];
+  validateTargetData(document);
+  assert.deepEqual(
+    document.workItems.map(item => [item.scopeId, item.featureId, item.jiraEpicMappingId]),
+    [
+      [null, null, null],
+      ['scope-alpha-multiple-mappings', null, null],
+      ['scope-alpha-multiple-mappings', 'feature-alpha-mapped', null],
+      ['scope-alpha-multiple-mappings', null, 'jira-mapping-alpha-one'],
+      ['scope-alpha-multiple-mappings', 'feature-alpha-mapped', 'jira-mapping-alpha-one']
+    ]
+  );
 });
 
 test('Scopes support zero, one, and multiple Jira Epic mappings', () => {
@@ -318,6 +378,8 @@ test('a Jira Epic mapping rejects mismatched Organization or Workspace parents',
 test('active Jira Epic mappings are unique within a Workspace but may repeat across Organizations', () => {
   const valid = clonedFixture();
   assert.equal(valid.jiraEpicMappings[0].jiraEpicKey, valid.jiraEpicMappings[3].jiraEpicKey);
+  assert.equal(new Set(valid.jiraEpicMappings.map(mapping => mapping.jiraEpicName)).size, 1);
+  assert.equal(new Set(valid.jiraEpicMappings.map(mapping => mapping.id)).size, 4);
   validateTargetData(valid);
 
   const duplicate = clonedFixture();
@@ -525,7 +587,7 @@ test('Finding extraction method and version preserve explicit extraction provena
   const document = clonedFixture();
   const finding = document.findings[0];
   assert.equal(finding.extractionMethod, 'deterministic-test-extraction');
-  assert.equal(finding.extractionVersion, 'target-v3-fixture-1');
+  assert.equal(finding.extractionVersion, 'target-v4-fixture-1');
   validateTargetData(document);
 });
 

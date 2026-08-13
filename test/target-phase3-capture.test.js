@@ -111,7 +111,9 @@ test('Source capture is bounded, parent-scoped, and creates only pending Finding
 
 test('import preview separates decisions, performs exact matching only, and writes nothing', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t, ({ document }) => {
-    document.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraKey = 'FICTA-10';
+    const item = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
+    item.jiraKey = 'FICTA-10';
+    item.jiraEpicMappingId = null;
   });
   const beforeBytes = await fs.readFile(targetDataFile);
   const before = await persisted(targetDataFile);
@@ -122,7 +124,6 @@ test('import preview separates decisions, performs exact matching only, and writ
       summary: 'Fictional existing item',
       jiraProjectKey: 'FICTA',
       jiraEpicKey: 'FICTA-101',
-      requestedScopeId: 'scope-alpha-zero-mapping',
       canonicalStatus: 'Waiting',
       evidenceExcerpt: 'Fictional exact status evidence.',
       category: 'status'
@@ -157,7 +158,10 @@ test('import preview separates decisions, performs exact matching only, and writ
   assert.ok(types.includes('proposed-current-state-change'));
   const explicitMove = preview.proposals.find(proposal => proposal.index === 0 && proposal.type === 'work-item-assign');
   assert.deepEqual(explicitMove.payload.featureChange, {
-    effect: 'cleared', beforeFeatureId: 'feature-alpha-mapped', afterFeatureId: null
+    effect: 'retained', beforeFeatureId: 'feature-alpha-mapped', afterFeatureId: 'feature-alpha-mapped'
+  });
+  assert.deepEqual(explicitMove.payload.jiraEpicChange, {
+    effect: 'replaced', beforeJiraEpicMappingId: null, afterJiraEpicMappingId: 'jira-mapping-alpha-one'
   });
   const noEpicAssignment = preview.proposals.find(proposal => proposal.index === 1 && proposal.type === 'work-item-assign');
   assert.equal(noEpicAssignment, undefined);
@@ -197,6 +201,64 @@ test('external Feature item types are preserved for explicit review and never be
   assert.equal(applied.status, 200, applied.body);
   assert.deepEqual(applied.json().outcome.externalItemTypeReviews, [review.payload]);
   assert.equal((await persisted(targetDataFile)).document.workItems.length, before.document.workItems.length);
+});
+
+test('an exact existing Jira Epic identifier may be explicitly approved without creating or auto-assigning mappings', async t => {
+  const { app, targetDataFile } = await createTargetApiHarness(t, ({ document }) => {
+    const item = document.workItems.find(candidate => candidate.id === 'work-item-alpha-assigned');
+    item.jiraKey = 'FICTA-10';
+    item.jiraEpicMappingId = null;
+  });
+  const input = importInput([{
+    externalKey: 'FICTA-10',
+    itemType: 'Task',
+    summary: 'Fictional exact mapping association',
+    jiraProjectKey: 'FICTA',
+    jiraEpicKey: 'FICTA-101'
+  }]);
+  const before = await persisted(targetDataFile);
+  const previewResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
+  assert.equal(previewResponse.status, 200, previewResponse.body);
+  const proposal = previewResponse.json().preview.proposals.find(candidate => candidate.type === 'work-item-assign');
+  assert.equal(proposal.payload.jiraEpicMappingId, 'jira-mapping-alpha-one');
+  assert.equal(previewResponse.json().preview.proposals.some(candidate => candidate.type === 'jira-mapping-create'), false);
+  assert.equal((await persisted(targetDataFile)).document.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId, null);
+
+  const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
+    expectedRevision: before.revision,
+    actor: ACTOR,
+    input,
+    previewHash: previewResponse.json().preview.previewHash,
+    approvedProposalIds: [proposal.id]
+  });
+  assert.equal(applied.status, 200, applied.body);
+  assert.equal(applied.json().outcome.assignments[0].featureId, 'feature-alpha-mapped');
+  assert.equal(applied.json().outcome.assignments[0].jiraEpicMappingId, 'jira-mapping-alpha-one');
+  const stored = await persisted(targetDataFile);
+  assert.equal(stored.document.jiraEpicMappings.length, before.document.jiraEpicMappings.length);
+  assert.equal(stored.document.workItems.find(item => item.id === 'work-item-alpha-assigned').featureId, 'feature-alpha-mapped');
+});
+
+test('new Work Item import proposals report null Feature retention before exact Jira Epic association', async t => {
+  const { app, targetDataFile } = await createTargetApiHarness(t);
+  const input = importInput([{
+    externalKey: 'FICTA-901',
+    itemType: 'Story',
+    summary: 'Fictional new Work Item with an exact existing Epic',
+    jiraProjectKey: 'FICTA',
+    jiraEpicKey: 'FICTA-101'
+  }]);
+  const before = await persisted(targetDataFile);
+  const response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
+  assert.equal(response.status, 200, response.body);
+  const proposal = response.json().preview.proposals.find(candidate => candidate.type === 'work-item-assign');
+  assert.deepEqual(proposal.payload.featureChange, {
+    effect: 'retained', beforeFeatureId: null, afterFeatureId: null
+  });
+  assert.deepEqual(proposal.payload.jiraEpicChange, {
+    effect: 'replaced', beforeJiraEpicMappingId: null, afterJiraEpicMappingId: 'jira-mapping-alpha-one'
+  });
+  assert.equal((await persisted(targetDataFile)).revision, before.revision);
 });
 
 test('import apply reconstructs the preview and applies only explicitly selected proposal types', async t => {
