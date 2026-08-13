@@ -36,7 +36,7 @@ const {
 } = require('../test-support/target-v3-fixtures');
 
 async function temporaryDirectory(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v3-test-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v4-test-'));
   t.after(async () => fs.rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -1235,6 +1235,33 @@ test('legitimate Work Item Scope assignment transitions remain valid', async t =
   );
 });
 
+test('existing Jira Epic mapping IDs cannot be deleted or moved while metadata remains editable', async t => {
+  const directory = await temporaryDirectory(t);
+  const filePath = path.join(directory, 'target-data.json');
+  const existing = createUncommunicatedFixture();
+  await createTarget(filePath, existing);
+
+  const removed = structuredClone(existing);
+  removed.jiraEpicMappings = removed.jiraEpicMappings.filter(mapping => mapping.id !== 'jira-mapping-alpha-one');
+  removed.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-alpha-two';
+  await assertRejectedWritePreservesFile(filePath, removed, /existing Jira Epic mapping cannot be removed/);
+
+  const moved = structuredClone(existing);
+  const movedMapping = moved.jiraEpicMappings.find(mapping => mapping.id === 'jira-mapping-alpha-one');
+  movedMapping.scopeId = 'scope-alpha-zero-mapping';
+  moved.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-alpha-two';
+  await assertRejectedWritePreservesFile(filePath, moved, /existing Jira Epic mapping cannot move to another parent/);
+
+  const edited = structuredClone(existing);
+  const editedMapping = edited.jiraEpicMappings.find(mapping => mapping.id === 'jira-mapping-alpha-one');
+  editedMapping.jiraEpicName = 'Renamed Fictional Epic';
+  editedMapping.mappingStatus = 'inactive';
+  await updateTarget(filePath, edited);
+  const stored = await readTargetData(filePath);
+  assert.equal(stored.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId, 'jira-mapping-alpha-one');
+  assert.equal(stored.jiraEpicMappings.find(mapping => mapping.id === 'jira-mapping-alpha-one').mappingStatus, 'inactive');
+});
+
 test('invalid candidate data never creates a new target or temporary file', async t => {
   const directory = await temporaryDirectory(t);
   const filePath = path.join(directory, 'target-data.json');
@@ -1357,7 +1384,7 @@ test('unsupported-version reads fail without rewriting the supplied file', async
   const directory = await temporaryDirectory(t);
   const filePath = path.join(directory, 'target-data.json');
   const document = createCleanSeed();
-  document.schemaVersion = 4;
+  document.schemaVersion = 5;
   const originalBytes = Buffer.from(JSON.stringify(document));
   await fs.writeFile(filePath, originalBytes, { mode: 0o600 });
 

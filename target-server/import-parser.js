@@ -168,11 +168,10 @@ function exactWorkItemForRecord(document, organizationId, workspaceId, record) {
     [item.jiraKey, item.jiraId].some(value => value !== null && value === record.externalKey)) || null;
 }
 
-function exactScopeForMapping(document, organizationId, workspaceId, record) {
+function exactMappingForRecord(document, organizationId, workspaceId, record) {
   if (record.noEpic === true || record.jiraEpicKey === null) return null;
-  const mapping = document.jiraEpicMappings.find(item => item.organizationId === organizationId && item.workspaceId === workspaceId &&
+  return document.jiraEpicMappings.find(item => item.organizationId === organizationId && item.workspaceId === workspaceId &&
     item.mappingStatus !== 'inactive' && item.jiraProjectKey === record.jiraProjectKey && item.jiraEpicKey === record.jiraEpicKey);
-  return mapping ? mapping.scopeId : null;
 }
 
 function buildImportPreview(document, organizationId, workspaceId, value, revision) {
@@ -203,9 +202,17 @@ function buildImportPreview(document, organizationId, workspaceId, value, revisi
       return;
     }
     const exactWorkItem = exactWorkItemForRecord(document, workspace.organizationId, workspace.id, record);
-    let exactScopeId = exactScopeForMapping(document, workspace.organizationId, workspace.id, record);
+    const exactMapping = exactMappingForRecord(document, workspace.organizationId, workspace.id, record);
+    let exactScopeId = exactMapping?.scopeId || null;
     if (record.requestedScopeId !== null) {
-      exactScopeId = resolvers.resolveWorkspaceChild('scopes', workspace.organizationId, workspace.id, record.requestedScopeId).id;
+      const requestedScopeId = resolvers.resolveWorkspaceChild(
+        'scopes',
+        workspace.organizationId,
+        workspace.id,
+        record.requestedScopeId
+      ).id;
+      if (exactMapping && exactMapping.scopeId !== requestedScopeId) throw invalidRequest();
+      exactScopeId = requestedScopeId;
     }
 
     let scopeProposal = null;
@@ -235,19 +242,37 @@ function buildImportPreview(document, organizationId, workspaceId, value, revisi
       });
     }
 
-    if (exactScopeId !== null && ((exactWorkItem && exactWorkItem.scopeId !== exactScopeId) || workItemProposal)) {
+    if (exactScopeId !== null && (
+      (exactWorkItem && (
+        exactWorkItem.scopeId !== exactScopeId ||
+        (exactMapping && exactWorkItem.jiraEpicMappingId !== exactMapping.id)
+      )) || workItemProposal
+    )) {
       const currentFeature = exactWorkItem?.featureId === null || exactWorkItem?.featureId === undefined
         ? null
         : document.features.find(feature => feature.id === exactWorkItem.featureId);
+      const beforeFeatureId = exactWorkItem?.featureId || null;
       const afterFeatureId = currentFeature?.scopeId === exactScopeId ? currentFeature.id : null;
+      const currentMapping = exactWorkItem?.jiraEpicMappingId === null || exactWorkItem?.jiraEpicMappingId === undefined
+        ? null
+        : document.jiraEpicMappings.find(mapping => mapping.id === exactWorkItem.jiraEpicMappingId);
+      const afterJiraEpicMappingId = exactMapping?.id || (currentMapping?.scopeId === exactScopeId ? currentMapping.id : null);
       add('work-item-assign', index, {
         workItemId: exactWorkItem?.id || null,
         workItemProposalId: workItemProposal?.id || null,
         scopeId: exactScopeId,
+        jiraEpicMappingId: afterJiraEpicMappingId,
         featureChange: {
-          effect: afterFeatureId === exactWorkItem?.featureId ? 'retained' : 'cleared',
-          beforeFeatureId: exactWorkItem?.featureId || null,
+          effect: afterFeatureId === beforeFeatureId ? 'retained' : (afterFeatureId === null ? 'cleared' : 'replaced'),
+          beforeFeatureId,
           afterFeatureId
+        },
+        jiraEpicChange: {
+          effect: afterJiraEpicMappingId === (exactWorkItem?.jiraEpicMappingId || null)
+            ? 'retained'
+            : (afterJiraEpicMappingId === null ? 'cleared' : 'replaced'),
+          beforeJiraEpicMappingId: exactWorkItem?.jiraEpicMappingId || null,
+          afterJiraEpicMappingId
         }
       }, workItemProposal ? [workItemProposal.id] : []);
     }

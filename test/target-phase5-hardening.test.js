@@ -16,10 +16,11 @@ const { requestApp } = require('../test-support/target-api-harness');
 const { assertBootstrapOnly, validateSeed } = require('../scripts/release/validate-seed');
 const { run: runBootstrap } = require('../scripts/release/bootstrap-seed');
 const { scanText: scanLegacyText } = require('../scripts/release/legacy-scan');
+const { ROLLBACK_REVISION } = require('../scripts/release/rehearse');
 
 async function harness(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase5-hardening-'));
-  const targetDataFile = path.join(root, 'target-v3.json');
+  const targetDataFile = path.join(root, 'target-v4.json');
   const sourceFilesRoot = path.join(root, 'sources');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });
@@ -27,7 +28,7 @@ async function harness(t) {
   return { root, sourceFilesRoot, targetDataFile };
 }
 
-test('release startup validates strict schema-v3 bytes before listening', async t => {
+test('release startup validates strict schema-v4 bytes before listening', async t => {
   const context = await harness(t);
   const before = await fs.readFile(context.targetDataFile);
   const validated = await validateTargetStartup(context);
@@ -186,7 +187,7 @@ test('generic private bootstrap is deterministic, strict, and target-only', () =
 test('staged-seed validation rejects operational history and permissive modes', async t => {
   const context = await harness(t);
   const result = await validateSeed(context.targetDataFile);
-  assert.equal(result.schemaVersion, 3);
+  assert.equal(result.schemaVersion, 4);
   assert.equal(result.counts.operationalRecords, 0);
 
   const withHistory = createCleanSeed();
@@ -217,6 +218,13 @@ test('legacy regression scan catches active behavior and permits only narrow enf
 test('CI fetches the known rollback commit history before running the exact-revision rehearsal', async () => {
   const workflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'security-gate.yml'), 'utf8');
   assert.match(workflow, /uses: actions\/checkout@[^\n]+[\s\S]{0,200}fetch-depth: 0[\s\S]{0,100}persist-credentials: false/);
+  assert.equal(ROLLBACK_REVISION, '49e59a3fbb56c9ec6ea01c6f0c58d0c9d66113a5');
+  const rollbackSource = await fs.readFile(path.join(__dirname, '..', 'scripts', 'release', 'rollback-application.js'), 'utf8');
+  assert.match(rollbackSource, /target-server\/start\.js/);
+  assert.match(rollbackSource, /api\/v2\/organizations/);
+  const legacyRoute = ['api', 'projects'].join('/');
+  const legacyDataSelector = ['PMDS', 'DATA', 'FILE'].join('_');
+  assert.doesNotMatch(rollbackSource, new RegExp(`${legacyRoute}|${legacyDataSelector}`));
 });
 
 test('CI provides fail-closed process inspection before the release rehearsal', async () => {

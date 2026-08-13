@@ -28,12 +28,12 @@ const {
 } = require('./workflow-utils');
 
 const MAX_BULK_WORK_ITEMS = 100;
-const WORK_ITEM_ACTIONS = Object.freeze(['assign-scope', 'assign-feature', 'assign-sprint', 'follow-up', 'archive']);
+const WORK_ITEM_ACTIONS = Object.freeze(['assign-scope', 'assign-feature', 'assign-jira-epic', 'assign-sprint', 'follow-up', 'archive']);
 const MAPPING_STATUSES = Object.freeze(['pending', 'verified', 'inactive']);
 const FOLLOW_UP_STATES = Object.freeze(['none', 'open', 'waiting', 'resolved']);
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target work services require an explicit schema-v3 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target work services require an explicit schema-v4 data-file path');
   return path.resolve(filePath);
 }
 
@@ -150,7 +150,7 @@ function rejectDuplicateActiveMapping(document, mapping, ownId = null) {
 
 function workItemCreateInput(value) {
   const allowed = [
-    'scopeId', 'featureId', 'jiraId', 'jiraKey', 'itemType', 'summary', 'description', 'canonicalStatus',
+    'scopeId', 'featureId', 'jiraEpicMappingId', 'jiraId', 'jiraKey', 'itemType', 'summary', 'description', 'canonicalStatus',
     'currentStateProvenance', 'currentStateConfidence', 'lastCapturedCommentAt', 'sourceStatus',
     'assignee', 'sprint', 'labels', 'dependencies', 'notes'
   ];
@@ -158,6 +158,7 @@ function workItemCreateInput(value) {
   return {
     scopeId: nullableStableId(value.scopeId),
     featureId: value.featureId === undefined ? null : nullableStableId(value.featureId),
+    jiraEpicMappingId: value.jiraEpicMappingId === undefined ? null : nullableStableId(value.jiraEpicMappingId),
     jiraId: optionalNullableText(value.jiraId, null, { max: 200 }),
     jiraKey: value.jiraKey === undefined || value.jiraKey === null ? null : requireJiraKey(value.jiraKey),
     itemType: requireEnum(value.itemType, [...ITEM_TYPES]),
@@ -221,7 +222,7 @@ function normalizeWorkItemAction(document, resolvers, context, workItem, value) 
   requireObject(value);
   requireEnum(value.type, WORK_ITEM_ACTIONS);
   if (value.type === 'assign-scope') {
-    exactKeys(value, ['type', 'scopeId', 'featureId'], ['type', 'scopeId']);
+    exactKeys(value, ['type', 'scopeId', 'featureId', 'jiraEpicMappingId'], ['type', 'scopeId']);
     const scopeId = nullableStableId(value.scopeId);
     if (scopeId !== null) resolvers.resolveWorkspaceChild('scopes', context.organizationId, context.workspaceId, scopeId);
     let featureId;
@@ -233,16 +234,32 @@ function normalizeWorkItemAction(document, resolvers, context, workItem, value) 
       const feature = resolvers.resolveWorkspaceChild('features', context.organizationId, context.workspaceId, featureId);
       if (feature.scopeId !== scopeId) throw notFound();
     }
+    let jiraEpicMappingId;
+    if (Object.hasOwn(value, 'jiraEpicMappingId')) jiraEpicMappingId = nullableStableId(value.jiraEpicMappingId);
+    else if (workItem.jiraEpicMappingId !== null && resolvers.indexes.jiraEpicMappings.get(workItem.jiraEpicMappingId)?.scopeId === scopeId) {
+      jiraEpicMappingId = workItem.jiraEpicMappingId;
+    } else jiraEpicMappingId = null;
+    if (jiraEpicMappingId !== null) {
+      if (scopeId === null) throw invalidRequest();
+      const mapping = resolvers.resolveWorkspaceChild('jiraEpicMappings', context.organizationId, context.workspaceId, jiraEpicMappingId);
+      if (mapping.scopeId !== scopeId) throw notFound();
+    }
     const evidenceChanges = document.evidence
       .filter(evidence => evidence.workItemId === workItem.id && evidence.scopeId !== scopeId)
       .map(evidence => ({ evidenceId: evidence.id, beforeScopeId: evidence.scopeId, afterScopeId: scopeId }));
     const featureEffect = featureId === workItem.featureId ? 'retained' : (featureId === null ? 'cleared' : 'replaced');
+    const jiraEpicEffect = jiraEpicMappingId === workItem.jiraEpicMappingId ? 'retained' : (jiraEpicMappingId === null ? 'cleared' : 'replaced');
     return {
       type: value.type,
       field: 'scopeId',
       before: workItem.scopeId,
       after: scopeId,
       featureChange: { effect: featureEffect, beforeFeatureId: workItem.featureId, afterFeatureId: featureId },
+      jiraEpicChange: {
+        effect: jiraEpicEffect,
+        beforeJiraEpicMappingId: workItem.jiraEpicMappingId,
+        afterJiraEpicMappingId: jiraEpicMappingId
+      },
       evidenceChanges
     };
   }
@@ -255,6 +272,16 @@ function normalizeWorkItemAction(document, resolvers, context, workItem, value) 
       if (feature.scopeId !== workItem.scopeId) throw notFound();
     }
     return { type: value.type, field: 'featureId', before: workItem.featureId, after: featureId };
+  }
+  if (value.type === 'assign-jira-epic') {
+    exactKeys(value, ['type', 'jiraEpicMappingId'], ['type', 'jiraEpicMappingId']);
+    const jiraEpicMappingId = nullableStableId(value.jiraEpicMappingId);
+    if (jiraEpicMappingId !== null) {
+      if (workItem.scopeId === null) throw invalidRequest();
+      const mapping = resolvers.resolveWorkspaceChild('jiraEpicMappings', context.organizationId, context.workspaceId, jiraEpicMappingId);
+      if (mapping.scopeId !== workItem.scopeId) throw notFound();
+    }
+    return { type: value.type, field: 'jiraEpicMappingId', before: workItem.jiraEpicMappingId, after: jiraEpicMappingId };
   }
   if (value.type === 'assign-sprint') {
     exactKeys(value, ['type', 'sprint'], ['type', 'sprint']);
@@ -269,8 +296,15 @@ function normalizeWorkItemAction(document, resolvers, context, workItem, value) 
 }
 
 function actionPreview(context, workItemId, normalized, revision) {
-  if (stateHash({ value: normalized.before, featureId: normalized.featureChange?.beforeFeatureId }) ===
-    stateHash({ value: normalized.after, featureId: normalized.featureChange?.afterFeatureId })) throw invalidRequest();
+  if (stateHash({
+    value: normalized.before,
+    featureId: normalized.featureChange?.beforeFeatureId,
+    jiraEpicMappingId: normalized.jiraEpicChange?.beforeJiraEpicMappingId
+  }) === stateHash({
+    value: normalized.after,
+    featureId: normalized.featureChange?.afterFeatureId,
+    jiraEpicMappingId: normalized.jiraEpicChange?.afterJiraEpicMappingId
+  })) throw invalidRequest();
   const preview = {
     organizationId: context.organizationId,
     workspaceId: context.workspaceId,
@@ -282,6 +316,7 @@ function actionPreview(context, workItemId, normalized, revision) {
   };
   if (normalized.evidenceChanges) preview.evidenceChanges = clone(normalized.evidenceChanges);
   if (normalized.featureChange) preview.featureChange = clone(normalized.featureChange);
+  if (normalized.jiraEpicChange) preview.jiraEpicChange = clone(normalized.jiraEpicChange);
   const revisionBoundPreview = { ...preview, expectedRevision: revision };
   return { ...revisionBoundPreview, previewHash: stateHash(revisionBoundPreview) };
 }
@@ -290,16 +325,22 @@ function normalizeBulkAction(document, resolvers, context, value) {
   requireObject(value);
   requireEnum(value.type, ['assign-scope', 'assign-sprint']);
   if (value.type === 'assign-scope') {
-    exactKeys(value, ['type', 'scopeId', 'featureId'], ['type', 'scopeId']);
+    exactKeys(value, ['type', 'scopeId', 'featureId', 'jiraEpicMappingId'], ['type', 'scopeId']);
     const scopeId = nullableStableId(value.scopeId);
     if (scopeId !== null) resolvers.resolveWorkspaceChild('scopes', context.organizationId, context.workspaceId, scopeId);
     const featureId = Object.hasOwn(value, 'featureId') ? nullableStableId(value.featureId) : undefined;
+    const jiraEpicMappingId = Object.hasOwn(value, 'jiraEpicMappingId') ? nullableStableId(value.jiraEpicMappingId) : undefined;
     if (featureId !== undefined && featureId !== null) {
       if (scopeId === null) throw invalidRequest();
       const feature = resolvers.resolveWorkspaceChild('features', context.organizationId, context.workspaceId, featureId);
       if (feature.scopeId !== scopeId) throw notFound();
     }
-    return { type: value.type, field: 'scopeId', after: scopeId, featureId };
+    if (jiraEpicMappingId !== undefined && jiraEpicMappingId !== null) {
+      if (scopeId === null) throw invalidRequest();
+      const mapping = resolvers.resolveWorkspaceChild('jiraEpicMappings', context.organizationId, context.workspaceId, jiraEpicMappingId);
+      if (mapping.scopeId !== scopeId) throw notFound();
+    }
+    return { type: value.type, field: 'scopeId', after: scopeId, featureId, jiraEpicMappingId };
   }
   exactKeys(value, ['type', 'sprint'], ['type', 'sprint']);
   return { type: value.type, field: 'sprint', after: nullableText(value.sprint, { max: 300 }) };
@@ -318,14 +359,31 @@ function buildBulkPreview(document, resolvers, context, workItemIds, rawAction, 
         beforeFeatureId: item.featureId,
         afterFeatureId
       };
+      const compatibleMapping = item.jiraEpicMappingId !== null &&
+        resolvers.indexes.jiraEpicMappings.get(item.jiraEpicMappingId)?.scopeId === normalized.after;
+      const afterJiraEpicMappingId = normalized.jiraEpicMappingId === undefined
+        ? (compatibleMapping ? item.jiraEpicMappingId : null)
+        : normalized.jiraEpicMappingId;
+      row.jiraEpicChange = {
+        effect: afterJiraEpicMappingId === item.jiraEpicMappingId ? 'retained' : (afterJiraEpicMappingId === null ? 'cleared' : 'replaced'),
+        beforeJiraEpicMappingId: item.jiraEpicMappingId,
+        afterJiraEpicMappingId
+      };
       row.evidenceChanges = document.evidence
         .filter(evidence => evidence.workItemId === item.id && evidence.scopeId !== normalized.after)
         .map(evidence => ({ evidenceId: evidence.id, beforeScopeId: evidence.scopeId, afterScopeId: normalized.after }));
     }
     return row;
   });
-  if (rows.every(row => stateHash({ scopeId: row.before, featureId: row.featureChange?.beforeFeatureId }) ===
-    stateHash({ scopeId: row.after, featureId: row.featureChange?.afterFeatureId }))) throw invalidRequest();
+  if (rows.every(row => stateHash({
+    scopeId: row.before,
+    featureId: row.featureChange?.beforeFeatureId,
+    jiraEpicMappingId: row.jiraEpicChange?.beforeJiraEpicMappingId
+  }) === stateHash({
+    scopeId: row.after,
+    featureId: row.featureChange?.afterFeatureId,
+    jiraEpicMappingId: row.jiraEpicChange?.afterJiraEpicMappingId
+  }))) throw invalidRequest();
   const preview = {
     organizationId: context.organizationId,
     workspaceId: context.workspaceId,
@@ -555,7 +613,12 @@ function createWorkServices(options = {}) {
           feature: clone(feature),
           workItems: document.workItems
             .filter(item => item.organizationId === organizationId && item.workspaceId === workspaceId && item.featureId === feature.id)
-            .map(item => publicWorkItem(item, resolvers.indexes.scopes, resolvers.indexes.features))
+            .map(item => publicWorkItem(
+              item,
+              resolvers.indexes.scopes,
+              resolvers.indexes.features,
+              resolvers.indexes.jiraEpicMappings
+            ))
         };
       });
     },
@@ -610,6 +673,11 @@ function createWorkServices(options = {}) {
           const feature = resolvers.resolveWorkspaceChild('features', organizationId, workspaceId, input.featureId);
           if (feature.scopeId !== input.scopeId) throw notFound();
         }
+        if (input.jiraEpicMappingId !== null) {
+          if (input.scopeId === null) throw invalidRequest();
+          const mapping = resolvers.resolveWorkspaceChild('jiraEpicMappings', organizationId, workspaceId, input.jiraEpicMappingId);
+          if (mapping.scopeId !== input.scopeId) throw notFound();
+        }
         input.dependencies.forEach(id => resolvers.resolveWorkspaceChild('workItems', organizationId, workspaceId, id));
         rejectDuplicateWorkItemJiraKey(document, context, input.jiraKey);
         const timestamp = runtime.timestamp();
@@ -624,7 +692,14 @@ function createWorkServices(options = {}) {
         };
         document.workItems.push(record);
         appendEntityAudit(document, runtime, context, 'workItem', record.id, 'work-item-created', request.actor, timestamp, null, record);
-        return { workItem: clone(record) };
+        return {
+          workItem: publicWorkItem(
+            record,
+            resolvers.indexes.scopes,
+            resolvers.indexes.features,
+            resolvers.indexes.jiraEpicMappings
+          )
+        };
       });
     },
 
@@ -667,12 +742,22 @@ function createWorkServices(options = {}) {
         if (preview.previewHash !== approvedHash) throw previewConflict();
         item[normalized.field] = clone(normalized.after);
         if (normalized.featureChange) item.featureId = normalized.featureChange.afterFeatureId;
+        if (normalized.jiraEpicChange) item.jiraEpicMappingId = normalized.jiraEpicChange.afterJiraEpicMappingId;
         item.updatedAt = runtime.timestamp();
-        const auditBefore = normalized.featureChange
-          ? { [normalized.field]: normalized.before, featureId: normalized.featureChange.beforeFeatureId }
+        const hasRelationshipChanges = normalized.featureChange || normalized.jiraEpicChange;
+        const auditBefore = hasRelationshipChanges
+          ? {
+              [normalized.field]: normalized.before,
+              featureId: normalized.featureChange?.beforeFeatureId,
+              jiraEpicMappingId: normalized.jiraEpicChange?.beforeJiraEpicMappingId
+            }
           : normalized.before;
-        const auditAfter = normalized.featureChange
-          ? { [normalized.field]: normalized.after, featureId: normalized.featureChange.afterFeatureId }
+        const auditAfter = hasRelationshipChanges
+          ? {
+              [normalized.field]: normalized.after,
+              featureId: normalized.featureChange?.afterFeatureId,
+              jiraEpicMappingId: normalized.jiraEpicChange?.afterJiraEpicMappingId
+            }
           : normalized.after;
         appendEntityAudit(document, runtime, context, 'workItem', item.id, `work-item-${normalized.type}-applied`, request.actor, item.updatedAt, auditBefore, auditAfter);
         (normalized.evidenceChanges || []).forEach(change => {
@@ -705,16 +790,33 @@ function createWorkServices(options = {}) {
         const changed = [];
         preview.rows.forEach(row => {
           const item = resolvers.resolveWorkspaceChild('workItems', organizationId, workspaceId, row.workItemId);
-          if (stateHash({ value: row.before, featureId: row.featureChange?.beforeFeatureId }) ===
-            stateHash({ value: row.after, featureId: row.featureChange?.afterFeatureId })) return;
+          if (stateHash({
+            value: row.before,
+            featureId: row.featureChange?.beforeFeatureId,
+            jiraEpicMappingId: row.jiraEpicChange?.beforeJiraEpicMappingId
+          }) === stateHash({
+            value: row.after,
+            featureId: row.featureChange?.afterFeatureId,
+            jiraEpicMappingId: row.jiraEpicChange?.afterJiraEpicMappingId
+          })) return;
           item[preview.field] = clone(row.after);
           if (row.featureChange) item.featureId = row.featureChange.afterFeatureId;
+          if (row.jiraEpicChange) item.jiraEpicMappingId = row.jiraEpicChange.afterJiraEpicMappingId;
           item.updatedAt = timestamp;
-          const auditBefore = row.featureChange
-            ? { [preview.field]: row.before, featureId: row.featureChange.beforeFeatureId }
+          const hasRelationshipChanges = row.featureChange || row.jiraEpicChange;
+          const auditBefore = hasRelationshipChanges
+            ? {
+                [preview.field]: row.before,
+                featureId: row.featureChange?.beforeFeatureId,
+                jiraEpicMappingId: row.jiraEpicChange?.beforeJiraEpicMappingId
+              }
             : row.before;
-          const auditAfter = row.featureChange
-            ? { [preview.field]: row.after, featureId: row.featureChange.afterFeatureId }
+          const auditAfter = hasRelationshipChanges
+            ? {
+                [preview.field]: row.after,
+                featureId: row.featureChange?.afterFeatureId,
+                jiraEpicMappingId: row.jiraEpicChange?.afterJiraEpicMappingId
+              }
             : row.after;
           appendEntityAudit(document, runtime, context, 'workItem', item.id, `bulk-${preview.action}-applied`, request.actor, timestamp, auditBefore, auditAfter);
           (row.evidenceChanges || []).forEach(change => {

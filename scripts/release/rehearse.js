@@ -20,7 +20,7 @@ const { materializeRollbackApplication, smokeRollbackApplication } = require('./
 const { safeReleaseErrorCategory } = require('./release-diagnostics');
 const { smokeStartedTarget, smokeTarget, stopStartedTarget } = require('./smoke');
 
-const ROLLBACK_REVISION = '316759d9073a004e8478d027d93df268b3827fdb';
+const ROLLBACK_REVISION = '49e59a3fbb56c9ec6ea01c6f0c58d0c9d66113a5';
 const REHEARSAL_TIMESTAMP = new Date('2026-08-11T12:00:00.000Z');
 const SCENARIOS = new Set(['all', 'backup', 'restore', 'cutover', 'rollback']);
 function safeRehearsalErrorCategory(error) {
@@ -81,15 +81,27 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
   if (!SCENARIOS.has(scenario)) throw new Error('Unknown release rehearsal scenario');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-release-rehearsal-'));
   const livePath = path.join(root, 'fictional-live.json');
-  const stagedSeedPath = path.join(root, 'fictional-staged-v3.json');
+  const stagedSeedPath = path.join(root, 'fictional-staged-v4.json');
   const sourceFilesRoot = path.join(root, 'source-files');
   const backupDirectory = path.join(root, 'verified-backups');
-  const legacyBytes = Buffer.from('{"projects": {}}\n');
+  const materializedRollback = await materializeRollbackApplication({
+    repositoryRoot,
+    revision: ROLLBACK_REVISION,
+    destination: path.join(root, 'rollback-application')
+  });
+  const previousSchemaBytes = execFileSync(process.execPath, ['-e', [
+    "const { createCleanSeed } = require('./target-model/clean-seed');",
+    "const { serializeTargetData } = require('./target-model/persistence');",
+    'process.stdout.write(serializeTargetData(createCleanSeed()));'
+  ].join(' ')], {
+    cwd: materializedRollback.checkoutRoot,
+    maxBuffer: 2 * 1024 * 1024
+  });
   await Promise.all([
     fs.mkdir(sourceFilesRoot, { mode: 0o700 }),
     fs.mkdir(backupDirectory, { mode: 0o700 })
   ]);
-  await fs.writeFile(livePath, legacyBytes, { mode: 0o600 });
+  await fs.writeFile(livePath, previousSchemaBytes, { mode: 0o600 });
   await fs.writeFile(stagedSeedPath, serializeTargetData(createCleanSeed()), { mode: 0o600 });
   const liveChecksum = await checksumFile(livePath);
   const seedChecksum = await checksumFile(stagedSeedPath);
@@ -131,7 +143,7 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
         timestamp: REHEARSAL_TIMESTAMP,
         repositoryRoot
       });
-      assert.deepEqual(await fs.readFile(livePath), legacyBytes);
+      assert.deepEqual(await fs.readFile(livePath), previousSchemaBytes);
       assert.equal(await checksumFile(backup.backupPath), liveChecksum);
       return { scenario, status: 'passed', semanticAndByteRestore: true, backupRetainedByTooling: true };
     }
@@ -174,15 +186,10 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
         });
       },
       smokeRollback: async () => {
-        const materialized = await materializeRollbackApplication({
-          repositoryRoot,
-          revision: ROLLBACK_REVISION,
-          destination: path.join(root, 'rollback-application')
-        });
         const beforeRollbackSmoke = await checksumFile(livePath);
-        const smoke = await smokeRollbackApplication({ checkoutRoot: materialized.checkoutRoot, livePath });
+        const smoke = await smokeRollbackApplication({ checkoutRoot: materializedRollback.checkoutRoot, livePath });
         assert.equal(await checksumFile(livePath), beforeRollbackSmoke);
-        return { ...smoke, revision: materialized.revision, serverObjectVerified: true };
+        return { ...smoke, revision: materializedRollback.revision, serverObjectVerified: true };
       }
     }, { simulatedPostCutoverFailure: scenario !== 'cutover' });
 
@@ -203,7 +210,7 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
 
     assert.equal(lifecycle.status, 'rolled-back-and-verified');
     assert.equal(lifecycle.rollbackAttempts, 1);
-    assert.deepEqual(await fs.readFile(livePath), legacyBytes);
+    assert.deepEqual(await fs.readFile(livePath), previousSchemaBytes);
     assert.equal(await checksumFile(lifecycle.cutover.backupPath), liveChecksum);
     return {
       scenario,
@@ -212,7 +219,7 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
       simulatedPostCutoverFailure: true,
       rollbackAttempts: lifecycle.rollbackAttempts,
       secondAutomaticCutoverAttempts: lifecycle.secondAutomaticCutoverAttempts,
-      restoredLegacyBytes: true,
+      restoredPreviousSchemaBytes: true,
       rollbackRevisionStartedAndSmoked: lifecycle.rollbackSmoke.revision,
       rollbackProcessValidated: lifecycle.rollbackSmoke.processValidated,
       backupRetainedByTooling: true

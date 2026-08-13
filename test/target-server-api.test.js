@@ -115,7 +115,7 @@ function prepareInitialFixture() {
 async function createHarness(t, mutate = () => {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-api-'));
   const sourceFilesRoot = path.join(root, 'source-files');
-  const targetDataFile = path.join(root, 'target-v3.json');
+  const targetDataFile = path.join(root, 'target-v4.json');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   const document = prepareInitialFixture();
 
@@ -154,8 +154,8 @@ function assertNoSentinel(value, sentinels) {
 }
 
 test('target services require explicit isolated data and Source-file paths', () => {
-  assert.throws(() => createTargetApiApp({}), /explicit schema-v3 data-file path/);
-  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v3.json' }), /explicit safe root/);
+  assert.throws(() => createTargetApiApp({}), /explicit schema-v4 data-file path/);
+  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v4.json' }), /explicit safe root/);
   const source = require('node:fs').readFileSync(path.join(__dirname, '..', 'target-server', 'services.js'), 'utf8');
   assert.doesNotMatch(source, /PMDS_DATA_FILE|PMDS_UPLOADS_DIR|\.priorena-data|pilot-data\.json/);
   assert.doesNotMatch(source, /require\(['"]\.\.\/server['"]\)/);
@@ -765,7 +765,7 @@ test('target API retains loopback, headers, method, request-size, and revision p
   assert.equal(response.status, 413);
 });
 
-test('all read-only API and service operations leave the schema-v3 target file unchanged', async t => {
+test('all read-only API and service operations leave the schema-v4 target file unchanged', async t => {
   const { app, services, targetDataFile } = await createHarness(t);
   const before = await fs.readFile(targetDataFile);
   await requestApp(app, { url: `${TARGET_API_NAMESPACE}/organizations/${ALPHA.organizationId}/portfolio` });

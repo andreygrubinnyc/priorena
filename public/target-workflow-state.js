@@ -1,7 +1,7 @@
 'use strict';
 
 const WORKFLOW_COLLECTIONS = Object.freeze([
-  'scopes', 'features', 'workItems', 'milestones', 'sources', 'findings', 'evidence', 'proposedChanges'
+  'scopes', 'features', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence', 'proposedChanges'
 ]);
 
 function stableId(value) {
@@ -20,6 +20,7 @@ function emptyWorkflowData() {
     revision: null,
     scopes: [],
     features: [],
+    jiraEpicMappings: [],
     workItems: [],
     milestones: [],
     sources: [],
@@ -27,7 +28,7 @@ function emptyWorkflowData() {
     evidence: [],
     proposedChanges: [],
     selectedWorkItemIds: [],
-    filters: { scopeId: 'all', featureId: 'all', itemType: 'all', search: '' },
+    filters: { scopeId: 'all', featureId: 'all', jiraEpicMappingId: 'all', itemType: 'all', search: '' },
     preview: null,
     confirmation: null,
     status: { kind: 'idle', message: '' },
@@ -86,6 +87,7 @@ function createTargetWorkflowApiClient(options = {}) {
       const routes = {
         scopes: `${root}/scopes`,
         features: `${root}/features`,
+        jiraEpicMappings: `${root}/jira-epic-mappings`,
         workItems: `${root}/work-items`,
         milestones: `${root}/milestones`,
         sources: `${root}/sources`,
@@ -177,10 +179,23 @@ function filterWorkItems(workItems, filters) {
       (filters.scopeId === 'unassigned' ? item.scopeId === null : item.scopeId === filters.scopeId);
     const featureMatch = !filters.featureId || filters.featureId === 'all' ||
       (filters.featureId === 'none' ? item.featureId === null : item.featureId === filters.featureId);
+    const jiraEpicMatch = !filters.jiraEpicMappingId || filters.jiraEpicMappingId === 'all' ||
+      (filters.jiraEpicMappingId === 'none'
+        ? item.jiraEpicMappingId === null
+        : item.jiraEpicMappingId === filters.jiraEpicMappingId);
     const typeMatch = !filters.itemType || filters.itemType === 'all' || item.itemType === filters.itemType;
-    const searchMatch = !search || [item.summary, item.jiraKey, item.canonicalStatus, item.assignee, item.sprint, item.feature?.name]
+    const searchMatch = !search || [
+      item.summary,
+      item.jiraKey,
+      item.canonicalStatus,
+      item.assignee,
+      item.sprint,
+      item.feature?.name,
+      item.jiraEpic?.jiraEpicKey,
+      item.jiraEpic?.jiraEpicName
+    ]
       .some(value => String(value || '').toLocaleLowerCase('en-US').includes(search));
-    return scopeMatch && featureMatch && typeMatch && searchMatch;
+    return scopeMatch && featureMatch && jiraEpicMatch && typeMatch && searchMatch;
   });
 }
 

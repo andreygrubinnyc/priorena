@@ -11,9 +11,6 @@ const { safeReleaseErrorCategory } = require('./release-diagnostics');
 const { assertOutsideRepository } = require('./safety');
 
 const MAX_PROCESS_OUTPUT_BYTES = 64 * 1024;
-const LEGACY_DATA_ENV = ['PMDS', 'DATA', 'FILE'].join('_');
-const LEGACY_UPLOADS_ENV = ['PMDS', 'UPLOADS', 'DIR'].join('_');
-const LEGACY_RECOVERY_ENV = ['PMDS', 'RECOVERY', 'DIR'].join('_');
 function codedError(code, message, cause = undefined) {
   const error = new Error(message, cause ? { cause } : undefined);
   error.code = code;
@@ -58,8 +55,9 @@ async function materializeRollbackApplication({ repositoryRoot, revision, destin
   } finally {
     await fs.unlink(archivePath).catch(() => {});
   }
-  const expectedServerObject = diagnosticStage('ROLLBACK_OBJECT_LOOKUP_FAILED', () => runner('git', ['rev-parse', `${revision}:server.js`], { cwd: repositoryRoot }).trim());
-  const extractedServerObject = diagnosticStage('ROLLBACK_OBJECT_HASH_FAILED', () => runner('git', ['hash-object', 'server.js'], { cwd: checkoutRoot }).trim());
+  const serverPath = 'target-server/start.js';
+  const expectedServerObject = diagnosticStage('ROLLBACK_OBJECT_LOOKUP_FAILED', () => runner('git', ['rev-parse', `${revision}:${serverPath}`], { cwd: repositoryRoot }).trim());
+  const extractedServerObject = diagnosticStage('ROLLBACK_OBJECT_HASH_FAILED', () => runner('git', ['hash-object', serverPath], { cwd: checkoutRoot }).trim());
   if (expectedServerObject !== extractedServerObject) throw codedError('ROLLBACK_OBJECT_MISMATCH', 'Rollback application extraction did not match the authorized revision');
   diagnosticStage('ROLLBACK_DEPENDENCY_INSTALL_FAILED', () => runner('npm', ['ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'], {
     cwd: checkoutRoot,
@@ -103,7 +101,7 @@ async function waitForRollbackReady(child, port, output, timeoutMs = 10_000) {
     if (child.exitCode !== null) throw codedError('ROLLBACK_START_EXITED', 'Rollback application exited before becoming ready');
     if (output.stdout.overflowed() || output.stderr.overflowed()) throw codedError('ROLLBACK_OUTPUT_LIMIT_EXCEEDED', 'Rollback application exceeded the bounded log limit');
     try {
-      const response = await fetch(`${origin}/api/projects`);
+      const response = await fetch(`${origin}/api/v2/organizations`);
       if (response.status === 200) return origin;
     } catch (_) {
       // The exact temporary child is still starting; retry only until the bound.
@@ -115,22 +113,18 @@ async function waitForRollbackReady(child, port, output, timeoutMs = 10_000) {
 
 async function smokeRollbackApplication({ checkoutRoot, livePath, port = undefined }) {
   const expectedPort = port || await diagnosticStageAsync('ROLLBACK_PORT_RESERVATION_FAILED', reserveLoopbackPort);
-  const uploadsRoot = path.join(path.dirname(livePath), 'rollback-uploads');
-  const recoveryRoot = path.join(path.dirname(livePath), 'rollback-recovery');
-  await Promise.all([
-    fs.mkdir(uploadsRoot, { mode: 0o700 }),
-    fs.mkdir(recoveryRoot, { mode: 0o700 })
-  ]);
-  const child = spawn(process.execPath, ['server.js'], {
+  const sourceFilesRoot = path.join(path.dirname(livePath), 'rollback-source-files');
+  const logFile = path.join(path.dirname(livePath), 'rollback-logs', 'target.log');
+  await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
+  const child = spawn(process.execPath, [
+    'target-server/start.js',
+    '--data-file', livePath,
+    '--source-files-root', sourceFilesRoot,
+    '--log-file', logFile,
+    '--port', String(expectedPort)
+  ], {
     cwd: checkoutRoot,
-    env: {
-      ...process.env,
-      PORT: String(expectedPort),
-      [LEGACY_DATA_ENV]: livePath,
-      [LEGACY_UPLOADS_ENV]: uploadsRoot,
-      [LEGACY_RECOVERY_ENV]: recoveryRoot,
-      PRIORENA_DEMO_MODE: '0'
-    },
+    env: { ...process.env },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let spawnError;
@@ -144,29 +138,46 @@ async function smokeRollbackApplication({ checkoutRoot, livePath, port = undefin
       pid: child.pid,
       expectedCwd: checkoutRoot,
       expectedPort,
-      expectedCommandFragment: 'server.js'
+      expectedCommandFragment: 'target-server/start.js'
     }));
     await diagnosticStageAsync('ROLLBACK_ROOT_SMOKE_FAILED', async () => {
       const rootResponse = await fetch(`${origin}/`);
       assert.equal(rootResponse.status, 200);
+      assert.match(rootResponse.url, /\/target\/$/);
       assert.match(await rootResponse.text(), /Priorena/);
     });
     await diagnosticStageAsync('ROLLBACK_DATA_SMOKE_FAILED', async () => {
-      const projectsResponse = await fetch(`${origin}/api/projects`);
-      assert.equal(projectsResponse.status, 200);
-      assert.deepEqual(await projectsResponse.json(), {});
+      const organizationsResponse = await fetch(`${origin}/api/v2/organizations`);
+      assert.equal(organizationsResponse.status, 200);
+      const organizations = await organizationsResponse.json();
+      assert.deepEqual(organizations.organizations.map(item => item.id), ['org-1']);
+      const workspacesResponse = await fetch(`${origin}/api/v2/organizations/org-1/workspaces`);
+      assert.equal(workspacesResponse.status, 200);
+      const workspaces = await workspacesResponse.json();
+      assert.deepEqual(workspaces.workspaces.map(item => item.id), ['workspace-1']);
+      const workspaceBase = `${origin}/api/v2/organizations/org-1/workspaces/workspace-1`;
+      const [scopes, features, mappings, workItems] = await Promise.all([
+        fetch(`${workspaceBase}/scopes`).then(response => response.json()),
+        fetch(`${workspaceBase}/features`).then(response => response.json()),
+        fetch(`${workspaceBase}/jira-epic-mappings`).then(response => response.json()),
+        fetch(`${workspaceBase}/work-items`).then(response => response.json())
+      ]);
+      assert.deepEqual(scopes.scopes.map(item => item.id), ['scope-1', 'scope-2', 'scope-3', 'scope-4']);
+      assert.deepEqual(features.features, []);
+      assert.deepEqual(mappings.jiraEpicMappings, []);
+      assert.deepEqual(workItems.workItems, []);
     });
     if (output.stdout.overflowed() || output.stderr.overflowed()) throw codedError('ROLLBACK_OUTPUT_LIMIT_EXCEEDED', 'Rollback application exceeded the bounded log limit');
     await diagnosticStageAsync('ROLLBACK_STOP_VALIDATION_FAILED', () => stopValidatedProcess({
       pid: child.pid,
       expectedCwd: checkoutRoot,
       expectedPort,
-      expectedCommandFragment: 'server.js'
+      expectedCommandFragment: 'target-server/start.js'
     }));
     stopped = true;
     const ended = await exit;
     if (ended.signal !== 'SIGTERM' && ended.code !== 0) throw codedError('ROLLBACK_STOP_FAILED', 'Rollback application did not stop cleanly');
-    return Object.freeze({ status: 'passed', host: '127.0.0.1', processValidated: processEvidence.commandMatched, legacyRuntimeReadOnly: true });
+    return Object.freeze({ status: 'passed', host: '127.0.0.1', processValidated: processEvidence.commandMatched, previousSchemaRuntimeReadOnly: true });
   } finally {
     if (!stopped && child.exitCode === null) {
       child.kill('SIGTERM');
@@ -176,7 +187,6 @@ async function smokeRollbackApplication({ checkoutRoot, livePath, port = undefin
 }
 
 module.exports = {
-  LEGACY_DATA_ENV,
   MAX_PROCESS_OUTPUT_BYTES,
   captureBounded,
   codedError,

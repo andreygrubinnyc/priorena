@@ -1,8 +1,8 @@
 # Priorena Target Product Model Specification
 
 **Status:** Approved target model
-**Version:** 1.3
-**Date:** 2026-08-12
+**Version:** 1.4
+**Date:** 2026-08-13
 **Product owner:** Priorena product owner
 **Purpose:** Canonical product-model, terminology, scope, workflow, clean-cutover, and acceptance specification for implementation by Codex.
 
@@ -12,7 +12,7 @@
 
 This repository copy is the repository-safe canonical target-model specification for Priorena. Customer-specific local bootstrap data is private environment configuration and must not be committed. All named Organizations, Workspaces, Scopes, Jira records, and IDs in this document are fictional examples; they do not prescribe universal onboarding defaults.
 
-Version 1.3 retains the approved clean-cutover decision and adds the generic repository seed, strict schema version 3, a first-class Feature hierarchy level, and controlled display-name renames. The current local runtime data is disposable. That decision supersedes every prior requirement to preserve, reconcile, translate, or migrate the current runtime records, including current Work Items; legacy Project/Jira Epic records and assignments; `Miscellaneous / No Epic`; Sources, Findings, Evidence, and updates; Follow-Up state; Milestones; Briefings, versions, outputs, and baselines; legacy IDs; mutable Workspace-name references; feed decisions; and current history.
+Version 1.4 retains the approved clean-cutover decision and the schema-v3 Feature hierarchy, and advances the source model to strict schema version 4 with independent Work Item Feature and Jira Epic associations. The current local runtime data is disposable. That decision supersedes every prior requirement to preserve, reconcile, translate, or migrate the current runtime records, including current Work Items; legacy Project/Jira Epic records and assignments; `Miscellaneous / No Epic`; Sources, Findings, Evidence, and updates; Follow-Up state; Milestones; Briefings, versions, outputs, and baselines; legacy IDs; mutable Workspace-name references; feed decisions; and current history.
 
 `docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md` remains authoritative about the current implementation, routes, logic, Organization-isolation and security risks, and tests. Its migration, reconciliation, legacy-preservation, and compatibility recommendations are superseded by this version and `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md`.
 
@@ -89,7 +89,7 @@ The following decisions are approved and must be treated as requirements.
 13. Briefings become the only current communication workflow after target behavior, automated tests, and release acceptance confirm feature parity.
 14. The committed and staged generic seed uses exactly Organization `org-1` / `Organization 1`, PM Workspace `workspace-1` / `PM Workspace 1`, and Scopes `scope-1` through `scope-4` / `Scope 1` through `Scope 4`. It contains no Features or operational records.
 15. Data from different Organizations must never be blended in ordinary product views, searches, Briefings, Sources, Evidence, exports, or settings.
-16. The current local runtime records and history are disposable and are not migrated into the schema-v3 target model.
+16. The current local runtime records and history are disposable and are not migrated into the schema-v4 target model.
 17. Follow-Up is stored as a nested object on Work Item.
 18. `Milestone.linkedWorkItemIds[]` is the canonical Milestone/Work Item relationship.
 19. Workspace-specific prompt overrides and drafting guidance must be stored in Workspace settings, never in `globalTechnicalSettings`.
@@ -102,6 +102,10 @@ The following decisions are approved and must be treated as requirements.
 26. A Work Item has a nullable `featureId`; any non-null Feature must match its Organization, Workspace, and Scope.
 27. Feature is not a Work Item type. Allowed Work Item types are Story, Task, Bug, Other, and Unknown.
 28. Organization, PM Workspace, Scope, and Feature display-name changes require revision-bound preview/apply and audit history while preserving stable IDs and frozen Briefing snapshots.
+29. Every schema-v4 Work Item persists a required nullable `jiraEpicMappingId` independently from `featureId` and from the Work Item's own `jiraId` and `jiraKey`.
+30. A non-null Work Item Jira Epic mapping must match the Work Item's exact Organization, Workspace, and Scope.
+31. Changing, clearing, or editing one Work Item relationship must not change the other unless a Scope change makes that relationship incompatible.
+32. Source-code merge authorization remains separate from authorization to reset the live schema-v3 runtime with a schema-v4 seed.
 
 ---
 
@@ -131,7 +135,7 @@ Organization 1                           Organization
     └── Scope 4                          Scope
 ```
 
-The clean seed contains no Features or Work Items. Future Work Items whose Scope is unknown use `scopeId: null` and `featureId: null` and appear as **Unassigned**; Unassigned is a state/view, not an entity.
+The clean seed contains no Features or Work Items. Future Work Items whose Scope is unknown use `scopeId: null`, `featureId: null`, and `jiraEpicMappingId: null` and appear as **Unassigned**; Unassigned is a state/view, not an entity.
 
 Jira is mapped beside this hierarchy:
 
@@ -295,6 +299,9 @@ Mapping status: verified
 - Priorena must not assign a Scope from title similarity, row proximity, meeting context, or hidden/unreadable screenshot content.
 - Duplicate Jira Epic mappings within one Workspace must be blocked or routed to reconciliation.
 - External names are preserved for provenance even when the user-facing Scope name differs.
+- A Jira Epic mapping has a stable ID and cannot be removed or reparented while ordinary metadata edits remain allowed.
+- Mapping status changes do not clear Work Item references. Current projections show the current mapping key, name, and status; frozen Briefing Versions remain unchanged.
+- Assigning or clearing a mapping on a Work Item uses revision-bound preview/apply and performs no Jira call.
 
 #### Example
 
@@ -329,6 +336,10 @@ Canonical types remain:
 - A Work Item has zero or one Feature through nullable `featureId`.
 - `featureId = null` means the Work Item has no Feature; it is independent from Unassigned Scope state.
 - A non-null Feature must be a child of the Work Item's exact Scope and matching Organization and Workspace.
+- A Work Item has zero or one Jira Epic mapping through required nullable `jiraEpicMappingId`.
+- `jiraEpicMappingId = null` means the Work Item has no Jira Epic association. A non-null mapping must belong to the Work Item's exact Organization, Workspace, and Scope.
+- Feature and Jira Epic associations are independent. Either, both, or neither may be present under a non-null Scope.
+- The Work Item's own `jiraId` and `jiraKey` identify the Work Item; they are not its parent Jira Epic mapping.
 - `Feature` is rejected as a Work Item `itemType`; an external source value of Feature is retained as bounded provenance and routed to explicit mapping review.
 - A Work Item may have a Jira key even when it is Unassigned.
 - Work Item identity must not be inferred from title alone when an external Jira key is available.
@@ -346,6 +357,8 @@ A Work Item may be assigned to a Scope through:
 3. an exact Jira Epic mapping that uniquely resolves to one Scope, with preview and approval where consequential.
 
 A Work Item must remain Unassigned when the association is ambiguous.
+
+Every individual or bulk Scope preview reports `featureChange` and `jiraEpicChange` separately as retained, cleared, or replaced. An omitted relationship selection preserves a compatible current value and otherwise clears it; an explicit selection is validated against the target Scope. Selecting Unassigned forces both relationships to null. A direct `assign-feature` action never changes the Jira Epic mapping, and a direct `assign-jira-epic` action never changes the Feature.
 
 #### No-Epic handling
 
@@ -820,7 +833,9 @@ WorkItem
 - workspaceId
 - scopeId null or one Scope
 - featureId null or one Feature under that Scope
+- jiraEpicMappingId null or one Jira Epic mapping under that Scope
 - jiraId optional
+- jiraKey optional; identifies the Work Item, not the parent Jira Epic
 - itemType
 - summary
 - description
@@ -929,8 +944,8 @@ BriefingVersion
 
 ### Target storage transition
 
-- The target runtime uses strict `schemaVersion: 3`, requires `features[]`, and uses canonical target identities.
-- Schema version 2 fails closed. There is no v2 compatibility reader, migration path, or dual reader/writer.
+- The target source model uses strict `schemaVersion: 4`, requires `features[]`, `jiraEpicMappings[]`, and required nullable `workItems[].jiraEpicMappingId`, and uses canonical target identities.
+- Schema version 3 fails closed. There is no v3 compatibility reader, migration path, or dual reader/writer.
 - The current legacy runtime file is not read as a migration input by the target implementation and is not translated record by record.
 - Target development and validation use a separate target-shaped data file until cutover.
 - The old application and legacy schema may remain temporarily available only for implementation sequencing.
@@ -1001,6 +1016,8 @@ Scope: active Workspace.
 Required filters:
 
 - Scope, default `All scopes`;
+- Feature, including `No Feature`;
+- Jira Epic, including `No Jira Epic`;
 - type;
 - status;
 - assignee;
@@ -1011,13 +1028,16 @@ Required filters:
 
 Required bulk action wording:
 
-- `Assign scope`
-- new value may be one Scope or `Unassigned`
+- preview and apply Scope, Feature, and Jira Epic associations independently;
+- Scope may be one stable-ID Scope or `Unassigned`;
+- Feature and Jira Epic selectors are limited to the selected Scope and support keeping a compatible value or explicitly clearing it.
 
 Every row must display:
 
 - Work Item key and summary;
 - Scope or Unassigned;
+- Feature or No Feature;
+- Jira Epic key/name/status or No Jira Epic, visually distinct from the Work Item's own Jira key;
 - assignee;
 - sprint;
 - status;
@@ -1200,7 +1220,7 @@ No item-level reconciliation package, tombstone system, legacy-ID translation ma
 
 ### 11.2 Fictional repository seed and private bootstrap
 
-The committed schema-v3 generic seed is fictional, deterministic, and target-shaped:
+The committed schema-v4 generic seed is fictional, deterministic, and target-shaped:
 
 ```text
 Organization: org-1 / Organization 1
@@ -1213,7 +1233,7 @@ Organization: org-1 / Organization 1
 
 All four Scopes have `organizationId: org-1` and `workspaceId: workspace-1`. User preferences select `org-1` and `workspace-1`. The seed creates no Features, Work Items, Jira Epic mappings, Sources, Findings, Evidence, Proposed Changes, Follow-Up state, Milestones, Briefings, Briefing Versions, Audit Events, or legacy history. It does not create `Miscellaneous / No Epic` or another catch-all Scope.
 
-This committed seed is the exact authorized generic bootstrap shape for the clean reset. It contains no customer-specific or operational values. The source-code merge authorization for this model remains separate from any later authorization to replace the live runtime with a schema-v3 seed.
+This committed seed is the exact authorized generic bootstrap shape for a future clean reset. It contains no customer-specific or operational values. Source-code merge authorization for this model remains separate from any later authorization to replace the live schema-v3 runtime with a schema-v4 seed.
 
 ### 11.3 Reset safeguard and retention
 
@@ -1231,7 +1251,7 @@ The backup is a rollback safeguard, not a migration source. Retain the backup an
 
 The current runtime file must not be deleted or replaced until all of the following are true:
 
-1. the schema-v3 seed validates and a schema-v2 document fails closed;
+1. the schema-v4 seed validates and a schema-v3 document fails closed;
 2. the exact clean environment seed validates and loads from a staged, non-live path;
 3. all automated tests pass, including two-Organization isolation tests;
 4. the target application starts successfully against the staged seed and passes smoke tests;
@@ -1281,7 +1301,7 @@ Target behavior:
 
 ### 13.1 Cutover principles
 
-- Build and validate the schema-v3 target model against separate temporary/staged data.
+- Build and validate the schema-v4 target model against separate temporary/staged data.
 - Leave the current runtime file untouched until the reset gate in Section 11.4 passes.
 - Do not expose legacy terminology in new UI, APIs, tests, or domain logic.
 - Do not preserve legacy routes, mutable-name identity, data shapes, IDs, or history solely for the current disposable runtime.
@@ -1376,7 +1396,7 @@ The detailed phase gates, likely modules, tests, rollback steps, and commit boun
 
 ### 14.8 Clean reset
 
-- The schema-v3 model validates and schema v2 fails closed.
+- The schema-v4 model validates and schema v3 fails closed.
 - The exact generic seed loads from a staged, non-live path.
 - No legacy runtime records are present in the target store.
 - The target application starts successfully against the clean seed.
@@ -1410,7 +1430,7 @@ At minimum, implement automated tests for:
 16. Current-state versus historical-Evidence behavior.
 17. Server/client status calculation consistency for any calculation that remains duplicated.
 18. Workspace prompt overrides and drafting guidance never entering another Workspace or global technical settings.
-19. Schema-v3 and exact generic-seed validation, including mandatory empty `features[]`, the absence of legacy records, and v2 fail-closed behavior.
+19. Schema-v4 and exact generic-seed validation, including mandatory empty `features[]`, the absence of legacy records, and v3 fail-closed behavior.
 20. Successful application startup and smoke behavior against the clean seed.
 21. At least two Organizations proving isolation across routes, UI, search, exports, backups, Briefings, Sources, Evidence, files, and AI context.
 22. Timestamped backup creation, checksum verification, atomic reset rehearsal, and checksum-verified rollback rehearsal using temporary copies.
@@ -1419,6 +1439,9 @@ At minimum, implement automated tests for:
 25. Scope-change previews showing Feature retained, cleared, or replaced for individual, bulk, and imported changes.
 26. Revision-bound Organization, PM Workspace, Scope, and Feature renames preserving IDs, relationships, and frozen Briefing snapshots.
 27. Feature context in UI filters, Today, search, Briefing candidates, exports, backups, and scoped AI context.
+28. Required nullable Jira Epic references, all five valid Work Item association states, exact-parent rejection, and stable mapping metadata updates.
+29. Independent direct and Scope-change preview/apply behavior for Feature and Jira Epic associations, including no-op, stale, wrong-parent, bulk, import, and Unassigned cases.
+30. Jira Epic context in UI filters/selectors, Today, search, Briefing candidates, exports, backups, and scoped AI context, while Work Item Jira identity remains distinct.
 
 ---
 
@@ -1485,7 +1508,7 @@ The target-model implementation is complete only when:
 - Workspace-specific prompt overrides and drafting guidance are not stored globally;
 - Briefings are the canonical current communication workflow and retain Teams-style, email-style, and Confluence-style deterministic outputs;
 - no ordinary screen, search, export, Briefing, or AI context leaks data across Organizations;
-- the schema-v3 model validates, schema v2 fails closed, and the generic seed contains no operational or legacy records;
+- the schema-v4 model validates, schema v3 fails closed, and the generic seed contains no operational or legacy records;
 - the application starts successfully against the clean seed;
 - all tests, including two-Organization isolation tests, pass;
 - the pre-reset backup path and checksum are recorded;
@@ -1505,7 +1528,7 @@ Before replacing the current runtime file or deleting legacy implementation path
 2. read `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md` and the still-valid implementation findings in `docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md`;
 3. inspect current code and schema against them;
 4. implement and validate the target against a separate temporary/staged data file;
-5. validate the schema-v3 model and exact generic clean seed;
+5. validate the schema-v4 model and exact generic clean seed;
 6. pass all automated tests, two-Organization isolation tests, target startup, and smoke tests;
 7. create and verify the timestamped pre-reset backup and SHA-256 checksum;
 8. rehearse atomic reset and checksum-verified rollback using temporary copies;

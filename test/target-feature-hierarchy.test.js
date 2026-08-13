@@ -264,12 +264,12 @@ test('bulk same-Scope Feature replacement and clear apply the previewed Feature 
   const stored = await persisted(targetDataFile);
   const audits = stored.document.auditEvents.filter(event => event.entityId === workItemIds[0] && event.action === 'bulk-assign-scope-applied').slice(-2);
   assert.deepEqual(audits.map(event => event.beforeHash), [
-    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: 'feature-alpha-mapped' }),
-    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: 'feature-alpha-mapped-alternate' })
+    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: 'feature-alpha-mapped', jiraEpicMappingId: 'jira-mapping-alpha-one' }),
+    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: 'feature-alpha-mapped-alternate', jiraEpicMappingId: 'jira-mapping-alpha-one' })
   ]);
   assert.deepEqual(audits.map(event => event.afterHash), [
-    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: 'feature-alpha-mapped-alternate' }),
-    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: null })
+    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: 'feature-alpha-mapped-alternate', jiraEpicMappingId: 'jira-mapping-alpha-one' }),
+    stateHash({ scopeId: 'scope-alpha-multiple-mappings', featureId: null, jiraEpicMappingId: 'jira-mapping-alpha-one' })
   ]);
 });
 

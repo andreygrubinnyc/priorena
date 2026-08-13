@@ -113,7 +113,8 @@ function validateTargetTransition(existingDocument, candidateDocument) {
 
   for (const [collection, label, parentFields] of [
     ['scopes', 'Scope', ['organizationId', 'workspaceId']],
-    ['features', 'Feature', ['organizationId', 'workspaceId', 'scopeId']]
+    ['features', 'Feature', ['organizationId', 'workspaceId', 'scopeId']],
+    ['jiraEpicMappings', 'Jira Epic mapping', ['organizationId', 'workspaceId', 'scopeId']]
   ]) {
     const candidates = recordsById(candidateDocument[collection]);
     existingDocument[collection].forEach(existingRecord => {
