@@ -6,6 +6,7 @@ const { readTargetDataWithRevision } = require('../../target-model/persistence')
 const { parseFlagPairs, requireExplicitPath } = require('./safety');
 
 const OPERATIONAL_COLLECTIONS = Object.freeze([
+  'features',
   'jiraEpicMappings',
   'workItems',
   'milestones',
@@ -19,7 +20,23 @@ const OPERATIONAL_COLLECTIONS = Object.freeze([
 ]);
 
 function assertBootstrapOnly(document) {
-  if (document.organizations.length < 1 || document.workspaces.length < 1) throw new Error('A staged seed requires at least one Organization and Workspace');
+  const hierarchy = {
+    organizations: document.organizations.map(({ id, name }) => ({ id, name })),
+    workspaces: document.workspaces.map(({ id, organizationId, name }) => ({ id, organizationId, name })),
+    scopes: document.scopes.map(({ id, organizationId, workspaceId, name }) => ({ id, organizationId, workspaceId, name }))
+  };
+  const expected = {
+    organizations: [{ id: 'org-1', name: 'Organization 1' }],
+    workspaces: [{ id: 'workspace-1', organizationId: 'org-1', name: 'PM Workspace 1' }],
+    scopes: [1, 2, 3, 4].map(index => ({
+      id: `scope-${index}`, organizationId: 'org-1', workspaceId: 'workspace-1', name: `Scope ${index}`
+    }))
+  };
+  if (JSON.stringify(hierarchy) !== JSON.stringify(expected)) throw new Error('A staged seed must contain the exact authorized generic hierarchy');
+  if (JSON.stringify(document.userPreferences) !== JSON.stringify({
+    activeOrganizationId: 'org-1',
+    activeWorkspaceIdsByOrganization: { 'org-1': 'workspace-1' }
+  })) throw new Error('A staged seed must contain the exact authorized generic preferences');
   for (const collection of OPERATIONAL_COLLECTIONS) {
     if (document[collection].length !== 0) throw new Error('A staged seed must not contain operational records or history');
   }

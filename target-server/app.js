@@ -82,8 +82,12 @@ function createTargetApiApp(options = {}) {
 
   jsonRoute(`${TARGET_API_NAMESPACE}/organizations`, () => services.listOrganizations());
   jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId`, req => services.getOrganization(req.params.organizationId));
+  mutationRoute('post', `${TARGET_API_NAMESPACE}/organizations/:organizationId/rename/preview`, req => services.previewOrganizationRename(req.params.organizationId, req.body));
+  mutationRoute('post', `${TARGET_API_NAMESPACE}/organizations/:organizationId/rename/apply`, req => services.applyOrganizationRename(req.params.organizationId, req.body));
   jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId/workspaces`, req => services.listWorkspaces(req.params.organizationId));
   jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId/workspaces/:workspaceId`, req => services.getWorkspace(req.params.organizationId, req.params.workspaceId));
+  mutationRoute('post', `${TARGET_API_NAMESPACE}/organizations/:organizationId/workspaces/:workspaceId/rename/preview`, req => services.previewWorkspaceRename(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${TARGET_API_NAMESPACE}/organizations/:organizationId/workspaces/:workspaceId/rename/apply`, req => services.applyWorkspaceRename(req.params.organizationId, req.params.workspaceId, req.body));
   jsonRoute(`${TARGET_API_NAMESPACE}/context`, req => services.resolveContext(req.query.organizationId, req.query.workspaceId));
   jsonRoute(`${TARGET_API_NAMESPACE}/organizations/:organizationId/portfolio`, req => services.portfolio(req.params.organizationId));
 
@@ -93,7 +97,16 @@ function createTargetApiApp(options = {}) {
 
   mutationRoute('post', `${workspaceBase}/scopes`, req => services.createScope(req.params.organizationId, req.params.workspaceId, req.body));
   mutationRoute('patch', `${workspaceBase}/scopes/:scopeId`, req => services.updateScope(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
+  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/rename/preview`, req => services.previewScopeRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
+  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/rename/apply`, req => services.applyScopeRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
   mutationRoute('post', `${workspaceBase}/scopes/:scopeId/archive`, req => services.setScopeArchived(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
+  jsonRoute(`${workspaceBase}/scopes/:scopeId/features`, req => services.listScopeFeatures(req.params.organizationId, req.params.workspaceId, req.params.scopeId));
+  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/features`, req => services.createFeature(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
+  jsonRoute(`${workspaceBase}/scopes/:scopeId/features/:featureId`, req => services.getScopeFeature(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId));
+  mutationRoute('patch', `${workspaceBase}/scopes/:scopeId/features/:featureId`, req => services.updateFeature(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId, req.body));
+  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/features/:featureId/rename/preview`, req => services.previewFeatureRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId, req.body));
+  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/features/:featureId/rename/apply`, req => services.applyFeatureRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId, req.body));
+  jsonRoute(`${workspaceBase}/scopes/:scopeId/features/:featureId/work-items`, req => services.listFeatureWorkItems(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId));
   jsonRoute(`${workspaceBase}/scopes/:scopeId/jira-epic-mappings`, req => services.listScopeMappings(req.params.organizationId, req.params.workspaceId, req.params.scopeId));
   mutationRoute('post', `${workspaceBase}/scopes/:scopeId/jira-epic-mappings`, req => services.createJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
   mutationRoute('patch', `${workspaceBase}/scopes/:scopeId/jira-epic-mappings/:mappingId`, req => services.updateJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.mappingId, req.body));
@@ -121,6 +134,7 @@ function createTargetApiApp(options = {}) {
 
   const collections = Object.freeze({
     scopes: 'scopes',
+    features: 'features',
     'jira-epic-mappings': 'jiraEpicMappings',
     'work-items': 'workItems',
     milestones: 'milestones',

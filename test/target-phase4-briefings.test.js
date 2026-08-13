@@ -16,7 +16,7 @@ const {
   requestApp,
   workspaceBase
 } = require('../test-support/target-api-harness');
-const { createPhase3WorkflowFixture } = require('../test-support/target-v2-fixtures');
+const { createPhase3WorkflowFixture } = require('../test-support/target-v3-fixtures');
 
 const NOW = '2026-08-09T12:00:00.000Z';
 const COMMUNICATED_AT = '2026-08-10T12:00:00.000Z';

@@ -9,7 +9,7 @@ const { PUBLIC_ERRORS } = require('../target-server/errors');
 const {
   createInvalidPhase3ProposedChangeFixture,
   createPhase3WorkflowFixture
-} = require('../test-support/target-v2-fixtures');
+} = require('../test-support/target-v3-fixtures');
 const {
   ALPHA,
   BETA,
@@ -122,6 +122,7 @@ test('import preview separates decisions, performs exact matching only, and writ
       summary: 'Fictional existing item',
       jiraProjectKey: 'FICTA',
       jiraEpicKey: 'FICTA-101',
+      requestedScopeId: 'scope-alpha-zero-mapping',
       canonicalStatus: 'Waiting',
       evidenceExcerpt: 'Fictional exact status evidence.',
       category: 'status'
@@ -154,12 +155,48 @@ test('import preview separates decisions, performs exact matching only, and writ
   assert.ok(types.includes('work-item-create'));
   assert.ok(types.includes('finding-create'));
   assert.ok(types.includes('proposed-current-state-change'));
+  const explicitMove = preview.proposals.find(proposal => proposal.index === 0 && proposal.type === 'work-item-assign');
+  assert.deepEqual(explicitMove.payload.featureChange, {
+    effect: 'cleared', beforeFeatureId: 'feature-alpha-mapped', afterFeatureId: null
+  });
   const noEpicAssignment = preview.proposals.find(proposal => proposal.index === 1 && proposal.type === 'work-item-assign');
   assert.equal(noEpicAssignment, undefined);
   const noEpicWorkItem = preview.proposals.find(proposal => proposal.index === 1 && proposal.type === 'work-item-create');
   assert.equal(noEpicWorkItem.payload.scopeId, null);
   assert.deepEqual(await fs.readFile(targetDataFile), beforeBytes);
   assert.equal((await persisted(targetDataFile)).revision, before.revision);
+});
+
+test('external Feature item types are preserved for explicit review and never become Work Items', async t => {
+  const { app, targetDataFile } = await createTargetApiHarness(t);
+  const before = await persisted(targetDataFile);
+  const input = importInput([{
+    externalKey: 'FICTA-500',
+    itemType: 'Feature',
+    summary: 'Fictional external Feature requiring explicit mapping'
+  }]);
+  const previewResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
+  assert.equal(previewResponse.status, 200);
+  const review = previewResponse.json().preview.proposals.find(proposal => proposal.type === 'external-item-type-review');
+  assert.deepEqual(review.payload, {
+    externalItemType: 'Feature',
+    externalKey: 'FICTA-500',
+    summary: 'Fictional external Feature requiring explicit mapping',
+    requiresExplicitMapping: true
+  });
+  assert.equal(previewResponse.json().preview.proposals.some(proposal => proposal.type === 'work-item-create'), false);
+
+  const sourceProposal = previewResponse.json().preview.proposals.find(proposal => proposal.type === 'source-create');
+  const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
+    expectedRevision: before.revision,
+    actor: ACTOR,
+    input,
+    previewHash: previewResponse.json().preview.previewHash,
+    approvedProposalIds: [sourceProposal.id, review.id]
+  });
+  assert.equal(applied.status, 200, applied.body);
+  assert.deepEqual(applied.json().outcome.externalItemTypeReviews, [review.payload]);
+  assert.equal((await persisted(targetDataFile)).document.workItems.length, before.document.workItems.length);
 });
 
 test('import apply reconstructs the preview and applies only explicitly selected proposal types', async t => {

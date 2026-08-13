@@ -111,6 +111,22 @@ function validateTargetTransition(existingDocument, candidateDocument) {
     }
   });
 
+  for (const [collection, label, parentFields] of [
+    ['scopes', 'Scope', ['organizationId', 'workspaceId']],
+    ['features', 'Feature', ['organizationId', 'workspaceId', 'scopeId']]
+  ]) {
+    const candidates = recordsById(candidateDocument[collection]);
+    existingDocument[collection].forEach(existingRecord => {
+      const candidateRecord = candidates.get(existingRecord.id);
+      if (!candidateRecord) transitionFail(`${collection}.${existingRecord.id}`, `an existing ${label} cannot be removed from the target store`);
+      for (const parentField of parentFields) {
+        if (candidateRecord[parentField] !== existingRecord[parentField]) {
+          transitionFail(`${collection}.${existingRecord.id}.${parentField}`, `an existing ${label} cannot move to another parent`);
+        }
+      }
+    });
+  }
+
   if (candidateDocument.auditEvents.length < existingDocument.auditEvents.length) {
     transitionFail('auditEvents', 'existing Audit Events cannot be deleted');
   }

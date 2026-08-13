@@ -18,6 +18,7 @@ const SAFE_BRIEFING_MEDIA_TYPES = new Set([
 ]);
 const WORKSPACE_OWNED_COLLECTIONS = Object.freeze([
   'scopes',
+  'features',
   'jiraEpicMappings',
   'workItems',
   'milestones',
@@ -63,6 +64,17 @@ function publicScope(scope) {
   };
 }
 
+function publicFeature(feature) {
+  return {
+    id: feature.id,
+    organizationId: feature.organizationId,
+    workspaceId: feature.workspaceId,
+    scopeId: feature.scopeId,
+    name: feature.name,
+    description: feature.description
+  };
+}
+
 function publicJiraEpicMapping(mapping) {
   return {
     id: mapping.id,
@@ -78,14 +90,17 @@ function publicJiraEpicMapping(mapping) {
   };
 }
 
-function publicWorkItem(workItem, scopeIndex) {
+function publicWorkItem(workItem, scopeIndex, featureIndex = new Map()) {
   const scope = workItem.scopeId === null ? null : scopeIndex.get(workItem.scopeId);
+  const feature = workItem.featureId === null ? null : featureIndex.get(workItem.featureId);
   return {
     id: workItem.id,
     organizationId: workItem.organizationId,
     workspaceId: workItem.workspaceId,
     scopeId: workItem.scopeId,
     scope: scope ? { id: scope.id, name: scope.name } : null,
+    featureId: workItem.featureId,
+    feature: feature ? { id: feature.id, scopeId: feature.scopeId, name: feature.name } : null,
     jiraId: workItem.jiraId,
     jiraKey: workItem.jiraKey,
     itemType: workItem.itemType,
@@ -371,6 +386,7 @@ function buildPortfolio(document, organizationId) {
   const workspaces = recordsForOrganization(document, 'workspaces', organization.id);
   const workspaceRows = workspaces.map(workspace => {
     const scopes = recordsForWorkspace(document, 'scopes', organization.id, workspace.id);
+    const features = recordsForWorkspace(document, 'features', organization.id, workspace.id);
     const workItems = recordsForWorkspace(document, 'workItems', organization.id, workspace.id).filter(item => !item.archived);
     const milestones = recordsForWorkspace(document, 'milestones', organization.id, workspace.id);
     const sources = recordsForWorkspace(document, 'sources', organization.id, workspace.id);
@@ -380,6 +396,7 @@ function buildPortfolio(document, organizationId) {
       ...publicWorkspace(workspace),
       counts: {
         scopes: scopes.filter(scope => !scope.archived).length,
+        features: features.length,
         workItems: workItems.length,
         unassignedWorkItems: workItems.filter(item => item.scopeId === null).length,
         openFollowUps: workItems.filter(item => ['open', 'waiting'].includes(item.followUp.state)).length,
@@ -397,6 +414,7 @@ function buildPortfolio(document, organizationId) {
       workspaces: workspaceRows.length,
       activeWorkspaces: workspaceRows.filter(workspace => !workspace.archived).length,
       workItems: total('workItems'),
+      features: total('features'),
       unassignedWorkItems: total('unassignedWorkItems'),
       openFollowUps: total('openFollowUps'),
       milestones: total('milestones'),
@@ -415,6 +433,8 @@ function buildToday(document, organizationId, workspaceId) {
   const workspace = resolvers.resolveWorkspace(organization.id, workspaceId);
   const scopes = recordsForWorkspace(document, 'scopes', organization.id, workspace.id);
   const scopeIndex = new Map(scopes.map(scope => [scope.id, scope]));
+  const features = recordsForWorkspace(document, 'features', organization.id, workspace.id);
+  const featureIndex = new Map(features.map(feature => [feature.id, feature]));
   const workItems = recordsForWorkspace(document, 'workItems', organization.id, workspace.id).filter(item => !item.archived);
   const milestones = recordsForWorkspace(document, 'milestones', organization.id, workspace.id);
   const findings = recordsForWorkspace(document, 'findings', organization.id, workspace.id);
@@ -425,6 +445,7 @@ function buildToday(document, organizationId, workspaceId) {
     workspace: publicWorkspace(workspace),
     counts: {
       workItems: workItems.length,
+      features: features.length,
       assignedWorkItems: workItems.filter(item => item.scopeId !== null).length,
       unassignedWorkItems: workItems.filter(item => item.scopeId === null).length,
       blockedWorkItems: workItems.filter(item => blockedStatuses.has(item.canonicalStatus.trim().toLowerCase())).length,
@@ -433,14 +454,15 @@ function buildToday(document, organizationId, workspaceId) {
       findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').length,
       acceptedEvidence: evidence.length
     },
-    workItems: workItems.map(item => publicWorkItem(item, scopeIndex)),
+    features: features.map(publicFeature),
+    workItems: workItems.map(item => publicWorkItem(item, scopeIndex, featureIndex)),
     attention: {
       blockedWorkItems: workItems
         .filter(item => blockedStatuses.has(item.canonicalStatus.trim().toLowerCase()))
-        .map(item => publicWorkItem(item, scopeIndex)),
+        .map(item => publicWorkItem(item, scopeIndex, featureIndex)),
       followUps: workItems
         .filter(item => ['open', 'waiting'].includes(item.followUp.state))
-        .map(item => publicWorkItem(item, scopeIndex)),
+        .map(item => publicWorkItem(item, scopeIndex, featureIndex)),
       milestones: milestones.map(milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace))),
       findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').map(publicFinding)
     }
@@ -463,6 +485,7 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
   const workspace = resolvers.resolveWorkspace(organizationId, workspaceId);
   const needle = normalizeSearchQuery(query);
   const scopeIndex = new Map(recordsForWorkspace(document, 'scopes', organizationId, workspace.id).map(scope => [scope.id, scope]));
+  const featureIndex = new Map(recordsForWorkspace(document, 'features', organizationId, workspace.id).map(feature => [feature.id, feature]));
   const contains = values => values.some(value => String(value || '').toLocaleLowerCase('en-US').includes(needle));
   const results = [];
   const add = result => {
@@ -472,9 +495,12 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
   recordsForWorkspace(document, 'scopes', organizationId, workspace.id).forEach(scope => {
     if (contains([scope.name, scope.description, scope.owner])) add({ kind: 'scope', id: scope.id, title: scope.name, workspaceId: workspace.id, scopeId: scope.id });
   });
+  recordsForWorkspace(document, 'features', organizationId, workspace.id).forEach(feature => {
+    if (contains([feature.name, feature.description])) add({ kind: 'feature', id: feature.id, title: feature.name, workspaceId: workspace.id, scopeId: feature.scopeId });
+  });
   recordsForWorkspace(document, 'workItems', organizationId, workspace.id).forEach(item => {
-    if (contains([item.summary, item.jiraKey, item.canonicalStatus, item.assignee, item.sprint])) {
-      add({ kind: 'workItem', id: item.id, title: item.summary, workspaceId: workspace.id, scopeId: item.scopeId, scopeName: scopeIndex.get(item.scopeId)?.name || null });
+    if (contains([item.summary, item.jiraKey, item.canonicalStatus, item.assignee, item.sprint, featureIndex.get(item.featureId)?.name])) {
+      add({ kind: 'workItem', id: item.id, title: item.summary, workspaceId: workspace.id, scopeId: item.scopeId, scopeName: scopeIndex.get(item.scopeId)?.name || null, featureId: item.featureId, featureName: featureIndex.get(item.featureId)?.name || null });
     }
   });
   recordsForWorkspace(document, 'milestones', organizationId, workspace.id).forEach(milestone => {
@@ -493,10 +519,12 @@ function listWorkspaceCollection(document, collection, organizationId, workspace
   const resolvers = createTargetResolvers(document);
   const workspace = resolvers.resolveWorkspace(organizationId, workspaceId);
   const scopeIndex = new Map(recordsForWorkspace(document, 'scopes', organizationId, workspace.id).map(scope => [scope.id, scope]));
+  const featureIndex = new Map(recordsForWorkspace(document, 'features', organizationId, workspace.id).map(feature => [feature.id, feature]));
   const serializers = {
     scopes: publicScope,
+    features: publicFeature,
     jiraEpicMappings: publicJiraEpicMapping,
-    workItems: item => publicWorkItem(item, scopeIndex),
+    workItems: item => publicWorkItem(item, scopeIndex, featureIndex),
     milestones: milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace)),
     sources: source => publicSource(source),
     findings: publicFinding,
@@ -511,10 +539,17 @@ function getWorkspaceChild(document, collection, organizationId, workspaceId, ch
   const workspace = resolvers.resolveWorkspace(organizationId, workspaceId);
   const child = resolvers.resolveWorkspaceChild(collection, organizationId, workspaceId, childId);
   const scopeIndex = resolvers.indexes.scopes;
+  const featureIndex = resolvers.indexes.features;
   const serializers = {
-    scopes: publicScope,
+    scopes: scope => ({
+      ...publicScope(scope),
+      features: recordsForWorkspace(document, 'features', organizationId, workspace.id)
+        .filter(feature => feature.scopeId === scope.id)
+        .map(publicFeature)
+    }),
+    features: publicFeature,
     jiraEpicMappings: publicJiraEpicMapping,
-    workItems: item => publicWorkItem(item, scopeIndex),
+    workItems: item => publicWorkItem(item, scopeIndex, featureIndex),
     milestones: milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace)),
     sources: source => publicSource(source, { includeContent: true }),
     findings: publicFinding,
@@ -523,6 +558,7 @@ function getWorkspaceChild(document, collection, organizationId, workspaceId, ch
   };
   const singularKeys = {
     scopes: 'scope',
+    features: 'feature',
     jiraEpicMappings: 'jiraEpicMapping',
     workItems: 'workItem',
     milestones: 'milestone',
@@ -612,6 +648,7 @@ function buildOrganizationArchive(document, organizationId, kind) {
     organizations: [clone(organization)],
     workspaces: clone(workspaces),
     scopes: clone(recordsForOrganization(document, 'scopes', organization.id)),
+    features: clone(recordsForOrganization(document, 'features', organization.id)),
     jiraEpicMappings: clone(recordsForOrganization(document, 'jiraEpicMappings', organization.id)),
     workItems: clone(recordsForOrganization(document, 'workItems', organization.id)),
     milestones: clone(recordsForOrganization(document, 'milestones', organization.id)),
@@ -636,6 +673,8 @@ function buildAiContext(document, organizationId, workspaceId) {
   const workspace = resolvers.resolveWorkspace(organization.id, workspaceId);
   const scopes = recordsForWorkspace(document, 'scopes', organization.id, workspace.id);
   const scopeIndex = new Map(scopes.map(scope => [scope.id, scope]));
+  const features = recordsForWorkspace(document, 'features', organization.id, workspace.id);
+  const featureIndex = new Map(features.map(feature => [feature.id, feature]));
   const briefings = recordsForOrganization(document, 'briefings', organization.id)
     .filter(briefing => briefing.workspaceIds.length === 1 && briefing.workspaceIds[0] === workspace.id)
     .map(briefing => {
@@ -658,7 +697,8 @@ function buildAiContext(document, organizationId, workspaceId) {
       draftingGuidance: workspace.draftingGuidance
     },
     scopes: scopes.map(publicScope),
-    workItems: recordsForWorkspace(document, 'workItems', organization.id, workspace.id).map(item => publicWorkItem(item, scopeIndex)),
+    features: features.map(publicFeature),
+    workItems: recordsForWorkspace(document, 'workItems', organization.id, workspace.id).map(item => publicWorkItem(item, scopeIndex, featureIndex)),
     milestones: recordsForWorkspace(document, 'milestones', organization.id, workspace.id)
       .map(milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace))),
     sources: recordsForWorkspace(document, 'sources', organization.id, workspace.id).map(source => publicSource(source, { includeContent: true })),
@@ -695,6 +735,7 @@ module.exports = {
   publicOrganization,
   publicBriefing,
   publicBriefingVersion,
+  publicFeature,
   publicMilestone,
   publicSource,
   publicWorkItem,

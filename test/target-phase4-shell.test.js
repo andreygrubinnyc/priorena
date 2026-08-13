@@ -47,7 +47,7 @@ test('target release launcher requires explicit private paths and binds only to 
 test('isolated target entry exposes the canonical hierarchy and operational navigation', async () => {
   const markup = await source('public/target/index.html');
   for (const expected of [
-    'Organization', 'PM Workspace', 'Portfolio', 'Today', 'Work Items', 'Follow-Up', 'Milestones',
+    'Organization', 'PM Workspace', 'Portfolio', 'Today', 'Work Items', 'Feature', 'Follow-Up', 'Milestones',
     'Add Source', 'Source Library', 'Review', 'Briefings', 'Settings', 'All scopes'
   ]) assert.match(markup, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
@@ -83,6 +83,14 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.match(client, /Snapshot prepared/);
   assert.match(client, /Priorena does not send/);
   assert.match(client, /Priorena sent nothing/);
+  assert.match(client, /All Features/);
+  assert.match(client, /function featureOptionLabel\(feature\)/);
+  assert.match(client, /Stable ID: \$\{feature\.id\}/);
+  assert.match(client, /Create Feature/);
+  assert.match(client, /Preview Scope and Feature assignment/);
+  assert.match(client, /Preview \$\{entityLabel\} rename/);
+  assert.match(client, /onApplied\(result\.body\);[\s\S]*state\.workflow = null;[\s\S]*await loadWorkflow\(\);[\s\S]*renderSettings\(\);/);
+  assert.match(client, /Existing frozen Briefing snapshots are not rewritten/);
   assert.doesNotMatch(client, /sendBriefing|sendOutput|autoPublish/);
 });
 
@@ -163,7 +171,7 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
 
 test('target UI is the release root and does not mutate target data', async t => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase4-shell-'));
-  const targetDataFile = path.join(tempRoot, 'target-v2.json');
+  const targetDataFile = path.join(tempRoot, 'target-v3.json');
   const sourceFilesRoot = path.join(tempRoot, 'source-files');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });

@@ -46,6 +46,17 @@ function scope(id, organizationId, workspaceId, name) {
   };
 }
 
+function feature(id, organizationId, workspaceId, scopeId, name = 'Duplicate Fictional Feature') {
+  return {
+    id,
+    organizationId,
+    workspaceId,
+    scopeId,
+    name,
+    description: 'Fictional Feature used only for schema-v3 isolation tests.'
+  };
+}
+
 function followUp(state = 'none') {
   const values = {
     none: {
@@ -84,17 +95,18 @@ function followUp(state = 'none') {
   return { state, ...values[state] };
 }
 
-function workItem(id, organizationId, workspaceId, scopeId, summary, followUpState = 'none') {
+function workItem(id, organizationId, workspaceId, scopeId, summary, followUpState = 'none', featureId = null) {
   return {
     id,
     organizationId,
     workspaceId,
     scopeId,
+    featureId,
     jiraId: null,
     jiraKey: null,
     itemType: 'Task',
     summary,
-    description: 'Synthetic Work Item for version-2 schema tests.',
+    description: 'Synthetic Work Item for schema-v3 tests.',
     canonicalStatus: 'Planned',
     currentStateProvenance: 'fictional-manual-review',
     currentStateConfidence: 'confirmed',
@@ -129,6 +141,12 @@ function createMultiOrganizationFixture() {
       scope('scope-alpha-multiple-mappings', 'org-fixture-alpha', 'workspace-alpha-shared', 'Mapped Scope'),
       scope('scope-alpha-secondary', 'org-fixture-alpha', 'workspace-alpha-secondary', 'Shared Scope'),
       scope('scope-beta-shared', 'org-fixture-beta', 'workspace-beta-shared', 'Shared Scope')
+    ],
+    features: [
+      feature('feature-alpha-mapped', 'org-fixture-alpha', 'workspace-alpha-shared', 'scope-alpha-multiple-mappings'),
+      feature('feature-alpha-zero', 'org-fixture-alpha', 'workspace-alpha-shared', 'scope-alpha-zero-mapping'),
+      feature('feature-alpha-secondary', 'org-fixture-alpha', 'workspace-alpha-secondary', 'scope-alpha-secondary'),
+      feature('feature-beta-shared', 'org-fixture-beta', 'workspace-beta-shared', 'scope-beta-shared')
     ],
     jiraEpicMappings: [
       {
@@ -187,7 +205,8 @@ function createMultiOrganizationFixture() {
         'workspace-alpha-shared',
         'scope-alpha-multiple-mappings',
         'ALPHA SENTINEL — assigned fictional work item',
-        'open'
+        'open',
+        'feature-alpha-mapped'
       ),
       workItem(
         'work-item-alpha-unassigned',
@@ -203,7 +222,8 @@ function createMultiOrganizationFixture() {
         'workspace-alpha-secondary',
         'scope-alpha-secondary',
         'ALPHA SECONDARY SENTINEL — fictional work item',
-        'waiting'
+        'waiting',
+        'feature-alpha-secondary'
       ),
       workItem(
         'work-item-beta-assigned',
@@ -211,7 +231,8 @@ function createMultiOrganizationFixture() {
         'workspace-beta-shared',
         'scope-beta-shared',
         'BETA SENTINEL — fictional work item',
-        'resolved'
+        'resolved',
+        'feature-beta-shared'
       )
     ],
     milestones: [
@@ -293,7 +314,7 @@ function createMultiOrganizationFixture() {
         sourceId: 'source-alpha-sentinel',
         exactExcerpt: 'The fictional Alpha dependency is waiting for review.',
         extractionMethod: 'deterministic-test-extraction',
-        extractionVersion: 'target-v2-fixture-1',
+        extractionVersion: 'target-v3-fixture-1',
         category: 'dependency',
         reviewStatus: 'accepted',
         proposedWorkItemId: 'work-item-alpha-assigned',
@@ -308,7 +329,7 @@ function createMultiOrganizationFixture() {
         sourceId: 'source-beta-sentinel',
         exactExcerpt: 'The fictional Beta checkpoint is ready.',
         extractionMethod: 'deterministic-test-extraction',
-        extractionVersion: 'target-v2-fixture-1',
+        extractionVersion: 'target-v3-fixture-1',
         category: 'progress',
         reviewStatus: 'accepted',
         proposedWorkItemId: 'work-item-beta-assigned',
@@ -474,6 +495,38 @@ function createInvalidCrossWorkspaceFixture() {
   return document;
 }
 
+function createFeatureIndependenceFixture() {
+  const document = createMultiOrganizationFixture();
+  document.scopes.push(scope(
+    'scope-alpha-mapping-only',
+    'org-fixture-alpha',
+    'workspace-alpha-shared',
+    'Fictional Mapping-Only Scope'
+  ));
+  document.jiraEpicMappings.push({
+    id: 'jira-mapping-alpha-featureless-scope',
+    organizationId: 'org-fixture-alpha',
+    workspaceId: 'workspace-alpha-shared',
+    scopeId: 'scope-alpha-mapping-only',
+    jiraProjectKey: 'FICTA',
+    jiraEpicKey: 'FICTA-301',
+    jiraEpicName: 'Fictional Mapping Without Feature',
+    mappingStatus: 'verified',
+    provenance: 'Synthetic reviewed independent mapping.',
+    verifiedAt: FIXTURE_TIMESTAMP
+  });
+  document.workItems.push(workItem(
+    'work-item-alpha-scoped-no-feature',
+    'org-fixture-alpha',
+    'workspace-alpha-shared',
+    'scope-alpha-mapping-only',
+    'ALPHA SENTINEL — scoped fictional work item without Feature',
+    'none',
+    null
+  ));
+  return document;
+}
+
 function createPhase3WorkflowFixture() {
   const document = createMultiOrganizationFixture();
   document.sources.push({
@@ -586,6 +639,7 @@ function createPhase4BriefingFixture() {
   const definition = {
     briefingId: briefing.id,
     name: briefing.name,
+    organization: { id: 'org-fixture-alpha', name: 'Fictional Organization Alpha' },
     briefingType: briefing.briefingType,
     audienceProfile: briefing.audienceProfile,
     preferredFormats: [...briefing.preferredFormats],
@@ -750,12 +804,14 @@ function createInvalidPhase3ProposedChangeFixture() {
 
 module.exports = {
   FIXTURE_TIMESTAMP,
+  createFeatureIndependenceFixture,
   createInvalidCrossOrganizationFixture,
   createInvalidPhase3ProposedChangeFixture,
   createInvalidCrossWorkspaceFixture,
   createMultiOrganizationFixture,
   createPhase4BriefingFixture,
   createPhase3WorkflowFixture,
+  feature,
   followUp,
   workItem
 };

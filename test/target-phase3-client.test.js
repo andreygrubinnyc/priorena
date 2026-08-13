@@ -22,14 +22,18 @@ function payload(organizationId, workspaceId, marker = '', revision = REVISION_A
       { id: `${workspaceId}-scope-one`, organizationId, workspaceId, name: 'Duplicate Scope' },
       { id: `${workspaceId}-scope-two`, organizationId, workspaceId, name: 'Duplicate Scope' }
     ],
+    features: [
+      { id: `${workspaceId}-feature-one`, organizationId, workspaceId, scopeId: `${workspaceId}-scope-one`, name: 'Duplicate Feature' },
+      { id: `${workspaceId}-feature-two`, organizationId, workspaceId, scopeId: `${workspaceId}-scope-two`, name: 'Duplicate Feature' }
+    ],
     workItems: [
       {
-        id: `${workspaceId}-assigned`, organizationId, workspaceId, scopeId: `${workspaceId}-scope-two`,
-        summary: `${marker} assigned fictional item`, jiraKey: null, canonicalStatus: 'Planned', assignee: null, sprint: null
+        id: `${workspaceId}-assigned`, organizationId, workspaceId, scopeId: `${workspaceId}-scope-two`, featureId: `${workspaceId}-feature-two`,
+        summary: `${marker} assigned fictional item`, jiraKey: null, itemType: 'Task', canonicalStatus: 'Planned', assignee: null, sprint: null
       },
       {
-        id: `${workspaceId}-unassigned`, organizationId, workspaceId, scopeId: null,
-        summary: `${marker} Unassigned fictional item`, jiraKey: null, canonicalStatus: 'Planned', assignee: null, sprint: null
+        id: `${workspaceId}-unassigned`, organizationId, workspaceId, scopeId: null, featureId: null,
+        summary: `${marker} Unassigned fictional item`, jiraKey: null, itemType: 'Task', canonicalStatus: 'Planned', assignee: null, sprint: null
       }
     ],
     milestones: [],
@@ -51,6 +55,14 @@ test('workflow filtering uses stable Scope IDs and preserves Unassigned semantic
     filterWorkItems(data.workItems, { scopeId: 'workspace-client-scope-two', search: 'assigned' }).map(item => item.id),
     ['workspace-client-assigned']
   );
+  assert.deepEqual(
+    filterWorkItems(data.workItems, { scopeId: 'all', featureId: 'workspace-client-feature-two', itemType: 'all', search: '' }).map(item => item.id),
+    ['workspace-client-assigned']
+  );
+  assert.deepEqual(
+    filterWorkItems(data.workItems, { scopeId: 'all', featureId: 'none', itemType: 'Task', search: '' }).map(item => item.id),
+    ['workspace-client-unassigned']
+  );
   assert.equal(commentCaptureLabel(null), 'No comment date captured');
   assert.equal(commentCaptureLabel('2026-08-11T12:00:00.000Z'), '2026-08-11T12:00:00.000Z');
 });
@@ -63,6 +75,7 @@ test('workflow API client uses only stable parent-scoped routes and explicit JSO
       const route = url.split('?')[0].split('/').pop();
       const bodies = {
         scopes: { scopes: [] },
+        features: { features: [] },
         'work-items': { workItems: [] },
         milestones: { milestones: [] },
         sources: { sources: [] },
@@ -88,7 +101,7 @@ test('workflow API client uses only stable parent-scoped routes and explicit JSO
     action: { type: 'assign-scope', scopeId: null },
     previewHash: REVISION_A
   });
-  assert.equal(calls.length, 9);
+  assert.equal(calls.length, 10);
   assert.ok(calls.every(call => call.url.startsWith('/api/v2/organizations/org-client/workspaces/workspace-client/')));
   assert.equal(calls.at(-1).options.method, 'POST');
   assert.match(calls.at(-1).options.body, /expectedRevision/);

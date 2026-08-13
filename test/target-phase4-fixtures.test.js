@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const { validateTargetData } = require('../target-model/schema');
 const { buildCandidateFacts } = require('../target-server/briefing-services');
-const { createPhase4BriefingFixture } = require('../test-support/target-v2-fixtures');
+const { createPhase4BriefingFixture } = require('../test-support/target-v3-fixtures');
 
 test('Phase 4 fixture is deterministic, valid, fictional, and covers every Briefing lifecycle placement', () => {
   const first = createPhase4BriefingFixture();
