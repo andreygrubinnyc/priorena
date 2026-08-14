@@ -20,7 +20,7 @@ const { materializeRollbackApplication, smokeRollbackApplication } = require('./
 const { safeReleaseErrorCategory } = require('./release-diagnostics');
 const { smokeStartedTarget, smokeTarget, stopStartedTarget } = require('./smoke');
 
-const ROLLBACK_REVISION = '49e59a3fbb56c9ec6ea01c6f0c58d0c9d66113a5';
+const ROLLBACK_REVISION = '363a321648aba0e2d10a812644a298b9abe5e7bb';
 const REHEARSAL_TIMESTAMP = new Date('2026-08-11T12:00:00.000Z');
 const SCENARIOS = new Set(['all', 'backup', 'restore', 'cutover', 'rollback']);
 function safeRehearsalErrorCategory(error) {
@@ -81,7 +81,7 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
   if (!SCENARIOS.has(scenario)) throw new Error('Unknown release rehearsal scenario');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-release-rehearsal-'));
   const livePath = path.join(root, 'fictional-live.json');
-  const stagedSeedPath = path.join(root, 'fictional-staged-v4.json');
+  const stagedSeedPath = path.join(root, 'fictional-staged-v5.json');
   const sourceFilesRoot = path.join(root, 'source-files');
   const backupDirectory = path.join(root, 'verified-backups');
   const materializedRollback = await materializeRollbackApplication({

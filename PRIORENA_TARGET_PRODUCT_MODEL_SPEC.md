@@ -1,8 +1,8 @@
 # Priorena Target Product Model Specification
 
 **Status:** Approved target model
-**Version:** 1.4
-**Date:** 2026-08-13
+**Version:** 1.5
+**Date:** 2026-08-14
 **Product owner:** Priorena product owner
 **Purpose:** Canonical product-model, terminology, scope, workflow, clean-cutover, and acceptance specification for implementation by Codex.
 
@@ -10,18 +10,18 @@
 
 ## 1. Authority and supersession
 
-This repository copy is the repository-safe canonical target-model specification for Priorena. Customer-specific local bootstrap data is private environment configuration and must not be committed. All named Organizations, Workspaces, Scopes, Jira records, and IDs in this document are fictional examples; they do not prescribe universal onboarding defaults.
+This repository copy is the repository-safe canonical target-model specification for Priorena. Customer-specific local bootstrap data is private environment configuration and must not be committed. All named Organizations, Workspaces, Initiatives, Jira records, and IDs in this document are fictional examples; they do not prescribe universal onboarding defaults.
 
-Version 1.4 retains the approved clean-cutover decision and the schema-v3 Feature hierarchy, and advances the source model to strict schema version 4 with independent Work Item Feature and Jira Epic associations. The current local runtime data is disposable. That decision supersedes every prior requirement to preserve, reconcile, translate, or migrate the current runtime records, including current Work Items; legacy Project/Jira Epic records and assignments; `Miscellaneous / No Epic`; Sources, Findings, Evidence, and updates; Follow-Up state; Milestones; Briefings, versions, outputs, and baselines; legacy IDs; mutable Workspace-name references; feed decisions; and current history.
+Version 1.5 adopts the strict schema-v5 Initiative and Workstream model. It replaces the schema-v4 Scope and Feature source model without migration, aliases, or dual-schema behavior. Workstreams and Jira Epic mappings are independent optional Initiative children or associations, and all consequential Work Item relationship changes remain human-reviewed. The current local schema-v4 runtime is disposable and remains untouched until a separate post-merge reset authorization.
 
 `docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md` remains authoritative about the current implementation, routes, logic, Organization-isolation and security risks, and tests. Its migration, reconciliation, legacy-preservation, and compatibility recommendations are superseded by this version and `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md`.
 
 It supersedes any current documentation, code comments, UI copy, or architectural decision that treats:
 
-- a PM Workspace as a Project;
+- a Workspace as a Project;
 - a Priorena Project as the same entity as a Jira Epic;
 - `Project / Jira Epic` as one combined concept;
-- `Miscellaneous / No Epic` as a real Project or Scope;
+- `Miscellaneous / No Epic` as a real Project or Initiative;
 - Portfolio as an aggregation across all organizations;
 - Today as a global cross-workspace view;
 - Status Summary and Teams Draft as permanent communication systems parallel to Briefings.
@@ -71,25 +71,27 @@ The following decisions are approved and must be treated as requirements.
 
 1. Priorena supports multiple Organizations.
 2. Organizations are independent data and operating boundaries.
-3. The canonical hierarchy is:
+3. The canonical hierarchy begins with:
 
-   `Organization → PM Workspace → Delivery Scope → Feature → Work Item`
+   `Organization → Workspace → Initiative`
 
-4. The normal UI label for Delivery Scope is **Scope**.
-5. A Scope can exist without a Jira Epic.
-6. A Scope can contain zero or more Jira Epic mappings.
-7. A Jira Epic is an optional external-system mapping, not the identity of a Scope.
-8. A Work Item can remain **Unassigned** when its Scope is unknown.
-9. Priorena must not automatically create `Miscellaneous / No Epic` or an equivalent fake Scope.
+   An Initiative may contain Workstreams, Jira Epic mappings, and Work Items. A Work Item may use either optional association, both, or neither.
+
+4. The normal UI label for Initiative is **Initiative**.
+5. An Initiative can exist without a Jira Epic.
+6. An Initiative can contain zero or more Jira Epic mappings.
+7. A Jira Epic is an optional external-system mapping, not the identity of an Initiative.
+8. A Work Item can remain **Unassigned** when its Initiative is unknown.
+9. Priorena must not automatically create `Miscellaneous / No Epic` or an equivalent fake Initiative.
 10. Milestones can apply to:
-    - an entire PM Workspace; or
-    - one Scope.
+    - an entire Workspace; or
+    - one Initiative.
 11. Portfolio is a separate global destination within the selected Organization.
-12. Today always represents the selected PM Workspace.
+12. Today always represents the selected Workspace.
 13. Briefings become the only current communication workflow after target behavior, automated tests, and release acceptance confirm feature parity.
-14. The committed and staged generic seed uses exactly Organization `org-1` / `Organization 1`, PM Workspace `workspace-1` / `PM Workspace 1`, and Scopes `scope-1` through `scope-4` / `Scope 1` through `Scope 4`. It contains no Features or operational records.
+14. The committed and staged generic seed uses exactly Organization `org-1` / `Organization 1`, Workspace `workspace-1` / `Workspace 1`, and Initiatives `initiative-1` through `initiative-4` / `Initiative 1` through `Initiative 4`. It contains no Workstreams or operational records.
 15. Data from different Organizations must never be blended in ordinary product views, searches, Briefings, Sources, Evidence, exports, or settings.
-16. The current local runtime records and history are disposable and are not migrated into the schema-v4 target model.
+16. The current local runtime records and history are disposable and are not migrated into the schema-v5 target model.
 17. Follow-Up is stored as a nested object on Work Item.
 18. `Milestone.linkedWorkItemIds[]` is the canonical Milestone/Work Item relationship.
 19. Workspace-specific prompt overrides and drafting guidance must be stored in Workspace settings, never in `globalTechnicalSettings`.
@@ -98,14 +100,18 @@ The following decisions are approved and must be treated as requirements.
 22. The timestamped pre-reset backup and checksum record are retained for 30 days after successful release acceptance.
 23. Privileged all-Organization export is deferred; ordinary exports and backups remain Organization-scoped.
 24. The target implementation must not create a long-lived dual-schema, dual-write, or legacy-ID translation architecture.
-25. Feature is a Priorena-owned entity under one Scope and is independent from Jira Epic mappings.
-26. A Work Item has a nullable `featureId`; any non-null Feature must match its Organization, Workspace, and Scope.
-27. Feature is not a Work Item type. Allowed Work Item types are Story, Task, Bug, Other, and Unknown.
-28. Organization, PM Workspace, Scope, and Feature display-name changes require revision-bound preview/apply and audit history while preserving stable IDs and frozen Briefing snapshots.
-29. Every schema-v4 Work Item persists a required nullable `jiraEpicMappingId` independently from `featureId` and from the Work Item's own `jiraId` and `jiraKey`.
-30. A non-null Work Item Jira Epic mapping must match the Work Item's exact Organization, Workspace, and Scope.
-31. Changing, clearing, or editing one Work Item relationship must not change the other unless a Scope change makes that relationship incompatible.
-32. Source-code merge authorization remains separate from authorization to reset the live schema-v3 runtime with a schema-v4 seed.
+25. Workstream is a Priorena-owned entity under one Initiative and is independent from Jira Epic mappings.
+26. A Work Item has a nullable `workstreamId`; any non-null Workstream must match its Organization, Workspace, and Initiative.
+27. Workstream is not a Work Item type. Allowed Work Item types are Story, Task, Bug, Other, and Unknown.
+28. Organization, Workspace, Initiative, and Workstream display-name changes require revision-bound preview/apply and audit history while preserving stable IDs and frozen Briefing snapshots.
+29. Every schema-v5 Work Item persists a required nullable `jiraEpicMappingId` independently from `workstreamId` and from the Work Item's own `jiraId` and `jiraKey`.
+30. A non-null Work Item Jira Epic mapping must match the Work Item's exact Organization, Workspace, and Initiative.
+31. Changing, clearing, or editing one Work Item relationship must not change the other unless an Initiative change makes that relationship incompatible.
+32. Source-code merge authorization remains separate from authorization to reset the live schema-v4 runtime with a schema-v5 seed.
+33. Active schema-v5 APIs, payloads, exports, imports, UI, and tests have no Scope or Feature compatibility aliases.
+34. Jira Epic mappings are created and managed locally in Settings under a parent Initiative; this never creates or modifies Jira data.
+35. The strict import contract is `target-v4`, distinct from persisted `schemaVersion: 5`; it does not create a Workstream or Jira Epic mapping and never assigns relationships without explicit review/apply.
+36. Strategy and Sub-task hierarchy are not part of this model.
 
 ---
 
@@ -114,33 +120,32 @@ The following decisions are approved and must be treated as requirements.
 ```text
 Organization
     ↓
-PM Workspace
+Workspace
     ↓
-Delivery Scope
-    ↓
-Feature
-    ↓
-Work Item
+Initiative
+    ├── optional Workstream ────→ Work Items
+    ├── optional Jira Epic mapping
+    └── Work Items with optional Workstream and/or Jira Epic association
 ```
 
 Fictional target-shaped example:
 
 ```text
 Organization 1                           Organization
-└── PM Workspace 1                       PM Workspace
-    ├── Scope 1                          Scope
-    │   └── future Features              Feature
-    ├── Scope 2                          Scope
-    ├── Scope 3                          Scope
-    └── Scope 4                          Scope
+└── Workspace 1                       Workspace
+    ├── Initiative 1                          Initiative
+    │   └── future Workstreams              Workstream
+    ├── Initiative 2                          Initiative
+    ├── Initiative 3                          Initiative
+    └── Initiative 4                          Initiative
 ```
 
-The clean seed contains no Features or Work Items. Future Work Items whose Scope is unknown use `scopeId: null`, `featureId: null`, and `jiraEpicMappingId: null` and appear as **Unassigned**; Unassigned is a state/view, not an entity.
+The clean seed contains no Workstreams or Work Items. Future Work Items whose Initiative is unknown use `initiativeId: null`, `workstreamId: null`, and `jiraEpicMappingId: null` and appear as **Unassigned**; Unassigned is a state/view, not an entity.
 
 Jira is mapped beside this hierarchy:
 
 ```text
-Scope ─────────────→ zero or more Jira Epic mappings
+Initiative ─────────────→ zero or more Jira Epic mappings
 Work Item ─────────→ optional Jira work-item mapping
 ```
 
@@ -161,8 +166,8 @@ Examples:
 
 #### Organization invariants
 
-- Every PM Workspace belongs to exactly one Organization.
-- An Organization can contain multiple PM Workspaces.
+- Every Workspace belongs to exactly one Organization.
+- An Organization can contain multiple Workspaces.
 - An Organization can exist with no Workspaces during onboarding.
 - A Workspace cannot belong to more than one Organization.
 - A Workspace cannot be moved to another Organization through a normal edit operation. Such a move requires an explicit migration with validation and audit history.
@@ -183,27 +188,27 @@ Authentication, billing, and enterprise role design are outside this specificati
 
 ---
 
-### 5.2 PM Workspace
+### 5.2 Workspace
 
-A PM Workspace is the delivery operating context that one PM, Scrum Master, consultant, or small team manages together.
+A Workspace is the delivery operating context that one PM, Scrum Master, consultant, or small team manages together.
 
 A Workspace contains related delivery work that benefits from one operational Today view, shared Sources, shared settings, and potentially Workspace-wide Briefings and Milestones.
 
 For the fictional repository example:
 
 - Organization: `Organization 1`
-- PM Workspace: `PM Workspace 1`
+- Workspace: `Workspace 1`
 
-#### PM Workspace invariants
+#### Workspace invariants
 
 - Every Workspace belongs to exactly one Organization.
-- Every Scope belongs to exactly one Workspace.
+- Every Initiative belongs to exactly one Workspace.
 - Every Work Item belongs to exactly one Workspace.
 - Sources belong to one Workspace.
 - Evidence extracted from a Source cannot be associated with a Work Item in another Workspace.
 - Workspace settings do not automatically apply to another Workspace, even inside the same Organization.
-- A Workspace can contain Work Items with no Scope assignment.
-- A Workspace name must describe the whole operating context, not only one subordinate Scope.
+- A Workspace can contain Work Items with no Initiative assignment.
+- A Workspace name must describe the whole operating context, not only one subordinate Initiative.
 
 #### Workspace-level settings
 
@@ -220,36 +225,36 @@ The following remain Workspace-specific unless a later decision explicitly promo
 
 ---
 
-### 5.3 Delivery Scope
+### 5.3 Initiative
 
-A Delivery Scope is a distinct initiative, project, workstream, product area, or body of work inside a PM Workspace that the user needs to filter, assess, milestone, or brief separately.
+An Initiative is a distinct initiative, project, workstream, product area, or body of work inside a Workspace that the user needs to filter, assess, milestone, or brief separately.
 
-The canonical documentation term is **Delivery Scope**. The ordinary UI label is **Scope**.
+The canonical documentation term is **Initiative**. The ordinary UI label is **Initiative**.
 
 Examples:
 
-- Scope 1
-- Scope 2
-- Scope 3
-- Scope 4
+- Initiative 1
+- Initiative 2
+- Initiative 3
+- Initiative 4
 
-#### Scope invariants
+#### Initiative invariants
 
-- Every Scope belongs to exactly one Workspace.
-- A Scope may exist with no Jira Epic mapping.
-- A Scope may have zero or more Jira Epic mappings.
-- One Jira Epic mapping may belong to only one active Scope within a Workspace.
-- A Scope is not automatically created for every Jira Epic.
-- A separate Scope should exist only when the user needs separate filtering, risk assessment, Milestones, or Briefings.
-- Scope identity is Priorena-owned and survives external-system renames or removal.
-- A Scope may be archived without deleting its Work Items, Evidence, Milestones, or Briefing history.
+- Every Initiative belongs to exactly one Workspace.
+- An Initiative may exist with no Jira Epic mapping.
+- An Initiative may have zero or more Jira Epic mappings.
+- One Jira Epic mapping may belong to only one active Initiative within a Workspace.
+- An Initiative is not automatically created for every Jira Epic.
+- A separate Initiative should exist only when the user needs separate filtering, risk assessment, Milestones, or Briefings.
+- Initiative identity is Priorena-owned and survives external-system renames or removal.
+- An Initiative may be archived without deleting its Work Items, Evidence, Milestones, or Briefing history.
 - Similar names are never sufficient for automatic merging.
 
-#### Scope creation rule
+#### Initiative creation rule
 
-Create a Scope when the user needs to manage that body of work independently.
+Create an Initiative when the user needs to manage that body of work independently.
 
-Do not create a Scope merely because:
+Do not create an Initiative merely because:
 
 - a Jira Epic exists;
 - a screenshot contains an Epic name;
@@ -259,29 +264,29 @@ Do not create a Scope merely because:
 
 ---
 
-### 5.3.1 Feature
+### 5.3.1 Workstream
 
-A Feature is a Priorena-owned body of related Work Items inside exactly one Scope. It is a management grouping below Scope, not a Jira Epic alias and not a Work Item type.
+A Workstream is a Priorena-owned body of related Work Items inside exactly one Initiative. It is a management grouping below Initiative, not a Jira Epic alias and not a Work Item type.
 
-#### Feature invariants
+#### Workstream invariants
 
-- Every Feature has a stable ID and exactly one Organization, PM Workspace, and Scope parent.
-- Its persisted fields are `id`, `organizationId`, `workspaceId`, `scopeId`, `name`, and bounded `description`.
-- Duplicate Feature names are allowed; identity and routing always use stable IDs and validated parents.
-- A Feature cannot move to another Scope through rename or ordinary update.
-- Creating, reading, updating, or renaming a Feature performs no Jira call and creates no Jira Epic mapping.
-- Feature creation and metadata update are distinct from Jira mapping workflows.
-- A Work Item may have `featureId: null`. A non-null `featureId` requires a non-null `scopeId` and an exact Organization, Workspace, and Scope match.
-- Changing a Work Item Scope must preview whether its Feature is retained, cleared, or explicitly replaced. An incompatible Feature is never silently moved.
-- Feature display-name changes use revision-bound preview/apply, append an Audit Event, preserve IDs and relationships, and do not rewrite frozen Briefing snapshots.
+- Every Workstream has a stable ID and exactly one Organization, Workspace, and Initiative parent.
+- Its persisted fields are `id`, `organizationId`, `workspaceId`, `initiativeId`, `name`, and bounded `description`.
+- Duplicate Workstream names are allowed; identity and routing always use stable IDs and validated parents.
+- A Workstream cannot move to another Initiative through rename or ordinary update.
+- Creating, reading, updating, or renaming a Workstream performs no Jira call and creates no Jira Epic mapping.
+- Workstream creation and metadata update are distinct from Jira mapping workflows.
+- A Work Item may have `workstreamId: null`. A non-null `workstreamId` requires a non-null `initiativeId` and an exact Organization, Workspace, and Initiative match.
+- Changing a Work Item Initiative must preview whether its Workstream is retained, cleared, or explicitly replaced. An incompatible Workstream is never silently moved.
+- Workstream display-name changes use revision-bound preview/apply, append an Audit Event, preserve IDs and relationships, and do not rewrite frozen Briefing snapshots.
 
 ---
 
 ### 5.4 Jira mapping
 
-Jira Project and Jira Epic are external-system concepts and must be stored separately from Priorena Scope identity.
+Jira Project and Jira Epic are external-system concepts and must be stored separately from Priorena Initiative identity.
 
-A Scope may contain zero or more mappings such as:
+An Initiative may contain zero or more mappings such as:
 
 ```text
 Jira project key: EXAMPLE
@@ -293,12 +298,12 @@ Mapping status: verified
 #### Jira mapping invariants
 
 - `jiraProjectKey` and `jiraEpicKey` are different fields.
-- A missing Jira Epic is not represented by a fake Scope.
+- A missing Jira Epic is not represented by a fake Initiative.
 - `noEpic: true` from a reviewed external feed means only that no Epic mapping was visible for that Work Item.
-- An exact Epic mapping may propose a Scope association only when the Epic mapping already belongs to one Scope or the user explicitly selects the Scope.
-- Priorena must not assign a Scope from title similarity, row proximity, meeting context, or hidden/unreadable screenshot content.
+- An exact Epic mapping may propose an Initiative association only when the Epic mapping already belongs to one Initiative or the user explicitly selects the Initiative.
+- Priorena must not assign an Initiative from title similarity, row proximity, meeting context, or hidden/unreadable screenshot content.
 - Duplicate Jira Epic mappings within one Workspace must be blocked or routed to reconciliation.
-- External names are preserved for provenance even when the user-facing Scope name differs.
+- External names are preserved for provenance even when the user-facing Initiative name differs.
 - A Jira Epic mapping has a stable ID and cannot be removed or reparented while ordinary metadata edits remain allowed.
 - Mapping status changes do not clear Work Item references. Current projections show the current mapping key, name, and status; frozen Briefing Versions remain unchanged.
 - Assigning or clearing a mapping on a Work Item uses revision-bound preview/apply and performs no Jira call.
@@ -306,13 +311,13 @@ Mapping status: verified
 #### Example
 
 ```text
-Scope: Scope 1
+Initiative: Initiative 1
 Jira Epic mappings:
 - EXAMPLE-123 — Fictional External Epic
 - additional verified fictional Epics, if later approved
 ```
 
-This allows the Scope to remain the PM’s management boundary while Jira Epics remain external delivery structures.
+This allows the Initiative to remain the PM’s management boundary while Jira Epics remain external delivery structures.
 
 ---
 
@@ -331,16 +336,16 @@ Canonical types remain:
 #### Work Item invariants
 
 - Every Work Item belongs to exactly one Workspace.
-- A Work Item has zero or one primary Scope in the MVP.
-- `scopeId = null` means **Unassigned**.
-- A Work Item has zero or one Feature through nullable `featureId`.
-- `featureId = null` means the Work Item has no Feature; it is independent from Unassigned Scope state.
-- A non-null Feature must be a child of the Work Item's exact Scope and matching Organization and Workspace.
+- A Work Item has zero or one primary Initiative in the MVP.
+- `initiativeId = null` means **Unassigned**.
+- A Work Item has zero or one Workstream through nullable `workstreamId`.
+- `workstreamId = null` means the Work Item has no Workstream; it is independent from Unassigned Initiative state.
+- A non-null Workstream must be a child of the Work Item's exact Initiative and matching Organization and Workspace.
 - A Work Item has zero or one Jira Epic mapping through required nullable `jiraEpicMappingId`.
-- `jiraEpicMappingId = null` means the Work Item has no Jira Epic association. A non-null mapping must belong to the Work Item's exact Organization, Workspace, and Scope.
-- Feature and Jira Epic associations are independent. Either, both, or neither may be present under a non-null Scope.
+- `jiraEpicMappingId = null` means the Work Item has no Jira Epic association. A non-null mapping must belong to the Work Item's exact Organization, Workspace, and Initiative.
+- Workstream and Jira Epic associations are independent. Either, both, or neither may be present under a non-null Initiative.
 - The Work Item's own `jiraId` and `jiraKey` identify the Work Item; they are not its parent Jira Epic mapping.
-- `Feature` is rejected as a Work Item `itemType`; an external source value of Feature is retained as bounded provenance and routed to explicit mapping review.
+- `Initiative`, `Workstream`, `Feature`, `Epic`, and `Sub-task` are rejected as Work Item `itemType` values. An external source value such as `Feature` is retained as bounded provenance and never infers a Workstream.
 - A Work Item may have a Jira key even when it is Unassigned.
 - Work Item identity must not be inferred from title alone when an external Jira key is available.
 - Work Items in different Organizations are independent even when they have the same Jira key, title, or external-system name.
@@ -348,29 +353,39 @@ Canonical types remain:
 - Current operational state and historical Evidence are separate concepts.
 - Historical Evidence must not silently overwrite current state.
 
-#### Scope assignment
+The five valid Work Item association states are:
 
-A Work Item may be assigned to a Scope through:
+1. Unassigned: `initiativeId`, `workstreamId`, and `jiraEpicMappingId` are null.
+2. Initiative only.
+3. Initiative plus Workstream.
+4. Initiative plus Jira Epic mapping.
+5. Initiative plus both Workstream and Jira Epic mapping.
+
+A non-null Workstream or Jira Epic mapping always requires the same non-null Initiative parent.
+
+#### Initiative assignment
+
+A Work Item may be assigned to an Initiative through:
 
 1. explicit user assignment;
 2. a reviewed external-feed proposal supported by exact same-item evidence;
-3. an exact Jira Epic mapping that uniquely resolves to one Scope, with preview and approval where consequential.
+3. an exact Jira Epic mapping that uniquely resolves to one Initiative, with preview and approval where consequential.
 
 A Work Item must remain Unassigned when the association is ambiguous.
 
-Every individual or bulk Scope preview reports `featureChange` and `jiraEpicChange` separately as retained, cleared, or replaced. An omitted relationship selection preserves a compatible current value and otherwise clears it; an explicit selection is validated against the target Scope. Selecting Unassigned forces both relationships to null. A direct `assign-feature` action never changes the Jira Epic mapping, and a direct `assign-jira-epic` action never changes the Feature.
+Every individual or bulk Initiative preview reports `workstreamChange` and `jiraEpicChange` separately as retained, cleared, or replaced. An omitted relationship selection preserves a compatible current value and otherwise clears it; an explicit selection is validated against the target Initiative. Selecting Unassigned forces both relationships to null. A direct `assign-workstream` action never changes the Jira Epic mapping, and a direct `assign-jira-epic` action never changes the Workstream.
 
 #### No-Epic handling
 
 The following are valid and distinct:
 
 ```text
-Scope: Scope 1
+Initiative: Initiative 1
 Jira Epic: none
 ```
 
 ```text
-Scope: Unassigned
+Initiative: Unassigned
 Jira Epic: none
 ```
 
@@ -409,7 +424,7 @@ Examples:
 Source invariants:
 
 - A Source belongs to exactly one Workspace.
-- A Source may discuss multiple Scopes and Work Items within that Workspace.
+- A Source may discuss multiple Initiatives and Work Items within that Workspace.
 - A Source cannot directly modify current Work Item state.
 - Source provenance and trust limitations must remain visible.
 
@@ -428,7 +443,7 @@ Evidence is an accepted Finding.
 Evidence may support:
 
 - an entire Workspace;
-- one Scope;
+- one Initiative;
 - one Work Item;
 - a Proposed Change.
 
@@ -522,14 +537,14 @@ A Milestone is a dated delivery checkpoint.
 Every Milestone must explicitly apply to either:
 
 - the entire Workspace; or
-- one Scope.
+- one Initiative.
 
 Reference shape:
 
 ```text
 Milestone
 - workspaceId
-- scopeId: null for entire Workspace, otherwise one Scope
+- initiativeId: null for entire Workspace, otherwise one Initiative
 - title
 - date
 - status
@@ -539,11 +554,11 @@ Milestone
 
 #### Milestone invariants
 
-- A Scope-level Milestone and all linked Work Items must belong to the same Workspace.
-- A Work Item from another Scope may be linked only when the user explicitly chooses it and the product clearly displays the cross-scope relationship. The default should be same-Scope linking.
+- An Initiative-level Milestone and all linked Work Items must belong to the same Workspace.
+- A Work Item from another Initiative may be linked only when the user explicitly chooses it and the product clearly displays the cross-scope relationship. The default should be same-Initiative linking.
 - No Milestone may link to a Work Item in another Organization.
 - `Milestone.linkedWorkItemIds[]` is the canonical Milestone/Work Item relationship. Work Items must not store a competing canonical `milestoneId` or legacy `timelineId` relationship.
-- Existing independent Project/Scope target dates should not compete with Milestone dates.
+- Existing independent Project/Initiative target dates should not compete with Milestone dates.
 - A primary delivery target should be represented by a designated Milestone rather than a second unrelated date field.
 
 ---
@@ -557,7 +572,7 @@ A **Briefing** is a reusable configuration containing:
 - name;
 - Organization;
 - one or more Workspaces within that Organization;
-- optional selected Scopes within those Workspaces;
+- optional selected Initiatives within those Workspaces;
 - audience profile;
 - output formats;
 - default sections;
@@ -573,7 +588,7 @@ Draft → Finalized → Communicated
 
 - A Briefing belongs to exactly one Organization.
 - A Briefing may cover one or more Workspaces only within that Organization.
-- A Briefing can cover an entire selected Workspace, selected Scopes, or both, according to explicit scope selection.
+- A Briefing can cover an entire selected Workspace, selected Initiatives, or both, according to explicit scope selection.
 - A Briefing cannot include data from another Organization.
 - Pending or rejected Findings are excluded.
 - Finalized facts are frozen and retain provenance.
@@ -597,13 +612,13 @@ Legacy Status Summary and Legacy Teams Draft may remain only while the target Br
 
 ### 5.11 Portfolio
 
-Portfolio is a computed view across PM Workspaces in the active Organization.
+Portfolio is a computed view across Workspaces in the active Organization.
 
 #### Portfolio invariants
 
 - Portfolio never combines Organizations.
 - Portfolio counts Workspaces as Workspaces, not Projects.
-- Every Portfolio item must display its Workspace and, where relevant, its Scope.
+- Every Portfolio item must display its Workspace and, where relevant, its Initiative.
 - Portfolio is not a stored project-management container.
 - Portfolio does not own Sources, Work Items, Milestones, or Briefings.
 - An Organization with one Workspace may still show Portfolio, but the UI may de-emphasize it.
@@ -612,14 +627,14 @@ Example heading:
 
 ```text
 Portfolio — Organization 1
-All PM Workspaces
+All Workspaces
 ```
 
 ---
 
 ### 5.12 Today
 
-Today is the selected PM Workspace’s attention-first operating view.
+Today is the selected Workspace’s attention-first operating view.
 
 #### Today invariants
 
@@ -627,12 +642,12 @@ Today is the selected PM Workspace’s attention-first operating view.
 - Today never represents all Organizations.
 - Today does not silently switch to Portfolio behavior.
 - Today surfaces blocked work, Follow-Up signals, milestone pressure, evidence gaps, and other delivery attention within the selected Workspace.
-- Every item shown from a subordinate Scope displays that Scope.
+- Every item shown from a subordinate Initiative displays that Initiative.
 
 Example heading:
 
 ```text
-Today — PM Workspace 1
+Today — Workspace 1
 Organization 1
 ```
 
@@ -651,10 +666,10 @@ The server must validate parent relationships rather than trusting client-suppli
 Examples:
 
 - a Workspace ID must resolve to the active Organization;
-- a Scope ID must resolve to the selected Workspace;
-- a Work Item’s Scope must belong to the same Workspace;
-- a Milestone’s Scope and linked Work Items must remain inside the same Organization;
-- a Briefing’s Workspaces and Scopes must all belong to one Organization;
+- an Initiative ID must resolve to the selected Workspace;
+- a Work Item’s Initiative must belong to the same Workspace;
+- a Milestone’s Initiative and linked Work Items must remain inside the same Organization;
+- a Briefing’s Workspaces and Initiatives must all belong to one Organization;
 - a Source’s Findings cannot link to Work Items outside the Source Workspace.
 
 ### 6.2 User-facing isolation
@@ -704,19 +719,19 @@ When the user switches Organizations:
 | Canonical term | Meaning | Do not use as synonym |
 |---|---|---|
 | Organization | Independent customer/company/account boundary | Portfolio, Project, Workspace |
-| PM Workspace | Delivery operating context managed together | Project |
-| Delivery Scope | Canonical model term for a distinct initiative/workstream inside a Workspace | Project / Jira Epic |
-| Scope | Normal UI label for Delivery Scope | Epic unless specifically external Jira data |
+| Workspace | Delivery operating context managed together | Project |
+| Initiative | Canonical model term for a distinct initiative/workstream inside a Workspace | Project / Jira Epic |
+| Initiative | Normal UI label for Initiative | Epic unless specifically external Jira data |
 | Jira project | External Jira container/project key | Priorena Project |
-| Jira Epic | External Jira Epic mapped to a Scope | Scope identity |
+| Jira Epic | External Jira Epic mapped to an Initiative | Initiative identity |
 | Work Item | Tracked unit of delivery work | Story when type is unknown |
-| Unassigned | Work Item has no Scope yet | Project not identified, Miscellaneous / No Epic |
+| Unassigned | Work Item has no Initiative yet | Project not identified, Miscellaneous / No Epic |
 | Source | Original retained input or normalized external feed | Evidence before review |
 | Finding | Extracted statement awaiting review | Evidence pending |
 | Evidence | Accepted Finding with provenance | Unreviewed extraction |
 | Proposed Change | Suggested local field mutation requiring approval | Accepted Evidence |
 | Follow-Up | PM intervention/conversation state around a Work Item | Tracked item as the primary noun |
-| Milestone | Dated Workspace- or Scope-level checkpoint | Project target when duplicative |
+| Milestone | Dated Workspace- or Initiative-level checkpoint | Project target when duplicative |
 | Briefing | Reusable stakeholder update configuration | Briefing stream, Project stream |
 | Briefing Version | Draft, Finalized, or Communicated instance | Separate Teams/status systems |
 | Portfolio | Cross-Workspace view inside the active Organization | Cross-organization view |
@@ -726,12 +741,12 @@ When the user switches Organizations:
 
 | Current wording | Required wording |
 |---|---|
-| Projects / Jira Epics | Scopes |
-| Project / Jira Epic | Scope |
-| Assign Project / Jira Epic | Assign scope |
+| Projects / Jira Epics | Initiatives |
+| Project / Jira Epic | Initiative |
+| Assign Project / Jira Epic | Assign Initiative |
 | Project not identified | Unassigned |
 | Miscellaneous / No Epic | Remove as an entity; show Unassigned or No Jira Epic linked |
-| All projects | All scopes, or All workspaces depending on actual level |
+| All projects | All initiatives, or All workspaces depending on actual level |
 | this project when Workspace-scoped | this workspace |
 | whole PM workspace | entire workspace |
 | Project stream | Briefing |
@@ -751,8 +766,8 @@ RootData
 - schemaVersion
 - organizations[]
 - workspaces[]
-- scopes[]
-- features[]
+- initiatives[]
+- workstreams[]
 - jiraEpicMappings[]
 - workItems[]
 - milestones[]
@@ -777,7 +792,7 @@ Organization
 - briefings[]
 - briefingVersions[]
 
-PMWorkspace
+Workspace
 - id
 - organizationId
 - name
@@ -785,8 +800,8 @@ PMWorkspace
 - archived
 - createdAt
 - updatedAt
-- scopes[]
-- features[]
+- initiatives[]
+- workstreams[]
 - workItems[]
 - milestones[]
 - sources[]
@@ -798,8 +813,9 @@ PMWorkspace
 - assigneeDirectory
 - jiraStatusMapping
 
-DeliveryScope
+Initiative
 - id
+- organizationId
 - workspaceId
 - name
 - description
@@ -810,17 +826,19 @@ DeliveryScope
 - jiraEpicMappings[]
 - primaryMilestoneId optional
 
-Feature
+Workstream
 - id
 - organizationId
 - workspaceId
-- scopeId
+- initiativeId
 - name
 - description
 
 JiraEpicMapping
 - id
-- scopeId
+- organizationId
+- workspaceId
+- initiativeId
 - jiraProjectKey
 - jiraEpicKey
 - jiraEpicName
@@ -830,10 +848,11 @@ JiraEpicMapping
 
 WorkItem
 - id
+- organizationId
 - workspaceId
-- scopeId null or one Scope
-- featureId null or one Feature under that Scope
-- jiraEpicMappingId null or one Jira Epic mapping under that Scope
+- initiativeId null or one Initiative
+- workstreamId null or one Workstream under that Initiative
+- jiraEpicMappingId null or one Jira Epic mapping under that Initiative
 - jiraId optional
 - jiraKey optional; identifies the Work Item, not the parent Jira Epic
 - itemType
@@ -859,8 +878,9 @@ WorkItem
 
 Milestone
 - id
+- organizationId
 - workspaceId
-- scopeId null for entire Workspace
+- initiativeId null for entire Workspace
 - title
 - date
 - status
@@ -885,7 +905,7 @@ Finding
 - category
 - reviewStatus
 - proposedWorkItemId optional
-- proposedScopeId optional
+- proposedInitiativeId optional
 - currentness
 - supersededBy optional
 
@@ -894,7 +914,7 @@ Evidence
 - sourceId
 - findingId
 - workspaceId
-- scopeId optional
+- initiativeId optional
 - workItemId optional
 - exactExcerpt
 - sourceDate
@@ -919,7 +939,7 @@ Briefing
 - organizationId
 - name
 - workspaceIds[]
-- scopeIds[]
+- initiativeIds[]
 - audienceProfile
 - preferredFormats[]
   - teams
@@ -931,7 +951,10 @@ Briefing
 
 BriefingVersion
 - id
+- organizationId
 - briefingId
+- workspaceIds[]
+- initiativeIds[]
 - status: draft | finalized | communicated
 - comparisonVersionId
 - frozenSnapshot
@@ -944,8 +967,8 @@ BriefingVersion
 
 ### Target storage transition
 
-- The target source model uses strict `schemaVersion: 4`, requires `features[]`, `jiraEpicMappings[]`, and required nullable `workItems[].jiraEpicMappingId`, and uses canonical target identities.
-- Schema version 3 fails closed. There is no v3 compatibility reader, migration path, or dual reader/writer.
+- The target source model uses strict `schemaVersion: 5`, requires `workstreams[]`, `jiraEpicMappings[]`, and required nullable `workItems[].jiraEpicMappingId`, and uses canonical target identities.
+- Schema version 4 fails closed. There is no v4 compatibility reader, migration path, or dual reader/writer.
 - The current legacy runtime file is not read as a migration input by the target implementation and is not translated record by record.
 - Target development and validation use a separate target-shaped data file until cutover.
 - The old application and legacy schema may remain temporarily available only for implementation sequencing.
@@ -954,7 +977,7 @@ BriefingVersion
 
 ---
 
-## 9. Screen scope requirements
+## 9. Screen context requirements
 
 ### 9.1 Global shell
 
@@ -970,8 +993,8 @@ Suggested arrangement:
 Organization
 [Organization 1 ▼]
 
-PM Workspace
-[PM Workspace 1 ▼]
+Workspace
+[Workspace 1 ▼]
 
 GLOBAL
 Portfolio
@@ -988,35 +1011,35 @@ Settings
 
 ### 9.2 Portfolio
 
-Scope: active Organization.
+Initiative: active Organization.
 
 Must show:
 
 - Workspaces, not Projects;
 - attention signals across those Workspaces;
 - Workspace name on every row/card;
-- Scope when a specific Scope is relevant;
+- Initiative when a specific Initiative is relevant;
 - no other Organization data.
 
 ### 9.3 Today
 
-Scope: active Workspace.
+Initiative: active Workspace.
 
 Must show:
 
 - current Workspace name;
 - attention queue;
-- Scope on each subordinate item;
-- Workspace-level and Scope-level Milestone pressure separately where relevant.
+- Initiative on each subordinate item;
+- Workspace-level and Initiative-level Milestone pressure separately where relevant.
 
 ### 9.4 Work
 
-Scope: active Workspace.
+Initiative: active Workspace.
 
 Required filters:
 
-- Scope, default `All scopes`;
-- Feature, including `No Feature`;
+- Initiative, default `All initiatives`;
+- Workstream, including `No Workstream`;
 - Jira Epic, including `No Jira Epic`;
 - type;
 - status;
@@ -1028,15 +1051,15 @@ Required filters:
 
 Required bulk action wording:
 
-- preview and apply Scope, Feature, and Jira Epic associations independently;
-- Scope may be one stable-ID Scope or `Unassigned`;
-- Feature and Jira Epic selectors are limited to the selected Scope and support keeping a compatible value or explicitly clearing it.
+- preview and apply Initiative, Workstream, and Jira Epic associations independently;
+- Initiative may be one stable-ID Initiative or `Unassigned`;
+- Workstream and Jira Epic selectors are limited to the selected Initiative and support keeping a compatible value or explicitly clearing it.
 
 Every row must display:
 
 - Work Item key and summary;
-- Scope or Unassigned;
-- Feature or No Feature;
+- Initiative or Unassigned;
+- Workstream or No Workstream;
 - Jira Epic key/name/status or No Jira Epic, visually distinct from the Work Item's own Jira key;
 - assignee;
 - sprint;
@@ -1045,7 +1068,7 @@ Every row must display:
 
 ### 9.5 Follow-Up
 
-Scope: active Workspace, optionally filtered by Scope.
+Initiative: active Workspace, optionally filtered by Initiative.
 
 Use Follow-Up language rather than exposing a separate tracked-item domain.
 
@@ -1058,21 +1081,21 @@ Required actions:
 
 ### 9.6 Milestones
 
-Scope: active Workspace.
+Initiative: active Workspace.
 
 Creation requires:
 
 ```text
 Applies to
 ○ Entire workspace
-○ Scope: [select]
+○ Initiative: [select]
 ```
 
 Every Milestone card must display its applicability.
 
 ### 9.7 Capture and Source Library
 
-Scope: active Workspace.
+Initiative: active Workspace.
 
 Recommended local navigation:
 
@@ -1080,7 +1103,7 @@ Recommended local navigation:
 Add Source | Sources | Review
 ```
 
-Source upload does not require one Scope because a Source may discuss several Scopes.
+Source upload does not require one Initiative because a Source may discuss several Initiatives.
 
 ### 9.8 Review
 
@@ -1094,13 +1117,13 @@ Every review row shows:
 - exact excerpt;
 - Source;
 - Work Item;
-- Scope or Unassigned;
+- Initiative or Unassigned;
 - source date;
 - whether acceptance changes current local state.
 
 ### 9.9 Communicate / Briefings
 
-Scope: active Organization, with explicitly selected Workspaces and optional Scopes.
+Initiative: active Organization, with explicitly selected Workspaces and optional Initiatives.
 
 Primary navigation:
 
@@ -1119,13 +1142,17 @@ Recommended sections:
 ```text
 Organization
 Workspace
-Scopes & Jira
+Initiatives
+Workstreams
+Jira Epic mappings
 Behavior
 AI — Advanced
 Data & Privacy
 ```
 
 Organization settings must not expose another Organization’s Workspaces or data.
+
+The Workstreams section selects a parent Initiative and supports create and controlled rename. The Jira Epic mappings section selects a parent Initiative and supports local create, list, metadata edit, status change, deactivate, and reactivate behavior. It displays stable IDs, Jira project and Epic keys, Epic name, mapping status, provenance, and parent Initiative. It must state: “This creates or updates a Priorena mapping only. It does not create or modify anything in Jira.”
 
 ---
 
@@ -1140,10 +1167,10 @@ Select Organization
 → Portfolio remains available for the Organization
 ```
 
-### 10.2 Scope management
+### 10.2 Initiative management
 
 ```text
-Create Scope
+Create Initiative
 → optionally add one or more Jira Epic mappings
 → review possible duplicates
 → assign Work Items explicitly or through reviewed exact mappings
@@ -1156,7 +1183,7 @@ Capture Source
 → extract Findings
 → review exact excerpts
 → accept/reject
-→ confirm Workspace/Scope/Work Item association
+→ confirm Workspace/Initiative/Work Item association
 → preview Proposed Change when applicable
 → apply locally with stale-value protection
 ```
@@ -1166,7 +1193,7 @@ Capture Source
 ```text
 Today — selected Workspace
 → inspect attention signal
-→ open Scope or Work Item
+→ open Initiative or Work Item
 → review current state and Evidence
 → add/resolve Follow-Up or approve local change
 ```
@@ -1175,7 +1202,7 @@ Today — selected Workspace
 
 ```text
 Create Milestone
-→ choose Entire Workspace or one Scope
+→ choose Entire Workspace or one Initiative
 → link Work Items
 → calculate delivery pressure/readiness
 → expose grounded Milestone facts to Briefings
@@ -1187,7 +1214,7 @@ Create Milestone
 Create Briefing
 → select one Organization
 → select one or more Workspaces in that Organization
-→ optionally select Scopes
+→ optionally select Initiatives
 → compare with last communicated version
 → review candidate facts
 → edit/select facts
@@ -1220,20 +1247,20 @@ No item-level reconciliation package, tombstone system, legacy-ID translation ma
 
 ### 11.2 Fictional repository seed and private bootstrap
 
-The committed schema-v4 generic seed is fictional, deterministic, and target-shaped:
+The committed schema-v5 generic seed is fictional, deterministic, and target-shaped:
 
 ```text
 Organization: org-1 / Organization 1
-└── PM Workspace: workspace-1 / PM Workspace 1
-    ├── Scope: scope-1 / Scope 1
-    ├── Scope: scope-2 / Scope 2
-    ├── Scope: scope-3 / Scope 3
-    └── Scope: scope-4 / Scope 4
+└── Workspace: workspace-1 / Workspace 1
+    ├── Initiative: initiative-1 / Initiative 1
+    ├── Initiative: initiative-2 / Initiative 2
+    ├── Initiative: initiative-3 / Initiative 3
+    └── Initiative: initiative-4 / Initiative 4
 ```
 
-All four Scopes have `organizationId: org-1` and `workspaceId: workspace-1`. User preferences select `org-1` and `workspace-1`. The seed creates no Features, Work Items, Jira Epic mappings, Sources, Findings, Evidence, Proposed Changes, Follow-Up state, Milestones, Briefings, Briefing Versions, Audit Events, or legacy history. It does not create `Miscellaneous / No Epic` or another catch-all Scope.
+All four Initiatives have `organizationId: org-1` and `workspaceId: workspace-1`. User preferences select `org-1` and `workspace-1`. The seed creates no Workstreams, Work Items, Jira Epic mappings, Sources, Findings, Evidence, Proposed Changes, Follow-Up state, Milestones, Briefings, Briefing Versions, Audit Events, or legacy history. It does not create `Miscellaneous / No Epic` or another catch-all Initiative.
 
-This committed seed is the exact authorized generic bootstrap shape for a future clean reset. It contains no customer-specific or operational values. Source-code merge authorization for this model remains separate from any later authorization to replace the live schema-v3 runtime with a schema-v4 seed.
+This committed seed is the exact authorized generic bootstrap shape for a future clean reset. It contains no customer-specific or operational values. Source-code merge authorization for this model remains separate from any later authorization to replace the live schema-v4 runtime with a schema-v5 seed.
 
 ### 11.3 Reset safeguard and retention
 
@@ -1251,7 +1278,7 @@ The backup is a rollback safeguard, not a migration source. Retain the backup an
 
 The current runtime file must not be deleted or replaced until all of the following are true:
 
-1. the schema-v4 seed validates and a schema-v3 document fails closed;
+1. the schema-v5 seed validates and a schema-v4 document fails closed;
 2. the exact clean environment seed validates and loads from a staged, non-live path;
 3. all automated tests pass, including two-Organization isolation tests;
 4. the target application starts successfully against the staged seed and passes smoke tests;
@@ -1280,18 +1307,21 @@ Legacy code may coexist temporarily only while target replacements are implement
 
 ## 12. External-feed behavior under the target model
 
-The first target release accepts the current target external-feed format only. At specification approval, that is the target/v3 format. An older feed version is retained only when an active producer is identified and verified to require it; old feed state in the disposable runtime is not a reason to keep an adapter.
+The strict active import contract is `target-v4`. This import-contract version is independent from persisted `schemaVersion: 5`. The prior `target-v3` contract and legacy relationship fields are rejected; there is no general compatibility parser.
 
 Target behavior:
 
 - feed import occurs inside one selected Workspace;
 - feed evidence never chooses an Organization;
 - exact visible Jira Epic evidence may identify a Jira Epic mapping;
-- a mapped Epic may propose a Scope only when it uniquely maps to one Scope;
-- an unmatched Epic may propose creating a Jira mapping and/or Scope, but both are separate unchecked human decisions;
+- a mapped Epic may propose an Initiative only when it uniquely maps to one Initiative;
+- an unmatched Epic remains an explicit reference-review item and does not create a mapping or infer an Initiative;
 - `noEpic: true` never creates `Miscellaneous / No Epic`;
 - missing, cropped, hidden, or unreadable Epic data means unknown, not no Epic;
-- Work Item creation, Scope creation, Jira mapping creation, and Scope assignment remain separate approvals;
+- mutable names do not infer an Initiative or Workstream;
+- external terms such as Feature are retained as bounded provenance and never infer a Workstream;
+- imports never create a Workstream or Jira Epic mapping;
+- Work Item creation and any exact-identifier Initiative or Jira association remain separate explicit review/apply decisions;
 - Replace All must not bypass relationship approvals;
 - stale-value protection remains mandatory.
 
@@ -1301,7 +1331,7 @@ Target behavior:
 
 ### 13.1 Cutover principles
 
-- Build and validate the schema-v4 target model against separate temporary/staged data.
+- Build and validate the schema-v5 target model against separate temporary/staged data.
 - Leave the current runtime file untouched until the reset gate in Section 11.4 passes.
 - Do not expose legacy terminology in new UI, APIs, tests, or domain logic.
 - Do not preserve legacy routes, mutable-name identity, data shapes, IDs, or history solely for the current disposable runtime.
@@ -1330,40 +1360,40 @@ The detailed phase gates, likely modules, tests, rollback steps, and commit boun
 - Switching Organization changes the Workspace selector and removes the previous Organization’s data from the screen.
 - Portfolio shows only Workspaces in the active Organization.
 - Search returns only active-Organization data.
-- Briefing creation rejects Workspaces or Scopes from another Organization.
+- Briefing creation rejects Workspaces or Initiatives from another Organization.
 - Source/Evidence links across Organizations are rejected.
 - Exports and ordinary backups contain only the explicitly selected Organization or Workspace.
 - AI prompt context contains no data from another Organization.
 
-### 14.2 Workspace and Scope
+### 14.2 Workspace and Initiative
 
 - In the generic repository seed, `org-1` / `Organization 1` exists as the only Organization.
-- In that seed, `workspace-1` / `PM Workspace 1` exists as the only PM Workspace under `org-1`.
-- In that seed, `scope-1` through `scope-4` / `Scope 1` through `Scope 4` exist under `workspace-1`.
-- Other environments are not forced to create the example Organization or its Scopes as an onboarding default.
-- A Scope can be created with no Jira Epic.
-- A Scope can hold multiple Jira Epic mappings.
-- The same Jira Epic mapping cannot be active under two Scopes in the same Workspace.
-- A Jira Epic rename does not rename or recreate the Scope automatically.
+- In that seed, `workspace-1` / `Workspace 1` exists as the only Workspace under `org-1`.
+- In that seed, `initiative-1` through `initiative-4` / `Initiative 1` through `Initiative 4` exist under `workspace-1`.
+- Other environments are not forced to create the example Organization or its Initiatives as an onboarding default.
+- An Initiative can be created with no Jira Epic.
+- An Initiative can hold multiple Jira Epic mappings.
+- The same Jira Epic mapping cannot be active under two Initiatives in the same Workspace.
+- A Jira Epic rename does not rename or recreate the Initiative automatically.
 - Work can remain Unassigned.
 - No action automatically creates `Miscellaneous / No Epic`.
 
 ### 14.3 Work
 
-- Work displays `Scope` and `Unassigned`, never `Project / Jira Epic`.
-- Work includes an `All scopes` filter.
-- Bulk assignment supports one Scope or Unassigned.
-- A Work Item cannot be assigned to a Scope from another Workspace.
+- Work displays `Initiative` and `Unassigned`, never `Project / Jira Epic`.
+- Work includes an `All initiatives` filter.
+- Bulk assignment supports one Initiative or Unassigned.
+- A Work Item cannot be assigned to an Initiative from another Workspace.
 - Ambiguous external associations remain pending/unassigned.
 
 ### 14.4 Milestones
 
 - A Milestone can be created for the entire Workspace.
-- A Milestone can be created for one Scope.
+- A Milestone can be created for one Initiative.
 - `Milestone.linkedWorkItemIds[]` is the canonical stored relationship to Work Items.
 - Its applicability is visible on every card and detail screen.
 - Cross-Organization links are rejected.
-- Scope-level Briefings include only applicable Milestones unless the user explicitly includes Workspace-wide Milestones.
+- Initiative-level Briefings include only applicable Milestones unless the user explicitly includes Workspace-wide Milestones.
 
 ### 14.5 Portfolio and Today
 
@@ -1371,7 +1401,7 @@ The detailed phase gates, likely modules, tests, rollback steps, and commit boun
 - Portfolio labels the count as Workspaces.
 - Today always names and uses the active Workspace.
 - Today does not show another Workspace’s Work Items.
-- Queue rows display Scope when applicable.
+- Queue rows display Initiative when applicable.
 
 ### 14.6 Evidence integrity
 
@@ -1385,7 +1415,7 @@ The detailed phase gates, likely modules, tests, rollback steps, and commit boun
 
 - A Briefing belongs to one Organization.
 - It can cover one or more Workspaces in that Organization.
-- It can cover the entire Workspace or selected Scopes.
+- It can cover the entire Workspace or selected Initiatives.
 - It cannot cover multiple Organizations.
 - Open shows Draft and Finalized versions.
 - History shows Communicated versions.
@@ -1396,7 +1426,7 @@ The detailed phase gates, likely modules, tests, rollback steps, and commit boun
 
 ### 14.8 Clean reset
 
-- The schema-v4 model validates and schema v3 fails closed.
+- The schema-v5 model validates and schema v4 fails closed.
 - The exact generic seed loads from a staged, non-live path.
 - No legacy runtime records are present in the target store.
 - The target application starts successfully against the clean seed.
@@ -1414,13 +1444,13 @@ At minimum, implement automated tests for:
 
 1. Organization-scoped reads and writes.
 2. Duplicate names and Jira keys across Organizations.
-3. Scope-to-Workspace validation.
-4. Work Item-to-Scope validation.
-5. Multiple Jira Epic mappings per Scope.
+3. Initiative-to-Workspace validation.
+4. Work Item-to-Initiative validation.
+5. Multiple Jira Epic mappings per Initiative.
 6. Duplicate Epic mapping rejection within a Workspace.
 7. Unassigned Work Item behavior.
 8. No automatic `Miscellaneous / No Epic` creation.
-9. Workspace- and Scope-level Milestones using canonical `linkedWorkItemIds[]`.
+9. Workspace- and Initiative-level Milestones using canonical `linkedWorkItemIds[]`.
 10. Follow-Up persisted only as a nested Work Item object.
 11. Briefing single-Organization enforcement, immutable lifecycle, and last-communicated baseline behavior.
 12. Teams-style, email-style, and Confluence-style deterministic outputs from one finalized fact set.
@@ -1430,18 +1460,21 @@ At minimum, implement automated tests for:
 16. Current-state versus historical-Evidence behavior.
 17. Server/client status calculation consistency for any calculation that remains duplicated.
 18. Workspace prompt overrides and drafting guidance never entering another Workspace or global technical settings.
-19. Schema-v4 and exact generic-seed validation, including mandatory empty `features[]`, the absence of legacy records, and v3 fail-closed behavior.
+19. Schema-v5 and exact generic-seed validation, including mandatory empty `workstreams[]`, the absence of legacy records, and v4 fail-closed behavior.
 20. Successful application startup and smoke behavior against the clean seed.
 21. At least two Organizations proving isolation across routes, UI, search, exports, backups, Briefings, Sources, Evidence, files, and AI context.
 22. Timestamped backup creation, checksum verification, atomic reset rehearsal, and checksum-verified rollback rehearsal using temporary copies.
 23. No automatic Jira write, Briefing finalization, or communication action.
-24. Feature parent validation, duplicate display names, nullable Work Item assignment, and foreign-reference rejection.
-25. Scope-change previews showing Feature retained, cleared, or replaced for individual, bulk, and imported changes.
-26. Revision-bound Organization, PM Workspace, Scope, and Feature renames preserving IDs, relationships, and frozen Briefing snapshots.
-27. Feature context in UI filters, Today, search, Briefing candidates, exports, backups, and scoped AI context.
+24. Workstream parent validation, duplicate display names, nullable Work Item assignment, and foreign-reference rejection.
+25. Initiative-change previews showing Workstream retained, cleared, or replaced for individual, bulk, and imported changes.
+26. Revision-bound Organization, Workspace, Initiative, and Workstream renames preserving IDs, relationships, and frozen Briefing snapshots.
+27. Workstream context in UI filters, Today, search, Briefing candidates, exports, backups, and scoped AI context.
 28. Required nullable Jira Epic references, all five valid Work Item association states, exact-parent rejection, and stable mapping metadata updates.
-29. Independent direct and Scope-change preview/apply behavior for Feature and Jira Epic associations, including no-op, stale, wrong-parent, bulk, import, and Unassigned cases.
+29. Independent direct and Initiative-change preview/apply behavior for Workstream and Jira Epic associations, including no-op, stale, wrong-parent, bulk, import, and Unassigned cases.
 30. Jira Epic context in UI filters/selectors, Today, search, Briefing candidates, exports, backups, and scoped AI context, while Work Item Jira identity remains distinct.
+31. Strict rejection of legacy root collections, relationship fields, routes, actions, and import versions.
+32. Complete local-only Jira Epic mapping management, including create, read, edit, status, deactivate/reactivate, stale revision, duplicate identity, and wrong-parent cases.
+33. No Strategy or Sub-task entity, navigation, relationship, or Work Item type.
 
 ---
 
@@ -1450,10 +1483,12 @@ At minimum, implement automated tests for:
 This implementation must not introduce:
 
 - cross-Organization Portfolio reporting in normal product use;
-- a Program layer between Workspace and Scope;
-- automatic creation of one Scope per Jira Epic;
-- multiple primary Scopes on one Work Item in the MVP;
-- title-based Jira or Scope matching;
+- a Program layer between Workspace and Initiative;
+- a Strategy layer, entity, ID, relationship, or navigation;
+- a Sub-task entity, hierarchy, parent-child model, or Work Item type;
+- automatic creation of one Initiative per Jira Epic;
+- multiple primary Initiatives on one Work Item in the MVP;
+- title-based Jira or Initiative matching;
 - autonomous Jira updates;
 - autonomous message sending;
 - Gantt charts;
@@ -1480,7 +1515,7 @@ Codex may choose the least risky implementation approach for:
 - exact visual placement of selectors and breadcrumbs;
 - test framework and fixtures.
 
-Codex must not reinterpret the approved hierarchy, Organization isolation, Scope semantics, Unassigned behavior, nested Follow-Up storage, canonical Milestone links, Workspace-owned prompt configuration, or Briefing lifecycle and outputs.
+Codex must not reinterpret the approved hierarchy, Organization isolation, Initiative semantics, Unassigned behavior, nested Follow-Up storage, canonical Milestone links, Workspace-owned prompt configuration, or Briefing lifecycle and outputs.
 
 When implementation details are ambiguous, prefer:
 
@@ -1498,23 +1533,25 @@ The target-model implementation is complete only when:
 
 - the canonical hierarchy is visible and enforced;
 - in the generic repository seed, `org-1` / `Organization 1` is the only Organization;
-- in that seed, `workspace-1` / `PM Workspace 1` is the only PM Workspace;
-- in that seed, `scope-1` through `scope-4` are the four exact Scopes and `features[]` is empty;
-- Scopes may exist without Jira Epics and may map to multiple Jira Epics;
-- Work Items may remain Unassigned without a fake no-Epic Scope;
+- in that seed, `workspace-1` / `Workspace 1` is the only Workspace;
+- in that seed, `initiative-1` through `initiative-4` are the four exact Initiatives and `workstreams[]` is empty;
+- Initiatives may exist without Jira Epics and may map to multiple Jira Epics;
+- Work Items may remain Unassigned without a fake no-Epic Initiative;
 - Follow-Up is nested on Work Item;
-- Milestones are explicitly Workspace- or Scope-level and use `linkedWorkItemIds[]` canonically;
+- Milestones are explicitly Workspace- or Initiative-level and use `linkedWorkItemIds[]` canonically;
 - Portfolio is Organization-scoped and Today is Workspace-scoped;
 - Workspace-specific prompt overrides and drafting guidance are not stored globally;
 - Briefings are the canonical current communication workflow and retain Teams-style, email-style, and Confluence-style deterministic outputs;
 - no ordinary screen, search, export, Briefing, or AI context leaks data across Organizations;
-- the schema-v4 model validates, schema v3 fails closed, and the generic seed contains no operational or legacy records;
+- the schema-v5 model validates, schema v4 fails closed, and the generic seed contains no operational or legacy records;
 - the application starts successfully against the clean seed;
 - all tests, including two-Organization isolation tests, pass;
 - the pre-reset backup path and checksum are recorded;
 - atomic reset and checksum-verified rollback rehearsal succeed;
 - the pre-reset backup is retained for 30 days after successful release acceptance;
 - no long-lived legacy compatibility or translation architecture remains;
+- current APIs, payloads, imports, exports, UI, and active documentation contain no Scope or Feature aliases;
+- Jira Epic mapping management is complete, local-only, and explicitly makes no Jira write;
 - all acceptance criteria and required tests pass;
 - current documentation no longer contradicts this specification.
 
@@ -1528,7 +1565,7 @@ Before replacing the current runtime file or deleting legacy implementation path
 2. read `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md` and the still-valid implementation findings in `docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md`;
 3. inspect current code and schema against them;
 4. implement and validate the target against a separate temporary/staged data file;
-5. validate the schema-v4 model and exact generic clean seed;
+5. validate the schema-v5 model and exact generic clean seed;
 6. pass all automated tests, two-Organization isolation tests, target startup, and smoke tests;
 7. create and verify the timestamped pre-reset backup and SHA-256 checksum;
 8. rehearse atomic reset and checksum-verified rollback using temporary copies;

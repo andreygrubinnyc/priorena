@@ -37,7 +37,7 @@ const MAX_MANUAL_INPUTS = 50;
 const MAX_OUTPUT_BYTES = 128 * 1024;
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit schema-v4 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit schema-v5 data-file path');
   return path.resolve(filePath);
 }
 
@@ -49,14 +49,14 @@ function uniqueValues(value, options = {}) {
 
 function definitionInput(value, existing = null) {
   const fields = [
-    'name', 'workspaceIds', 'scopeIds', 'audienceProfile', 'preferredFormats', 'defaultSections',
+    'name', 'workspaceIds', 'initiativeIds', 'audienceProfile', 'preferredFormats', 'defaultSections',
     'briefingType', 'draftingGuidance'
   ];
-  exactKeys(value, fields, existing ? [] : ['name', 'workspaceIds', 'scopeIds', 'audienceProfile', 'preferredFormats', 'defaultSections']);
+  exactKeys(value, fields, existing ? [] : ['name', 'workspaceIds', 'initiativeIds', 'audienceProfile', 'preferredFormats', 'defaultSections']);
   const next = existing ? {
     name: existing.name,
     workspaceIds: [...existing.workspaceIds],
-    scopeIds: [...existing.scopeIds],
+    initiativeIds: [...existing.initiativeIds],
     audienceProfile: existing.audienceProfile,
     preferredFormats: [...existing.preferredFormats],
     defaultSections: [...existing.defaultSections],
@@ -68,7 +68,7 @@ function definitionInput(value, existing = null) {
   };
   if (Object.hasOwn(value, 'name')) next.name = requireText(value.name, { max: 300 });
   if (Object.hasOwn(value, 'workspaceIds')) next.workspaceIds = uniqueValues(value.workspaceIds, { min: 1, max: 20, ids: true });
-  if (Object.hasOwn(value, 'scopeIds')) next.scopeIds = uniqueValues(value.scopeIds, { max: 100, ids: true });
+  if (Object.hasOwn(value, 'initiativeIds')) next.initiativeIds = uniqueValues(value.initiativeIds, { max: 100, ids: true });
   if (Object.hasOwn(value, 'audienceProfile')) next.audienceProfile = requireText(value.audienceProfile, { max: 500 });
   if (Object.hasOwn(value, 'preferredFormats')) next.preferredFormats = uniqueValues(value.preferredFormats, { min: 1, max: 3, accepted: BRIEFING_FORMATS });
   if (Object.hasOwn(value, 'defaultSections')) next.defaultSections = uniqueValues(value.defaultSections, { min: 1, max: BRIEFING_SECTIONS.length, accepted: BRIEFING_SECTIONS });
@@ -81,9 +81,9 @@ function validateDefinitionParents(resolvers, organizationId, input) {
   resolvers.resolveOrganization(organizationId);
   const workspaceIds = new Set(input.workspaceIds);
   input.workspaceIds.forEach(workspaceId => resolvers.resolveWorkspace(organizationId, workspaceId));
-  input.scopeIds.forEach(scopeId => {
-    const scope = resolvers.indexes.scopes.get(requireStableId(scopeId));
-    if (!scope || scope.organizationId !== organizationId || !workspaceIds.has(scope.workspaceId)) throw notFound();
+  input.initiativeIds.forEach(initiativeId => {
+    const initiative = resolvers.indexes.initiatives.get(requireStableId(initiativeId));
+    if (!initiative || initiative.organizationId !== organizationId || !workspaceIds.has(initiative.workspaceId)) throw notFound();
   });
 }
 
@@ -109,21 +109,21 @@ function safeText(value, maximum = 2_000) {
 
 function selectionMap(document, selection) {
   const selectedWorkspaceIds = new Set(selection.workspaceIds);
-  const scopesByWorkspace = new Map(selection.workspaceIds.map(workspaceId => [workspaceId, new Set()]));
-  selection.scopeIds.forEach(scopeId => {
-    const scope = document.scopes.find(item => item.id === scopeId);
-    if (!scope || scope.organizationId !== selection.organizationId || !selectedWorkspaceIds.has(scope.workspaceId)) throw notFound();
-    scopesByWorkspace.get(scope.workspaceId).add(scope.id);
+  const initiativesByWorkspace = new Map(selection.workspaceIds.map(workspaceId => [workspaceId, new Set()]));
+  selection.initiativeIds.forEach(initiativeId => {
+    const initiative = document.initiatives.find(item => item.id === initiativeId);
+    if (!initiative || initiative.organizationId !== selection.organizationId || !selectedWorkspaceIds.has(initiative.workspaceId)) throw notFound();
+    initiativesByWorkspace.get(initiative.workspaceId).add(initiative.id);
   });
-  return { selectedWorkspaceIds, scopesByWorkspace };
+  return { selectedWorkspaceIds, initiativesByWorkspace };
 }
 
 function includesRecord(record, map, options = {}) {
   if (!map.selectedWorkspaceIds.has(record.workspaceId)) return false;
-  const selectedScopes = map.scopesByWorkspace.get(record.workspaceId);
-  if (!selectedScopes || selectedScopes.size === 0) return true;
-  if (record.scopeId === null) return options.includeWorkspaceLevel === true;
-  return selectedScopes.has(record.scopeId);
+  const selectedInitiatives = map.initiativesByWorkspace.get(record.workspaceId);
+  if (!selectedInitiatives || selectedInitiatives.size === 0) return true;
+  if (record.initiativeId === null) return options.includeWorkspaceLevel === true;
+  return selectedInitiatives.has(record.initiativeId);
 }
 
 function candidateSection(preferred, sections) {
@@ -138,7 +138,7 @@ function candidateBase(selection, record, values) {
     section: candidateSection(values.section, selection.defaultSections),
     organizationId: selection.organizationId,
     workspaceId: record.workspaceId,
-    scopeId: record.scopeId,
+    initiativeId: record.initiativeId,
     recordId: record.id,
     title: safeText(values.title, 500).text,
     text: bounded.text,
@@ -151,8 +151,8 @@ function candidateBase(selection, record, values) {
 
 function buildCandidateFacts(document, selection) {
   const map = selectionMap(document, selection);
-  const scopeNames = new Map(document.scopes.map(scope => [scope.id, scope.name]));
-  const featureNames = new Map(document.features.map(feature => [feature.id, feature.name]));
+  const initiativeNames = new Map(document.initiatives.map(initiative => [initiative.id, initiative.name]));
+  const workstreamNames = new Map(document.workstreams.map(workstream => [workstream.id, workstream.name]));
   const jiraEpicMappings = new Map(document.jiraEpicMappings.map(mapping => [mapping.id, mapping]));
   const sourceNames = new Map(document.sources.map(source => [source.id, source.title]));
   const findingIndex = new Map(document.findings.map(finding => [finding.id, finding]));
@@ -161,8 +161,8 @@ function buildCandidateFacts(document, selection) {
   document.workItems
     .filter(item => item.organizationId === selection.organizationId && !item.archived && includesRecord(item, map))
     .forEach(item => {
-      const scopeLabel = item.scopeId === null ? 'Unassigned' : scopeNames.get(item.scopeId);
-      const featureLabel = item.featureId === null ? 'No Feature' : featureNames.get(item.featureId);
+      const initiativeLabel = item.initiativeId === null ? 'Unassigned' : initiativeNames.get(item.initiativeId);
+      const workstreamLabel = item.workstreamId === null ? 'No Workstream' : workstreamNames.get(item.workstreamId);
       const jiraEpicMapping = item.jiraEpicMappingId === null ? null : jiraEpicMappings.get(item.jiraEpicMappingId);
       const jiraEpicLabel = jiraEpicMapping === null
         ? 'No Jira Epic'
@@ -173,12 +173,12 @@ function buildCandidateFacts(document, selection) {
         kind: 'current-state',
         section: ['Blocked', 'At risk'].includes(item.canonicalStatus) ? 'risk' : 'progress',
         title: item.summary,
-        text: `Status: ${item.canonicalStatus}. Scope: ${scopeLabel}. Feature: ${featureLabel}. Jira Epic: ${jiraEpicLabel}. Work Item Jira key: ${workItemJiraLabel}.`,
+        text: `Status: ${item.canonicalStatus}. Initiative: ${initiativeLabel}. Workstream: ${workstreamLabel}. Jira Epic: ${jiraEpicLabel}. Work Item Jira key: ${workItemJiraLabel}.`,
         currentness: 'current',
         provenance: { type: 'direct-work-item-state', workItemId: item.id, label: item.currentStateProvenance }
       }));
-      candidates.at(-1).featureId = item.featureId;
-      candidates.at(-1).featureName = featureLabel;
+      candidates.at(-1).workstreamId = item.workstreamId;
+      candidates.at(-1).workstreamName = workstreamLabel;
       candidates.at(-1).jiraEpicMappingId = item.jiraEpicMappingId;
       candidates.at(-1).jiraEpicKey = jiraEpicMapping?.jiraEpicKey || null;
       candidates.at(-1).jiraEpicName = jiraEpicMapping?.jiraEpicName || null;
@@ -204,7 +204,7 @@ function buildCandidateFacts(document, selection) {
       kind: 'milestone',
       section: ['At risk', 'Blocked'].includes(item.status) ? 'risk' : 'milestones',
       title: item.title,
-      text: `${item.status}. Due ${item.date}. Applies to: ${item.scopeId === null ? 'Entire workspace' : scopeNames.get(item.scopeId)}.`,
+      text: `${item.status}. Due ${item.date}. Applies to: ${item.initiativeId === null ? 'Entire workspace' : initiativeNames.get(item.initiativeId)}.`,
       currentness: 'current',
       provenance: { type: 'direct-milestone-state', milestoneId: item.id }
     })));
@@ -241,7 +241,7 @@ function definitionSnapshot(document, briefing) {
   const resolvers = createTargetResolvers(document);
   const organization = resolvers.resolveOrganization(briefing.organizationId);
   const workspaces = briefing.workspaceIds.map(workspaceId => resolvers.resolveWorkspace(briefing.organizationId, workspaceId));
-  const scopes = briefing.scopeIds.map(scopeId => resolvers.indexes.scopes.get(scopeId));
+  const initiatives = briefing.initiativeIds.map(initiativeId => resolvers.indexes.initiatives.get(initiativeId));
   return {
     briefingId: briefing.id,
     name: briefing.name,
@@ -252,15 +252,15 @@ function definitionSnapshot(document, briefing) {
     defaultSections: [...briefing.defaultSections],
     draftingGuidance: briefing.draftingGuidance || '',
     workspaceIds: [...briefing.workspaceIds],
-    scopeIds: [...briefing.scopeIds],
+    initiativeIds: [...briefing.initiativeIds],
     workspaces: workspaces.map(workspace => {
-      const selectedScopes = scopes.filter(scope => scope.workspaceId === workspace.id);
+      const selectedInitiatives = initiatives.filter(initiative => initiative.workspaceId === workspace.id);
       return {
         id: workspace.id,
         name: workspace.name,
-        selection: selectedScopes.length
-          ? { kind: 'selected-scopes', label: selectedScopes.map(scope => scope.name).join(', '), scopes: selectedScopes.map(scope => ({ id: scope.id, name: scope.name })) }
-          : { kind: 'entire-workspace', label: 'Entire workspace', scopes: [] }
+        selection: selectedInitiatives.length
+          ? { kind: 'selected-initiatives', label: selectedInitiatives.map(initiative => initiative.name).join(', '), initiatives: selectedInitiatives.map(initiative => ({ id: initiative.id, name: initiative.name })) }
+          : { kind: 'entire-workspace', label: 'Entire workspace', initiatives: [] }
       };
     })
   };
@@ -294,7 +294,7 @@ function manualFacts(version, manualInputs) {
     section: input.section,
     organizationId: version.organizationId,
     workspaceId: null,
-    scopeId: null,
+    initiativeId: null,
     recordId: input.id,
     title: 'Manual PM input',
     text: input.text,
@@ -332,7 +332,7 @@ function comparisonFromBaseline(document, briefing, candidates, baselineId = bri
 
 function draftSnapshot(document, briefing, runtime, options = {}) {
   const definition = options.definition || definitionSnapshot(document, briefing);
-  const selection = { organizationId: briefing.organizationId, workspaceIds: definition.workspaceIds, scopeIds: definition.scopeIds, defaultSections: definition.defaultSections };
+  const selection = { organizationId: briefing.organizationId, workspaceIds: definition.workspaceIds, initiativeIds: definition.initiativeIds, defaultSections: definition.defaultSections };
   const candidates = buildCandidateFacts(document, selection);
   const selectedFactIds = options.selectedFactIds || [];
   const manualInputs = options.manualInputs || [];
@@ -358,7 +358,7 @@ function draftStateHash(version) {
     organizationId: version.organizationId,
     briefingId: version.briefingId,
     workspaceIds: version.workspaceIds,
-    scopeIds: version.scopeIds,
+    initiativeIds: version.initiativeIds,
     definition: version.frozenSnapshot.definition,
     candidateStateHash: version.frozenSnapshot.candidateStateHash,
     selectedFactIds: version.frozenSnapshot.selectedFactIds,
@@ -373,7 +373,7 @@ function assertDraftCurrent(document, version) {
   const candidates = buildCandidateFacts(document, {
     organizationId: version.organizationId,
     workspaceIds: version.workspaceIds,
-    scopeIds: version.scopeIds,
+    initiativeIds: version.initiativeIds,
     defaultSections: definition.defaultSections
   });
   if (stateHash(candidates) !== version.frozenSnapshot.candidateStateHash) throw previewConflict();
@@ -401,7 +401,7 @@ function canonicalContentModel(version) {
   return { ...base, contentHash: stateHash(base) };
 }
 
-function scopeSummary(content) {
+function initiativeSummary(content) {
   return content.workspaces.map(workspace => `${workspace.name}: ${workspace.selection.label}`).join('; ');
 }
 
@@ -410,7 +410,7 @@ function factsBySection(content) {
 }
 
 function renderTeams(content) {
-  const lines = [`**${content.name}**`, `Audience: ${content.audienceProfile}`, `Scope: ${scopeSummary(content)}`];
+  const lines = [`**${content.name}**`, `Audience: ${content.audienceProfile}`, `Initiative: ${initiativeSummary(content)}`];
   factsBySection(content).forEach(group => {
     if (!group.facts.length) return;
     lines.push('', `**${group.section}**`);
@@ -420,7 +420,7 @@ function renderTeams(content) {
 }
 
 function renderEmail(content) {
-  const lines = [`Subject: ${content.name}`, `Audience: ${content.audienceProfile}`, `Scope: ${scopeSummary(content)}`, ''];
+  const lines = [`Subject: ${content.name}`, `Audience: ${content.audienceProfile}`, `Initiative: ${initiativeSummary(content)}`, ''];
   factsBySection(content).forEach(group => {
     if (!group.facts.length) return;
     lines.push(group.section.toUpperCase());
@@ -431,7 +431,7 @@ function renderEmail(content) {
 }
 
 function renderConfluence(content) {
-  const lines = [`h1. ${content.name}`, `*Audience:* ${content.audienceProfile}`, `*Scope:* ${scopeSummary(content)}`];
+  const lines = [`h1. ${content.name}`, `*Audience:* ${content.audienceProfile}`, `*Initiative:* ${initiativeSummary(content)}`];
   factsBySection(content).forEach(group => {
     if (!group.facts.length) return;
     lines.push('', `h2. ${group.section}`);
@@ -464,7 +464,7 @@ function prepareFinalization(document, briefing, version) {
   const outputs = deterministicOutputs(content);
   return {
     briefing: { id: briefing.id, name: briefing.name, organizationId: briefing.organizationId },
-    version: { id: version.id, status: version.status, workspaceIds: [...version.workspaceIds], scopeIds: [...version.scopeIds] },
+    version: { id: version.id, status: version.status, workspaceIds: [...version.workspaceIds], initiativeIds: [...version.initiativeIds] },
     audienceProfile: content.audienceProfile,
     workspaces: clone(content.workspaces),
     sections: [...content.sections],
@@ -480,7 +480,7 @@ function prepareFinalization(document, briefing, version) {
 function frozenContentHash(version) {
   return stateHash({
     workspaceIds: version.workspaceIds,
-    scopeIds: version.scopeIds,
+    initiativeIds: version.initiativeIds,
     comparisonVersionId: version.comparisonVersionId,
     frozenSnapshot: version.frozenSnapshot,
     facts: version.facts,
@@ -604,7 +604,7 @@ function createBriefingServices(options = {}) {
         const candidates = buildCandidateFacts(document, {
           organizationId: briefing.organizationId,
           workspaceIds: briefing.workspaceIds,
-          scopeIds: briefing.scopeIds,
+          initiativeIds: briefing.initiativeIds,
           defaultSections: briefing.defaultSections
         });
         return {
@@ -637,7 +637,7 @@ function createBriefingServices(options = {}) {
           organizationId: briefing.organizationId,
           briefingId: briefing.id,
           workspaceIds: [...briefing.workspaceIds],
-          scopeIds: [...briefing.scopeIds],
+          initiativeIds: [...briefing.initiativeIds],
           status: 'draft',
           comparisonVersionId: briefing.lastCommunicatedVersionId,
           frozenSnapshot: snapshot,

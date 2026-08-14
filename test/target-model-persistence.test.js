@@ -33,10 +33,10 @@ const {
   createInvalidCrossOrganizationFixture,
   createMultiOrganizationFixture,
   workItem
-} = require('../test-support/target-v3-fixtures');
+} = require('../test-support/target-v5-fixtures');
 
 async function temporaryDirectory(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v4-test-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v5-test-'));
   t.after(async () => fs.rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -1155,15 +1155,15 @@ test('stale full-document replacements reject valid changes across target collec
     null,
     'FICTIONAL STALE CROSS-COLLECTION WORK ITEM'
   ));
-  const staleScope = structuredClone(base.document);
-  staleScope.scopes.find(item => item.id === 'scope-alpha-zero-mapping').name = 'Fictional Renamed Stale Scope';
+  const staleInitiative = structuredClone(base.document);
+  staleInitiative.initiatives.find(item => item.id === 'initiative-alpha-zero-mapping').name = 'Fictional Renamed Stale Initiative';
   const staleMilestone = structuredClone(base.document);
   staleMilestone.milestones.find(item => item.id === 'milestone-alpha-workspace').title = 'Fictional Stale Milestone';
   const staleAudit = structuredClone(base.document);
   staleAudit.auditEvents.push(organizationAuditEvent('audit-event-cross-collection-stale'));
   const staleCommunication = communicationCandidate(base.document, 'briefing-version-beta-draft');
 
-  for (const candidate of [staleWorkItem, staleScope, staleMilestone, staleAudit, staleCommunication]) {
+  for (const candidate of [staleWorkItem, staleInitiative, staleMilestone, staleAudit, staleCommunication]) {
     validateTargetTransition(base.document, candidate);
     await assertStaleWritePreservesFile(filePath, candidate, base.revision);
   }
@@ -1220,18 +1220,18 @@ test('same-base concurrent Audit appends reject one stale candidate without losi
   assert.deepEqual(await temporaryFilesFor(filePath), []);
 });
 
-test('legitimate Work Item Scope assignment transitions remain valid', async t => {
+test('legitimate Work Item Initiative assignment transitions remain valid', async t => {
   const directory = await temporaryDirectory(t);
   const filePath = path.join(directory, 'target-data.json');
   const existing = createUncommunicatedFixture();
   await createTarget(filePath, existing);
   const candidate = structuredClone(existing);
-  candidate.workItems.find(item => item.id === 'work-item-alpha-unassigned').scopeId = 'scope-alpha-zero-mapping';
+  candidate.workItems.find(item => item.id === 'work-item-alpha-unassigned').initiativeId = 'initiative-alpha-zero-mapping';
 
   await updateTarget(filePath, candidate);
   assert.equal(
-    (await readTargetData(filePath)).workItems.find(item => item.id === 'work-item-alpha-unassigned').scopeId,
-    'scope-alpha-zero-mapping'
+    (await readTargetData(filePath)).workItems.find(item => item.id === 'work-item-alpha-unassigned').initiativeId,
+    'initiative-alpha-zero-mapping'
   );
 });
 
@@ -1248,7 +1248,7 @@ test('existing Jira Epic mapping IDs cannot be deleted or moved while metadata r
 
   const moved = structuredClone(existing);
   const movedMapping = moved.jiraEpicMappings.find(mapping => mapping.id === 'jira-mapping-alpha-one');
-  movedMapping.scopeId = 'scope-alpha-zero-mapping';
+  movedMapping.initiativeId = 'initiative-alpha-zero-mapping';
   moved.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-alpha-two';
   await assertRejectedWritePreservesFile(filePath, moved, /existing Jira Epic mapping cannot move to another parent/);
 
@@ -1384,7 +1384,7 @@ test('unsupported-version reads fail without rewriting the supplied file', async
   const directory = await temporaryDirectory(t);
   const filePath = path.join(directory, 'target-data.json');
   const document = createCleanSeed();
-  document.schemaVersion = 5;
+  document.schemaVersion = 4;
   const originalBytes = Buffer.from(JSON.stringify(document));
   await fs.writeFile(filePath, originalBytes, { mode: 0o600 });
 

@@ -6,7 +6,7 @@ const { readTargetDataWithRevision } = require('../../target-model/persistence')
 const { parseFlagPairs, requireExplicitPath } = require('./safety');
 
 const OPERATIONAL_COLLECTIONS = Object.freeze([
-  'features',
+  'workstreams',
   'jiraEpicMappings',
   'workItems',
   'milestones',
@@ -23,13 +23,13 @@ function assertBootstrapOnly(document) {
   const hierarchy = {
     organizations: document.organizations.map(({ id, name }) => ({ id, name })),
     workspaces: document.workspaces.map(({ id, organizationId, name }) => ({ id, organizationId, name })),
-    scopes: document.scopes.map(({ id, organizationId, workspaceId, name }) => ({ id, organizationId, workspaceId, name }))
+    initiatives: document.initiatives.map(({ id, organizationId, workspaceId, name }) => ({ id, organizationId, workspaceId, name }))
   };
   const expected = {
     organizations: [{ id: 'org-1', name: 'Organization 1' }],
-    workspaces: [{ id: 'workspace-1', organizationId: 'org-1', name: 'PM Workspace 1' }],
-    scopes: [1, 2, 3, 4].map(index => ({
-      id: `scope-${index}`, organizationId: 'org-1', workspaceId: 'workspace-1', name: `Scope ${index}`
+    workspaces: [{ id: 'workspace-1', organizationId: 'org-1', name: 'Workspace 1' }],
+    initiatives: [1, 2, 3, 4].map(index => ({
+      id: `initiative-${index}`, organizationId: 'org-1', workspaceId: 'workspace-1', name: `Initiative ${index}`
     }))
   };
   if (JSON.stringify(hierarchy) !== JSON.stringify(expected)) throw new Error('A staged seed must contain the exact authorized generic hierarchy');
@@ -57,7 +57,7 @@ async function validateSeed(filePath) {
     counts: {
       organizations: document.organizations.length,
       workspaces: document.workspaces.length,
-      scopes: document.scopes.length,
+      initiatives: document.initiatives.length,
       operationalRecords: 0
     }
   };

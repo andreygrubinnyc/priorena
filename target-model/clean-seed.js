@@ -18,8 +18,8 @@ const CLEAN_SEED = {
     {
       id: 'workspace-1',
       organizationId: 'org-1',
-      name: 'PM Workspace 1',
-      description: 'Fictional PM Workspace for the repository-safe Priorena seed.',
+      name: 'Workspace 1',
+      description: 'Fictional Workspace for the repository-safe Priorena seed.',
       archived: false,
       createdAt: SEED_TIMESTAMP,
       updatedAt: SEED_TIMESTAMP,
@@ -36,12 +36,12 @@ const CLEAN_SEED = {
       savedViews: []
     }
   ],
-  scopes: [
+  initiatives: [
     {
-      id: 'scope-1',
+      id: 'initiative-1',
       organizationId: 'org-1',
       workspaceId: 'workspace-1',
-      name: 'Scope 1',
+      name: 'Initiative 1',
       description: '',
       owner: null,
       archived: false,
@@ -50,10 +50,10 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     },
     {
-      id: 'scope-2',
+      id: 'initiative-2',
       organizationId: 'org-1',
       workspaceId: 'workspace-1',
-      name: 'Scope 2',
+      name: 'Initiative 2',
       description: '',
       owner: null,
       archived: false,
@@ -62,10 +62,10 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     },
     {
-      id: 'scope-3',
+      id: 'initiative-3',
       organizationId: 'org-1',
       workspaceId: 'workspace-1',
-      name: 'Scope 3',
+      name: 'Initiative 3',
       description: '',
       owner: null,
       archived: false,
@@ -74,10 +74,10 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     },
     {
-      id: 'scope-4',
+      id: 'initiative-4',
       organizationId: 'org-1',
       workspaceId: 'workspace-1',
-      name: 'Scope 4',
+      name: 'Initiative 4',
       description: '',
       owner: null,
       archived: false,
@@ -86,7 +86,7 @@ const CLEAN_SEED = {
       updatedAt: SEED_TIMESTAMP
     }
   ],
-  features: [],
+  workstreams: [],
   jiraEpicMappings: [],
   workItems: [],
   milestones: [],

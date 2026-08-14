@@ -23,7 +23,7 @@ const FINALIZED_BRIEFING_VERSION_FIELDS = Object.freeze([
   'organizationId',
   'briefingId',
   'workspaceIds',
-  'scopeIds',
+  'initiativeIds',
   'comparisonVersionId',
   'frozenSnapshot',
   'facts',
@@ -112,9 +112,9 @@ function validateTargetTransition(existingDocument, candidateDocument) {
   });
 
   for (const [collection, label, parentFields] of [
-    ['scopes', 'Scope', ['organizationId', 'workspaceId']],
-    ['features', 'Feature', ['organizationId', 'workspaceId', 'scopeId']],
-    ['jiraEpicMappings', 'Jira Epic mapping', ['organizationId', 'workspaceId', 'scopeId']]
+    ['initiatives', 'Initiative', ['organizationId', 'workspaceId']],
+    ['workstreams', 'Workstream', ['organizationId', 'workspaceId', 'initiativeId']],
+    ['jiraEpicMappings', 'Jira Epic mapping', ['organizationId', 'workspaceId', 'initiativeId']]
   ]) {
     const candidates = recordsById(candidateDocument[collection]);
     existingDocument[collection].forEach(existingRecord => {

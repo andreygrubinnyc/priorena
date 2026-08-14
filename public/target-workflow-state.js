@@ -1,7 +1,7 @@
 'use strict';
 
 const WORKFLOW_COLLECTIONS = Object.freeze([
-  'scopes', 'features', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence', 'proposedChanges'
+  'initiatives', 'workstreams', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence', 'proposedChanges'
 ]);
 
 function stableId(value) {
@@ -18,8 +18,8 @@ function encodedId(value) {
 function emptyWorkflowData() {
   return {
     revision: null,
-    scopes: [],
-    features: [],
+    initiatives: [],
+    workstreams: [],
     jiraEpicMappings: [],
     workItems: [],
     milestones: [],
@@ -28,7 +28,7 @@ function emptyWorkflowData() {
     evidence: [],
     proposedChanges: [],
     selectedWorkItemIds: [],
-    filters: { scopeId: 'all', featureId: 'all', jiraEpicMappingId: 'all', itemType: 'all', search: '' },
+    filters: { initiativeId: 'all', workstreamId: 'all', jiraEpicMappingId: 'all', itemType: 'all', search: '' },
     preview: null,
     confirmation: null,
     status: { kind: 'idle', message: '' },
@@ -85,8 +85,8 @@ function createTargetWorkflowApiClient(options = {}) {
     async loadWorkspace(organizationId, workspaceId) {
       const root = base(organizationId, workspaceId);
       const routes = {
-        scopes: `${root}/scopes`,
-        features: `${root}/features`,
+        initiatives: `${root}/initiatives`,
+        workstreams: `${root}/workstreams`,
         jiraEpicMappings: `${root}/jira-epic-mappings`,
         workItems: `${root}/work-items`,
         milestones: `${root}/milestones`,
@@ -115,8 +115,8 @@ function createTargetWorkflowApiClient(options = {}) {
       return write(`${base(organizationId, workspaceId)}/work-items/bulk/apply`, value)
         .then(result => ({ ...result.body, revision: result.revision || result.body.revision }));
     },
-    createScope(organizationId, workspaceId, value) {
-      return write(`${base(organizationId, workspaceId)}/scopes`, value).then(result => result.body);
+    createInitiative(organizationId, workspaceId, value) {
+      return write(`${base(organizationId, workspaceId)}/initiatives`, value).then(result => result.body);
     },
     createWorkItem(organizationId, workspaceId, value) {
       return write(`${base(organizationId, workspaceId)}/work-items`, value).then(result => result.body);
@@ -175,10 +175,10 @@ function validateWorkspacePayload(payload, organizationId, workspaceId) {
 function filterWorkItems(workItems, filters) {
   const search = String(filters.search || '').trim().toLocaleLowerCase('en-US');
   return workItems.filter(item => {
-    const scopeMatch = filters.scopeId === 'all' ||
-      (filters.scopeId === 'unassigned' ? item.scopeId === null : item.scopeId === filters.scopeId);
-    const featureMatch = !filters.featureId || filters.featureId === 'all' ||
-      (filters.featureId === 'none' ? item.featureId === null : item.featureId === filters.featureId);
+    const initiativeMatch = filters.initiativeId === 'all' ||
+      (filters.initiativeId === 'unassigned' ? item.initiativeId === null : item.initiativeId === filters.initiativeId);
+    const workstreamMatch = !filters.workstreamId || filters.workstreamId === 'all' ||
+      (filters.workstreamId === 'none' ? item.workstreamId === null : item.workstreamId === filters.workstreamId);
     const jiraEpicMatch = !filters.jiraEpicMappingId || filters.jiraEpicMappingId === 'all' ||
       (filters.jiraEpicMappingId === 'none'
         ? item.jiraEpicMappingId === null
@@ -190,12 +190,12 @@ function filterWorkItems(workItems, filters) {
       item.canonicalStatus,
       item.assignee,
       item.sprint,
-      item.feature?.name,
+      item.workstream?.name,
       item.jiraEpic?.jiraEpicKey,
       item.jiraEpic?.jiraEpicName
     ]
       .some(value => String(value || '').toLocaleLowerCase('en-US').includes(search));
-    return scopeMatch && featureMatch && jiraEpicMatch && typeMatch && searchMatch;
+    return initiativeMatch && workstreamMatch && jiraEpicMatch && typeMatch && searchMatch;
   });
 }
 
@@ -275,9 +275,9 @@ function createTargetWorkflowController(api) {
     }
   }
 
-  function setScopeFilter(scopeId) {
-    if (!['all', 'unassigned'].includes(scopeId)) stableId(scopeId);
-    state.filters.scopeId = scopeId;
+  function setInitiativeFilter(initiativeId) {
+    if (!['all', 'unassigned'].includes(initiativeId)) stableId(initiativeId);
+    state.filters.initiativeId = initiativeId;
     state.selectedWorkItemIds = [];
     state.preview = null;
     state.confirmation = null;
@@ -388,7 +388,7 @@ function createTargetWorkflowController(api) {
     previewBulk,
     selectWorkItems,
     setContext,
-    setScopeFilter,
+    setInitiativeFilter,
     setSearch,
     snapshot,
     visibleWorkItems

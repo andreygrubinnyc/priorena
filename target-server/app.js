@@ -95,21 +95,22 @@ function createTargetApiApp(options = {}) {
   jsonRoute(`${workspaceBase}/today`, req => services.today(req.params.organizationId, req.params.workspaceId));
   jsonRoute(`${workspaceBase}/search`, req => services.search(req.params.organizationId, req.params.workspaceId, req.query.q));
 
-  mutationRoute('post', `${workspaceBase}/scopes`, req => services.createScope(req.params.organizationId, req.params.workspaceId, req.body));
-  mutationRoute('patch', `${workspaceBase}/scopes/:scopeId`, req => services.updateScope(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
-  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/rename/preview`, req => services.previewScopeRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
-  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/rename/apply`, req => services.applyScopeRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
-  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/archive`, req => services.setScopeArchived(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
-  jsonRoute(`${workspaceBase}/scopes/:scopeId/features`, req => services.listScopeFeatures(req.params.organizationId, req.params.workspaceId, req.params.scopeId));
-  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/features`, req => services.createFeature(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
-  jsonRoute(`${workspaceBase}/scopes/:scopeId/features/:featureId`, req => services.getScopeFeature(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId));
-  mutationRoute('patch', `${workspaceBase}/scopes/:scopeId/features/:featureId`, req => services.updateFeature(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId, req.body));
-  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/features/:featureId/rename/preview`, req => services.previewFeatureRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId, req.body));
-  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/features/:featureId/rename/apply`, req => services.applyFeatureRename(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId, req.body));
-  jsonRoute(`${workspaceBase}/scopes/:scopeId/features/:featureId/work-items`, req => services.listFeatureWorkItems(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.featureId));
-  jsonRoute(`${workspaceBase}/scopes/:scopeId/jira-epic-mappings`, req => services.listScopeMappings(req.params.organizationId, req.params.workspaceId, req.params.scopeId));
-  mutationRoute('post', `${workspaceBase}/scopes/:scopeId/jira-epic-mappings`, req => services.createJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.body));
-  mutationRoute('patch', `${workspaceBase}/scopes/:scopeId/jira-epic-mappings/:mappingId`, req => services.updateJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.scopeId, req.params.mappingId, req.body));
+  mutationRoute('post', `${workspaceBase}/initiatives`, req => services.createInitiative(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('patch', `${workspaceBase}/initiatives/:initiativeId`, req => services.updateInitiative(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.body));
+  mutationRoute('post', `${workspaceBase}/initiatives/:initiativeId/rename/preview`, req => services.previewInitiativeRename(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.body));
+  mutationRoute('post', `${workspaceBase}/initiatives/:initiativeId/rename/apply`, req => services.applyInitiativeRename(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.body));
+  mutationRoute('post', `${workspaceBase}/initiatives/:initiativeId/archive`, req => services.setInitiativeArchived(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.body));
+  jsonRoute(`${workspaceBase}/initiatives/:initiativeId/workstreams`, req => services.listInitiativeWorkstreams(req.params.organizationId, req.params.workspaceId, req.params.initiativeId));
+  mutationRoute('post', `${workspaceBase}/initiatives/:initiativeId/workstreams`, req => services.createWorkstream(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.body));
+  jsonRoute(`${workspaceBase}/initiatives/:initiativeId/workstreams/:workstreamId`, req => services.getInitiativeWorkstream(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.workstreamId));
+  mutationRoute('patch', `${workspaceBase}/initiatives/:initiativeId/workstreams/:workstreamId`, req => services.updateWorkstream(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.workstreamId, req.body));
+  mutationRoute('post', `${workspaceBase}/initiatives/:initiativeId/workstreams/:workstreamId/rename/preview`, req => services.previewWorkstreamRename(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.workstreamId, req.body));
+  mutationRoute('post', `${workspaceBase}/initiatives/:initiativeId/workstreams/:workstreamId/rename/apply`, req => services.applyWorkstreamRename(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.workstreamId, req.body));
+  jsonRoute(`${workspaceBase}/initiatives/:initiativeId/workstreams/:workstreamId/work-items`, req => services.listWorkstreamWorkItems(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.workstreamId));
+  jsonRoute(`${workspaceBase}/initiatives/:initiativeId/jira-epic-mappings`, req => services.listInitiativeMappings(req.params.organizationId, req.params.workspaceId, req.params.initiativeId));
+  mutationRoute('post', `${workspaceBase}/initiatives/:initiativeId/jira-epic-mappings`, req => services.createJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.body));
+  jsonRoute(`${workspaceBase}/initiatives/:initiativeId/jira-epic-mappings/:mappingId`, req => services.getInitiativeMapping(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.mappingId));
+  mutationRoute('patch', `${workspaceBase}/initiatives/:initiativeId/jira-epic-mappings/:mappingId`, req => services.updateJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.mappingId, req.body));
 
   mutationRoute('post', `${workspaceBase}/work-items`, req => services.createWorkItem(req.params.organizationId, req.params.workspaceId, req.body));
   mutationRoute('post', `${workspaceBase}/work-items/bulk/preview`, req => services.previewBulkWorkItems(req.params.organizationId, req.params.workspaceId, req.body));
@@ -133,8 +134,8 @@ function createTargetApiApp(options = {}) {
   mutationRoute('post', `${workspaceBase}/proposed-changes/:proposedChangeId/apply`, req => services.applyProposedChange(req.params.organizationId, req.params.workspaceId, req.params.proposedChangeId, req.body));
 
   const collections = Object.freeze({
-    scopes: 'scopes',
-    features: 'features',
+    initiatives: 'initiatives',
+    workstreams: 'workstreams',
     'jira-epic-mappings': 'jiraEpicMappings',
     'work-items': 'workItems',
     milestones: 'milestones',

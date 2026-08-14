@@ -20,7 +20,7 @@ async function smokeStartedTarget(started) {
   const ui = await fetch(`${origin}/target/`);
   assert.equal(ui.status, 200);
   const markup = await ui.text();
-  for (const label of ['Organization', 'PM Workspace', 'Portfolio', 'Today', 'Briefings', 'Settings']) assert.match(markup, new RegExp(label));
+  for (const label of ['Organization', 'Workspace', 'Portfolio', 'Today', 'Briefings', 'Settings']) assert.match(markup, new RegExp(label));
   const clientResponse = await fetch(`${origin}/target/app.js`);
   assert.equal(clientResponse.status, 200);
   assert.match(await clientResponse.text(), /Data & Privacy/);

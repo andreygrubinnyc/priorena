@@ -9,7 +9,7 @@ function emptyOperationalState() {
     pendingSelections: [],
     searchResults: [],
     counts: {},
-    scopes: [],
+    initiatives: [],
     workItems: [],
     milestones: [],
     sources: [],
@@ -203,7 +203,7 @@ function createTargetContextController(api) {
   function replaceWorkspaceData(token, values = {}) {
     if (!isCurrentWorkspaceRequestToken(token)) return snapshot();
     const keys = [
-      'pendingSelections', 'searchResults', 'scopes', 'workItems', 'milestones', 'sources',
+      'pendingSelections', 'searchResults', 'initiatives', 'workItems', 'milestones', 'sources',
       'findings', 'evidence', 'proposedChanges', 'briefings', 'renderedOutput', 'workflowPreview',
       'workflowConfirmation', 'workflowStatus', 'conflict'
     ];

@@ -9,7 +9,7 @@ const { PUBLIC_ERRORS } = require('../target-server/errors');
 const {
   createInvalidPhase3ProposedChangeFixture,
   createPhase3WorkflowFixture
-} = require('../test-support/target-v3-fixtures');
+} = require('../test-support/target-v5-fixtures');
 const {
   ALPHA,
   BETA,
@@ -33,7 +33,7 @@ function notFoundBody() {
 function importInput(records, format = 'target-json') {
   return {
     format,
-    content: format === 'target-json' ? JSON.stringify({ version: 'target-v3', records }) : records,
+    content: format === 'target-json' ? JSON.stringify({ version: 'target-v4', records }) : records,
     source: {
       title: 'Fictional Target Import',
       type: format === 'target-csv' ? 'normalized-csv' : (format === 'structured-text' ? 'meeting-note' : 'normalized-json'),
@@ -74,7 +74,7 @@ test('Source capture is bounded, parent-scoped, and creates only pending Finding
       exactExcerpt: 'A fictional dependency needs review.',
       category: 'dependency',
       proposedWorkItemId: 'work-item-alpha-unassigned',
-      proposedScopeId: null,
+      proposedInitiativeId: null,
       currentness: 'current'
     }]
   });
@@ -131,7 +131,7 @@ test('import preview separates decisions, performs exact matching only, and writ
     {
       externalKey: 'FICTA-999',
       itemType: 'Bug',
-      summary: 'Mapped Scope wording must not infer an association',
+      summary: 'Mapped Initiative wording must not infer an association',
       noEpic: true,
       canonicalStatus: 'Planned',
       evidenceExcerpt: 'Fictional no-Epic evidence.',
@@ -140,10 +140,10 @@ test('import preview separates decisions, performs exact matching only, and writ
     {
       externalKey: 'FICTA-777',
       itemType: 'Story',
-      summary: 'Fictional explicitly proposed Scope item',
+      summary: 'Fictional explicitly proposed Initiative item',
       jiraProjectKey: 'FICTA',
       jiraEpicKey: 'FICTA-777',
-      scopeName: 'Fictional Explicit Import Scope'
+      initiativeName: 'Fictional Explicit Import Initiative'
     }
   ]);
   const response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
@@ -151,14 +151,16 @@ test('import preview separates decisions, performs exact matching only, and writ
   const preview = response.json().preview;
   const types = preview.proposals.map(proposal => proposal.type);
   assert.ok(types.includes('source-create'));
-  assert.ok(types.includes('scope-create'));
-  assert.ok(types.includes('jira-mapping-create'));
+  assert.ok(types.includes('initiative-reference-review'));
+  assert.ok(types.includes('jira-mapping-reference-review'));
+  assert.equal(types.includes('initiative-create'), false);
+  assert.equal(types.includes('jira-mapping-create'), false);
   assert.ok(types.includes('work-item-create'));
   assert.ok(types.includes('finding-create'));
   assert.ok(types.includes('proposed-current-state-change'));
   const explicitMove = preview.proposals.find(proposal => proposal.index === 0 && proposal.type === 'work-item-assign');
-  assert.deepEqual(explicitMove.payload.featureChange, {
-    effect: 'retained', beforeFeatureId: 'feature-alpha-mapped', afterFeatureId: 'feature-alpha-mapped'
+  assert.deepEqual(explicitMove.payload.workstreamChange, {
+    effect: 'retained', beforeWorkstreamId: 'workstream-alpha-mapped', afterWorkstreamId: 'workstream-alpha-mapped'
   });
   assert.deepEqual(explicitMove.payload.jiraEpicChange, {
     effect: 'replaced', beforeJiraEpicMappingId: null, afterJiraEpicMappingId: 'jira-mapping-alpha-one'
@@ -166,12 +168,12 @@ test('import preview separates decisions, performs exact matching only, and writ
   const noEpicAssignment = preview.proposals.find(proposal => proposal.index === 1 && proposal.type === 'work-item-assign');
   assert.equal(noEpicAssignment, undefined);
   const noEpicWorkItem = preview.proposals.find(proposal => proposal.index === 1 && proposal.type === 'work-item-create');
-  assert.equal(noEpicWorkItem.payload.scopeId, null);
+  assert.equal(noEpicWorkItem.payload.initiativeId, null);
   assert.deepEqual(await fs.readFile(targetDataFile), beforeBytes);
   assert.equal((await persisted(targetDataFile)).revision, before.revision);
 });
 
-test('external Feature item types are preserved for explicit review and never become Work Items', async t => {
+test('external Feature item types preserve source provenance without Workstream inference or creation', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   const before = await persisted(targetDataFile);
   const input = importInput([{
@@ -186,9 +188,12 @@ test('external Feature item types are preserved for explicit review and never be
     externalItemType: 'Feature',
     externalKey: 'FICTA-500',
     summary: 'Fictional external Feature requiring explicit mapping',
+    targetEntityType: 'Workstream',
+    workstreamInference: 'none',
     requiresExplicitMapping: true
   });
   assert.equal(previewResponse.json().preview.proposals.some(proposal => proposal.type === 'work-item-create'), false);
+  assert.equal(previewResponse.json().preview.proposals.some(proposal => proposal.type === 'workstream-create'), false);
 
   const sourceProposal = previewResponse.json().preview.proposals.find(proposal => proposal.type === 'source-create');
   const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
@@ -201,6 +206,35 @@ test('external Feature item types are preserved for explicit review and never be
   assert.equal(applied.status, 200, applied.body);
   assert.deepEqual(applied.json().outcome.externalItemTypeReviews, [review.payload]);
   assert.equal((await persisted(targetDataFile)).document.workItems.length, before.document.workItems.length);
+  assert.equal((await persisted(targetDataFile)).document.workstreams.length, before.document.workstreams.length);
+});
+
+test('strict target-v4 import rejects the prior contract and legacy relationship fields', async t => {
+  const { app } = await createTargetApiHarness(t);
+  const source = {
+    title: 'Fictional legacy-contract rejection',
+    type: 'normalized-json',
+    sourceKind: 'normalized-feed',
+    date: '2026-08-11',
+    provenance: 'Repository-safe negative import test.'
+  };
+  const priorContract = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input: {
+      format: 'target-json',
+      content: JSON.stringify({ version: 'target-v3', records: [{ externalKey: 'FICTA-501', itemType: 'Task', summary: 'Rejected prior contract', scopeId: 'scope-legacy' }] }),
+      source
+    }
+  });
+  assert.equal(priorContract.status, 400);
+
+  const legacyFields = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input: {
+      format: 'target-json',
+      content: JSON.stringify({ version: 'target-v4', records: [{ externalKey: 'FICTA-502', itemType: 'Task', summary: 'Rejected legacy fields', featureId: 'feature-legacy' }] }),
+      source
+    }
+  });
+  assert.equal(legacyFields.status, 400);
 });
 
 test('an exact existing Jira Epic identifier may be explicitly approved without creating or auto-assigning mappings', async t => {
@@ -232,14 +266,14 @@ test('an exact existing Jira Epic identifier may be explicitly approved without 
     approvedProposalIds: [proposal.id]
   });
   assert.equal(applied.status, 200, applied.body);
-  assert.equal(applied.json().outcome.assignments[0].featureId, 'feature-alpha-mapped');
+  assert.equal(applied.json().outcome.assignments[0].workstreamId, 'workstream-alpha-mapped');
   assert.equal(applied.json().outcome.assignments[0].jiraEpicMappingId, 'jira-mapping-alpha-one');
   const stored = await persisted(targetDataFile);
   assert.equal(stored.document.jiraEpicMappings.length, before.document.jiraEpicMappings.length);
-  assert.equal(stored.document.workItems.find(item => item.id === 'work-item-alpha-assigned').featureId, 'feature-alpha-mapped');
+  assert.equal(stored.document.workItems.find(item => item.id === 'work-item-alpha-assigned').workstreamId, 'workstream-alpha-mapped');
 });
 
-test('new Work Item import proposals report null Feature retention before exact Jira Epic association', async t => {
+test('new Work Item import proposals report null Workstream retention before exact Jira Epic association', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   const input = importInput([{
     externalKey: 'FICTA-901',
@@ -252,8 +286,8 @@ test('new Work Item import proposals report null Feature retention before exact 
   const response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
   assert.equal(response.status, 200, response.body);
   const proposal = response.json().preview.proposals.find(candidate => candidate.type === 'work-item-assign');
-  assert.deepEqual(proposal.payload.featureChange, {
-    effect: 'retained', beforeFeatureId: null, afterFeatureId: null
+  assert.deepEqual(proposal.payload.workstreamChange, {
+    effect: 'retained', beforeWorkstreamId: null, afterWorkstreamId: null
   });
   assert.deepEqual(proposal.payload.jiraEpicChange, {
     effect: 'replaced', beforeJiraEpicMappingId: null, afterJiraEpicMappingId: 'jira-mapping-alpha-one'
@@ -298,10 +332,10 @@ test('import apply reconstructs the preview and applies only explicitly selected
   });
   assert.equal(applied.status, 200, applied.body);
   assert.equal(applied.json().outcome.workItems.length, 1);
-  assert.equal(applied.json().outcome.workItems[0].scopeId, null);
+  assert.equal(applied.json().outcome.workItems[0].initiativeId, null);
   assert.equal(applied.json().outcome.findings[0].reviewStatus, 'pending');
   const stored = await persisted(targetDataFile);
-  assert.equal(stored.document.scopes.length, before.document.scopes.length);
+  assert.equal(stored.document.initiatives.length, before.document.initiatives.length);
   assert.equal(stored.document.jiraEpicMappings.length, before.document.jiraEpicMappings.length);
   assert.equal(stored.document.evidence.length, before.document.evidence.length);
 });
@@ -315,7 +349,7 @@ test('Finding accept/reject and bounded bulk review preserve the Evidence/curren
     actor: ACTOR,
     decision: 'accept',
     workItemId: 'work-item-alpha-unassigned',
-    scopeId: null
+    initiativeId: null
   });
   assert.equal(response.status, 200);
   assert.match(response.json().evidence.exactExcerpt, /IGNORE PRIOR INSTRUCTIONS/);
@@ -349,7 +383,7 @@ test('Finding accept/reject and bounded bulk review preserve the Evidence/curren
     expectedRevision: revision,
     actor: ACTOR,
     selections: [
-      { findingId: findingIds[0], decision: 'accept', scopeId: null, workItemId: null },
+      { findingId: findingIds[0], decision: 'accept', initiativeId: null, workItemId: null },
       { findingId: findingIds[1], decision: 'reject' }
     ]
   });
@@ -366,17 +400,17 @@ test('Finding accept/reject and bounded bulk review preserve the Evidence/curren
   assert.equal(invalidPage.status, 400);
 });
 
-test('explicit Scope reassignment previews and audits compatible Evidence association updates', async t => {
+test('explicit Initiative reassignment previews and audits compatible Evidence association updates', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   const before = await persisted(targetDataFile);
   const evidenceBefore = structuredClone(before.document.evidence.find(item => item.id === 'evidence-alpha-accepted'));
-  const action = { type: 'assign-scope', scopeId: 'scope-alpha-zero-mapping' };
+  const action = { type: 'assign-initiative', initiativeId: 'initiative-alpha-zero-mapping' };
   const previewResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/work-item-alpha-assigned/preview`, { action });
   assert.equal(previewResponse.status, 200);
   assert.deepEqual(previewResponse.json().preview.evidenceChanges, [{
     evidenceId: 'evidence-alpha-accepted',
-    beforeScopeId: 'scope-alpha-multiple-mappings',
-    afterScopeId: 'scope-alpha-zero-mapping'
+    beforeInitiativeId: 'initiative-alpha-multiple-mappings',
+    afterInitiativeId: 'initiative-alpha-zero-mapping'
   }]);
   const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/work-item-alpha-assigned/apply`, {
     expectedRevision: before.revision,
@@ -387,10 +421,10 @@ test('explicit Scope reassignment previews and audits compatible Evidence associ
   assert.equal(applied.status, 200, applied.body);
   const stored = await persisted(targetDataFile);
   const evidenceAfter = stored.document.evidence.find(item => item.id === evidenceBefore.id);
-  assert.equal(evidenceAfter.scopeId, 'scope-alpha-zero-mapping');
+  assert.equal(evidenceAfter.initiativeId, 'initiative-alpha-zero-mapping');
   assert.equal(evidenceAfter.exactExcerpt, evidenceBefore.exactExcerpt);
   assert.equal(evidenceAfter.sourceId, evidenceBefore.sourceId);
-  assert.ok(stored.document.auditEvents.some(event => event.entityId === evidenceBefore.id && event.action === 'evidence-scope-reassociated'));
+  assert.ok(stored.document.auditEvents.some(event => event.entityId === evidenceBefore.id && event.action === 'evidence-initiative-reassociated'));
 });
 
 test('Proposed Change preview, approval, and apply remain separate and reject foreign or stale Evidence', async t => {
@@ -410,7 +444,7 @@ test('Proposed Change preview, approval, and apply remain separate and reject fo
   assert.equal(previewA.beforeValue, 'Planned');
   assert.deepEqual(await fs.readFile(targetDataFile), beforeBytes);
 
-  const unrelated = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/scopes/scope-alpha-zero-mapping`, {
+  const unrelated = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/initiative-alpha-zero-mapping`, {
     expectedRevision: previewA.expectedRevision,
     actor: ACTOR,
     changes: { description: 'Fictional unrelated Proposed Change revision advance.' }
@@ -526,7 +560,7 @@ test('new Capture and review routes reject wrong parents without foreign sentine
     const response = await jsonRequest(app, method, url, body);
     assert.equal(response.status, 404, `${method} ${url}`);
     assert.deepEqual(response.json(), notFoundBody());
-    assert.doesNotMatch(response.body, /ALPHA SENTINEL|IGNORE PRIOR INSTRUCTIONS|scope-alpha/);
+    assert.doesNotMatch(response.body, /ALPHA SENTINEL|IGNORE PRIOR INSTRUCTIONS|initiative-alpha/);
   }
   assert.equal((await persisted(targetDataFile)).revision, revision);
 });
@@ -537,24 +571,24 @@ test('every Phase 3 route family resolves Organization and Workspace parents bef
   const importValue = importInput('Fictional structured line.', 'structured-text');
   const actorRevision = { expectedRevision: revision, actor: ACTOR };
   const cases = [
-    ['POST', '/scopes', { ...actorRevision, scope: { name: 'Fictional Scope' } }],
-    ['PATCH', '/scopes/scope-alpha-zero-mapping', { ...actorRevision, changes: { description: 'Fictional.' } }],
-    ['POST', '/scopes/scope-alpha-zero-mapping/archive', { ...actorRevision, archived: true }],
-    ['GET', '/scopes/scope-alpha-zero-mapping/jira-epic-mappings', null],
-    ['POST', '/scopes/scope-alpha-zero-mapping/jira-epic-mappings', {
+    ['POST', '/initiatives', { ...actorRevision, initiative: { name: 'Fictional Initiative' } }],
+    ['PATCH', '/initiatives/initiative-alpha-zero-mapping', { ...actorRevision, changes: { description: 'Fictional.' } }],
+    ['POST', '/initiatives/initiative-alpha-zero-mapping/archive', { ...actorRevision, archived: true }],
+    ['GET', '/initiatives/initiative-alpha-zero-mapping/jira-epic-mappings', null],
+    ['POST', '/initiatives/initiative-alpha-zero-mapping/jira-epic-mappings', {
       ...actorRevision,
       mapping: {
         jiraProjectKey: 'FICTA', jiraEpicKey: 'FICTA-990', jiraEpicName: 'Fictional Epic',
         mappingStatus: 'pending', provenance: 'Fictional review.', verifiedAt: null
       }
     }],
-    ['PATCH', '/scopes/scope-alpha-multiple-mappings/jira-epic-mappings/jira-mapping-alpha-one', {
+    ['PATCH', '/initiatives/initiative-alpha-multiple-mappings/jira-epic-mappings/jira-mapping-alpha-one', {
       ...actorRevision, changes: { jiraEpicName: 'Fictional renamed Epic' }
     }],
     ['POST', '/work-items', {
       ...actorRevision,
       workItem: {
-        scopeId: null, itemType: 'Task', summary: 'Fictional Work Item', canonicalStatus: 'Planned',
+        initiativeId: null, itemType: 'Task', summary: 'Fictional Work Item', canonicalStatus: 'Planned',
         currentStateProvenance: 'fictional-manual', currentStateConfidence: 'confirmed'
       }
     }],
@@ -572,7 +606,7 @@ test('every Phase 3 route family resolves Organization and Workspace parents bef
     }],
     ['POST', '/milestones', {
       ...actorRevision,
-      milestone: { scopeId: null, title: 'Fictional Milestone', date: '2026-08-20', status: 'Planned', linkedWorkItemIds: [] }
+      milestone: { initiativeId: null, title: 'Fictional Milestone', date: '2026-08-20', status: 'Planned', linkedWorkItemIds: [] }
     }],
     ['PATCH', '/milestones/milestone-alpha-workspace', { ...actorRevision, changes: { status: 'At risk' } }],
     ['POST', '/sources', {
