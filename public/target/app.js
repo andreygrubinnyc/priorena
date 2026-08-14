@@ -34,12 +34,12 @@
     'work-items': ['Work Items', 'Review independent Initiative, Workstream, and Jira Epic associations.'],
     'follow-up': ['Follow-Up', 'PM attention attached to Work Items in this Workspace.'],
     milestones: ['Milestones', 'Workspace and Initiative delivery checkpoints.'],
-    'add-source': ['Add Source', 'Capture bounded local material for explicit Finding review.'],
-    'source-library': ['Source Library', 'Workspace-owned Sources with safe provenance metadata.'],
+    'add-source': ['Add Source', 'Add local material for separate Finding review.'],
+    'source-library': ['Source Library', 'Workspace Sources and how each one was added.'],
     review: ['Review', 'Review Findings and Proposed changes as separate consequences.'],
     search: ['Search', 'Search only the selected Workspace.'],
     briefings: ['Briefings', 'Prepare, Open, and History for canonical stakeholder communication.'],
-    settings: ['Settings', 'Target-safe Organization, Workspace, behavior, and privacy settings.']
+    settings: ['Settings', 'Manage your Organization, Workspace, Initiatives, and delivery settings.']
   });
 
   const state = {
@@ -90,7 +90,7 @@
     return node('div', { className: 'empty', text: message });
   }
 
-  function showLoading(message = 'Loading validated target data…') {
+  function showLoading(message = 'Loading workspace data…') {
     elements.view.replaceChildren(empty(message));
     setStatus(message);
   }
@@ -197,15 +197,27 @@
   }
 
   function clearOperationalUi(message = 'Select a valid context to continue.') {
+    const reset = workflowModule.defaultWorkItemUiState();
     state.workflow = null;
-    state.initiativeFilter = 'all';
-    state.workstreamFilter = 'all';
-    state.jiraEpicFilter = 'all';
-    state.itemTypeFilter = 'all';
+    state.initiativeFilter = reset.filters.initiativeId;
+    state.workstreamFilter = reset.filters.workstreamId;
+    state.jiraEpicFilter = reset.filters.jiraEpicMappingId;
+    state.itemTypeFilter = reset.filters.itemType;
     state.selectedWorkItemIds.clear();
     elements.view.replaceChildren(empty(message));
     elements.initiative.textContent = 'All initiatives';
     updateBreadcrumb();
+  }
+
+  function activateView(view) {
+    const reset = workflowModule.defaultWorkItemUiState();
+    state.activeView = view;
+    state.initiativeFilter = reset.filters.initiativeId;
+    state.workstreamFilter = reset.filters.workstreamId;
+    state.jiraEpicFilter = reset.filters.jiraEpicMappingId;
+    state.itemTypeFilter = reset.filters.itemType;
+    state.selectedWorkItemIds.clear();
+    renderActiveView();
   }
 
   function updateBreadcrumb() {
@@ -337,7 +349,7 @@
           recordList(today.attention.blockedWorkItems, item => [
             node('div', { className: 'row-head' }, [node('strong', { text: item.summary }), badge(item.initiative?.name || 'Unassigned')]),
             node('p', { className: 'risk', text: item.canonicalStatus }),
-            node('p', { className: 'meta', text: `Current-state provenance: ${item.currentStateProvenance}` })
+            node('p', { className: 'meta', text: `How this status was confirmed: ${item.currentStateProvenance}` })
           ], 'No blocked or at-risk Work Items in this Workspace.')
         ]),
         node('section', { className: 'card' }, [
@@ -404,7 +416,8 @@
     }, [
       option('all', 'All initiatives', state.initiativeFilter === 'all'),
       option('unassigned', 'Unassigned', state.initiativeFilter === 'unassigned'),
-      ...(state.workflow?.initiatives || []).filter(initiative => !initiative.archived).map(initiative => option(initiative.id, initiative.name, state.initiativeFilter === initiative.id))
+      ...workflowModule.initiativeChoices(state.workflow?.initiatives || [], 'work-item-filter')
+        .map(initiative => option(initiative.id, initiative.name, state.initiativeFilter === initiative.id))
     ]);
     return node('label', {}, [node('span', { text: 'Initiative' }), select]);
   }
@@ -510,18 +523,58 @@
     } catch (error) {
       if (!workspaceOperationCurrent(token)) return;
       setStatus(error.code === 'REVISION_CONFLICT' || error.code === 'PREVIEW_CONFLICT'
-        ? 'The target data changed. Refresh and review the action again.'
+        ? 'The workspace changed. Refresh and review the action again.'
         : error.message, 'error');
     }
+  }
+
+  function workItemFiltersActive() {
+    return state.initiativeFilter !== 'all' || state.workstreamFilter !== 'all' ||
+      state.jiraEpicFilter !== 'all' || state.itemTypeFilter !== 'all';
+  }
+
+  function clearWorkItemFilters() {
+    const reset = workflowModule.defaultWorkItemUiState();
+    state.initiativeFilter = reset.filters.initiativeId;
+    state.workstreamFilter = reset.filters.workstreamId;
+    state.jiraEpicFilter = reset.filters.jiraEpicMappingId;
+    state.itemTypeFilter = reset.filters.itemType;
+    state.selectedWorkItemIds.clear();
+    updateBreadcrumb();
+    renderWorkItems();
+    setStatus('Work Item filters cleared.', 'success');
   }
 
   function renderWorkItems() {
     const assignment = node('select', { id: 'initiative-assignment' }, [
       option('unassigned', 'Unassigned'),
-      ...(state.workflow?.initiatives || []).filter(initiative => !initiative.archived).map(initiative => option(initiative.id, initiative.name))
+      ...workflowModule.initiativeChoices(state.workflow?.initiatives || [], 'bulk-assignment')
+        .map(initiative => option(initiative.id, initiative.name))
     ]);
     const workstreamAssignment = node('select', { id: 'workstream-assignment' });
     const jiraEpicAssignment = node('select', { id: 'jira-epic-assignment' });
+    const selectedCount = node('strong', { className: 'selected-count', attrs: { id: 'selected-work-item-count' } });
+    const helper = node('p', {
+      className: 'meta bulk-helper',
+      text: 'Select one or more Work Items to change their associations.',
+      attrs: { id: 'bulk-assignment-help' }
+    });
+    const previewButton = node('button', {
+      className: 'button primary',
+      type: 'button',
+      text: 'Preview changes',
+      attrs: { 'aria-describedby': 'bulk-assignment-help' },
+      on: { click: () => previewInitiativeAssignment(assignment.value, workstreamAssignment.value, jiraEpicAssignment.value) }
+    });
+    const refreshBulkAvailability = () => {
+      const controls = workflowModule.workItemControlState([...state.selectedWorkItemIds], assignment.value);
+      selectedCount.textContent = controls.selectedCountLabel;
+      assignment.disabled = controls.initiativeDisabled;
+      workstreamAssignment.disabled = controls.workstreamDisabled;
+      jiraEpicAssignment.disabled = controls.jiraEpicDisabled;
+      previewButton.disabled = controls.previewDisabled;
+      helper.hidden = !controls.helperVisible;
+    };
     const refreshRelationshipAssignments = () => {
       const initiativeId = assignment.value;
       workstreamAssignment.replaceChildren(
@@ -536,24 +589,59 @@
           .filter(mapping => mapping.initiativeId === initiativeId)
           .map(mapping => option(mapping.id, jiraEpicOptionLabel(mapping)))
       );
-      workstreamAssignment.disabled = initiativeId === 'unassigned';
-      jiraEpicAssignment.disabled = initiativeId === 'unassigned';
+      refreshBulkAvailability();
     };
     assignment.addEventListener('change', refreshRelationshipAssignments);
     refreshRelationshipAssignments();
     const items = visibleWorkItems();
-    elements.view.replaceChildren(
-      node('div', { className: 'filters' }, [
+    const totalWorkItems = state.workflow?.workItems?.length || 0;
+    const emptyState = workflowModule.workItemEmptyState(totalWorkItems, items.length);
+    const filterGroup = node('fieldset', { className: 'control-group filters-group' }, [
+      node('legend', { text: 'Filters' }),
+      node('div', { className: 'control-grid' }, [
         initiativeFilterControl(),
         workstreamFilterControl(),
         jiraEpicFilterControl(),
-        itemTypeFilterControl(),
-        node('label', {}, [node('span', { text: 'Assign selected Initiative' }), assignment]),
-        node('label', {}, [node('span', { text: 'Assign selected Workstream' }), workstreamAssignment]),
-        node('label', {}, [node('span', { text: 'Assign selected Jira Epic' }), jiraEpicAssignment]),
-        node('button', { className: 'button primary', type: 'button', text: 'Preview association changes', on: { click: () => previewInitiativeAssignment(assignment.value, workstreamAssignment.value, jiraEpicAssignment.value) } })
+        itemTypeFilterControl()
       ]),
-      recordList(items, item => {
+      node('button', {
+        className: 'button secondary',
+        type: 'button',
+        text: 'Clear filters',
+        disabled: !workItemFiltersActive(),
+        on: { click: clearWorkItemFilters }
+      })
+    ]);
+    const bulkGroup = node('fieldset', { className: 'control-group bulk-assignment-group', attrs: { 'aria-describedby': 'bulk-assignment-help' } }, [
+      node('legend', { text: 'Bulk assignment' }),
+      selectedCount,
+      helper,
+      node('div', { className: 'control-grid' }, [
+        node('label', {}, [node('span', { text: 'Initiative' }), assignment]),
+        node('label', {}, [node('span', { text: 'Workstream' }), workstreamAssignment]),
+        node('label', {}, [node('span', { text: 'Jira Epic' }), jiraEpicAssignment])
+      ]),
+      previewButton
+    ]);
+    let resultContent;
+    if (emptyState === 'no-data') {
+      resultContent = node('section', { className: 'empty empty-state', attrs: { 'aria-labelledby': 'no-work-items-title' } }, [
+        node('h2', { id: 'no-work-items-title', text: 'No Work Items have been added to this Workspace yet.' }),
+        node('p', { text: 'Add and review source material to begin building the delivery view.' }),
+        node('div', { className: 'empty-actions' }, [
+          node('button', { className: 'button primary', type: 'button', text: 'Add Source', on: { click: () => activateView('add-source') } })
+        ])
+      ]);
+    } else if (emptyState === 'filtered-no-results') {
+      resultContent = node('section', { className: 'empty empty-state', attrs: { 'aria-labelledby': 'filtered-work-items-title' } }, [
+        node('h2', { id: 'filtered-work-items-title', text: 'No Work Items match the current filters.' }),
+        node('p', { text: 'Clear or change the filters to see more work.' }),
+        node('div', { className: 'empty-actions' }, [
+          node('button', { className: 'button secondary', type: 'button', text: 'Clear filters', on: { click: clearWorkItemFilters } })
+        ])
+      ]);
+    } else {
+      resultContent = recordList(items, item => {
         const checkbox = node('input', {
           type: 'checkbox',
           checked: state.selectedWorkItemIds.has(item.id),
@@ -561,15 +649,17 @@
           on: { change: event => {
             if (event.target.checked) state.selectedWorkItemIds.add(item.id);
             else state.selectedWorkItemIds.delete(item.id);
+            refreshBulkAvailability();
           } }
         });
         return [
           node('div', { className: 'row-head' }, [node('span', {}, [checkbox, ' ', node('strong', { text: item.summary })]), node('span', {}, [badge(item.initiative?.name || 'Unassigned'), ' ', badge(item.workstream?.name || 'No Workstream'), ' ', badge(item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} · ${item.jiraEpic.mappingStatus}` : 'No Jira Epic')])]),
           node('p', { className: 'meta', text: `${item.itemType} · ${item.canonicalStatus} · ${item.assignee || 'No assignee captured'} · Workstream: ${item.workstream?.name || 'No Workstream'} · Jira Epic: ${item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} — ${item.jiraEpic.jiraEpicName} (${item.jiraEpic.mappingStatus})` : 'No Jira Epic'} · Work Item Jira key: ${item.workItemJiraKey || 'None'}` }),
-          node('p', { className: 'meta', text: `Current-state provenance: ${item.currentStateProvenance}` })
+          node('p', { className: 'meta', text: `How this status was confirmed: ${item.currentStateProvenance}` })
         ];
-      }, 'No Work Items match this Initiative filter.')
-    );
+      }, 'No Work Items are available.');
+    }
+    elements.view.replaceChildren(filterGroup, bulkGroup, resultContent);
   }
 
   function renderFollowUp() {
@@ -596,7 +686,7 @@
     const form = node('form', { className: 'panel', attrs: { novalidate: 'novalidate' } });
     const title = node('input', { name: 'title', attrs: { maxlength: '500', required: 'required' } });
     const date = node('input', { name: 'date', type: 'date', value: new Date().toISOString().slice(0, 10), attrs: { required: 'required' } });
-    const provenance = node('input', { name: 'provenance', value: 'Explicit local target UI capture', attrs: { maxlength: '4000', required: 'required' } });
+    const provenance = node('input', { name: 'provenance', value: 'Added directly in Priorena', attrs: { maxlength: '4000', required: 'required' } });
     const content = node('textarea', { name: 'content', attrs: { maxlength: '524288', required: 'required' } });
     form.append(
       node('h2', { text: 'Capture a Workspace-owned Source' }),
@@ -604,7 +694,7 @@
       node('div', { className: 'field-group' }, [
         node('label', { className: 'field' }, [node('span', { text: 'Source title' }), title]),
         node('label', { className: 'field' }, [node('span', { text: 'Source date' }), date]),
-        node('label', { className: 'field' }, [node('span', { text: 'Provenance' }), provenance])
+        node('label', { className: 'field' }, [node('span', { text: 'How this Source was added' }), provenance])
       ]),
       node('label', { className: 'field' }, [node('span', { text: 'Source content' }), content]),
       node('button', { className: 'button primary', type: 'submit', text: 'Add Source' })
@@ -651,7 +741,7 @@
       recordList(state.workflow?.sources || [], source => [
         node('div', { className: 'row-head' }, [node('strong', { text: source.title }), badge(source.processingState)]),
         node('p', { className: 'meta', text: `${source.type} · ${source.date}` }),
-        node('p', { text: source.provenance })
+        node('p', { text: `How this Source was added: ${source.provenance}` })
       ], 'No Sources have been added to this Workspace.')
     );
   }
@@ -785,7 +875,7 @@
       return { workspaceId: workspace.id, initiatives: result.body.initiatives || [], revision: result.revision };
     }));
     if (generation !== state.generation) return false;
-    if (initiativeResults.some(result => result.revision !== listed.revision)) throw new Error('Target data changed while Briefings were loading. Refresh and try again.');
+    if (initiativeResults.some(result => result.revision !== listed.revision)) throw new Error('Workspace data changed while Briefings were loading. Refresh and try again.');
     state.briefings.definitions = listed.body.briefings;
     state.briefings.revision = listed.revision;
     state.briefings.initiativesByWorkspace = new Map(initiativeResults.map(result => [result.workspaceId, result.initiatives]));
@@ -801,7 +891,7 @@
       option('delivery-status', 'Delivery Status', existing?.briefingType === 'delivery-status'),
       option('general', 'General', existing?.briefingType === 'general')
     ]);
-    const guidance = node('textarea', { value: existing?.draftingGuidance || '', attrs: { maxlength: '4000', rows: '4' }, placeholder: 'Optional deterministic drafting guidance' });
+    const guidance = node('textarea', { value: existing?.draftingGuidance || '', attrs: { maxlength: '4000', rows: '4' }, placeholder: 'Optional drafting guidance' });
     const selectedWorkspaces = new Set(existing?.workspaces.map(workspace => workspace.id) || [state.context.activeWorkspaceId]);
     const selectedInitiatives = new Set(existing?.initiatives.map(initiative => initiative.id) || []);
     const workspaceControls = node('div', { className: 'selection-grid' }, (state.context.workspaces || []).map(workspace => {
@@ -810,7 +900,7 @@
       return node('fieldset', { className: 'choice-group' }, [
         node('legend', {}, [node('label', { className: 'choice' }, [workspaceControl, node('strong', { text: workspace.name })])]),
         node('p', { className: 'meta', text: 'No Initiative selected means Entire workspace.' }),
-        ...initiatives.filter(initiative => !initiative.archived).map(initiative => node('label', { className: 'choice' }, [
+        ...workflowModule.initiativeChoices(initiatives, 'briefing').map(initiative => node('label', { className: 'choice' }, [
           node('input', { type: 'checkbox', name: 'briefing-initiative', value: initiative.id, checked: selectedInitiatives.has(initiative.id), attrs: { 'data-workspace-id': workspace.id } }),
           node('span', { text: initiative.name })
         ]))
@@ -989,7 +1079,7 @@
       node('span', {}, [
         node('strong', { text: candidate.title }),
         node('span', { text: candidate.text }),
-        node('small', { text: `${candidate.kind} · ${candidate.section} · ${candidate.provenance.type}${candidate.truncated ? ' · bounded preview' : ''}` })
+        node('small', { text: `${candidate.kind} · ${candidate.section} · ${candidate.provenance.type}${candidate.truncated ? ' · shortened preview' : ''}` })
       ])
     ])));
     const manualRows = snapshot.manualInputs.map(input => {
@@ -1034,7 +1124,7 @@
             const result = await briefingApi.previewOutputs(state.context.activeOrganizationId, definition.id, version.id);
             if (!briefingOperationCurrent(token) || !previewArea.isConnected) return;
             previewArea.replaceChildren(outputCards(result.body.outputs));
-            setStatus('Deterministic outputs previewed. Draft lifecycle is unchanged.', 'success');
+            setStatus('Draft outputs previewed. Nothing has been finalized or sent.', 'success');
           } catch (error) { if (briefingOperationCurrent(token)) setStatus(error.message, 'error'); }
         } } }),
         node('button', { className: 'button secondary', type: 'button', text: 'Preview and finalize', on: { click: async () => {
@@ -1185,7 +1275,7 @@
       return { definition, versions: result.body.versions, revision: result.revision };
     }));
     if (generation !== state.generation || renderGeneration !== state.briefings.renderGeneration) return;
-    if (placements.some(placement => placement.revision !== state.briefings.revision)) throw new Error('Target data changed while Briefing Versions were loading. Refresh and try again.');
+    if (placements.some(placement => placement.revision !== state.briefings.revision)) throw new Error('Workspace data changed while Briefing Versions were loading. Refresh and try again.');
     const versions = placements.flatMap(placement => placement.versions.map(version => ({ definition: placement.definition, version })));
     if (placements[0]) state.briefings.revision = placements[0].revision;
     const list = recordList(versions, item => [
@@ -1233,7 +1323,7 @@
     })));
     elements.view.append(
       tabs,
-      node('p', { className: 'notice', text: 'Priorena creates deterministic outputs for explicit copy. It never sends Briefing content; communication state changes only after explicit confirmation.' })
+      node('p', { className: 'notice', text: 'Priorena creates drafts for you to review and copy. It never sends them automatically; communication state changes only after your confirmation.' })
     );
     if (state.briefings.tab === 'prepare') renderPrepareBriefings();
     else await renderVersionPlacement(state.briefings.tab === 'history', renderGeneration);
@@ -1273,7 +1363,7 @@
     } catch (error) {
       if (!workspaceOperationCurrent(token)) return;
       setStatus(error.code === 'PREVIEW_CONFLICT' || error.code === 'REVISION_CONFLICT'
-        ? 'The target data changed. Refresh and preview the rename again.'
+        ? 'The workspace changed. Refresh and preview the rename again.'
         : error.message, 'error');
     }
   }
@@ -1283,6 +1373,144 @@
     return node('div', { className: 'actions' }, [
       input,
       node('button', { className: 'button secondary', type: 'button', text: `Preview ${entityLabel} rename`, on: { click: () => controlledRename(route, entityLabel, currentName, input.value, onApplied) } })
+    ]);
+  }
+
+  async function createInitiativeFromSettings(controls) {
+    const token = workspaceOperationToken();
+    const name = controls.name.value.trim();
+    if (!name) {
+      setStatus('Initiative name is required.', 'error');
+      controls.name.focus();
+      return;
+    }
+    try {
+      await requestJson(`/api/v2/organizations/${encoded(token.organizationId)}/workspaces/${encoded(token.workspaceId)}/initiatives`, mutationOptions({
+        expectedRevision: state.workflow.revision,
+        actor: 'local-target-ui',
+        initiative: {
+          name,
+          description: controls.description.value.trim(),
+          owner: controls.owner.value.trim() || null
+        }
+      }));
+      if (!workspaceOperationCurrent(token)) return;
+      state.workflow = null;
+      await loadWorkflow();
+      if (!workspaceOperationCurrent(token)) return;
+      renderSettings();
+      setStatus(`Initiative “${name}” created and available in current selectors.`, 'success');
+    } catch (error) {
+      if (workspaceOperationCurrent(token)) setStatus(error.message, 'error');
+    }
+  }
+
+  function initiativeRelationshipCounts(initiativeId) {
+    return {
+      workstreams: (state.workflow?.workstreams || []).filter(item => item.initiativeId === initiativeId).length,
+      jiraEpicMappings: (state.workflow?.jiraEpicMappings || []).filter(item => item.initiativeId === initiativeId).length,
+      workItems: (state.workflow?.workItems || []).filter(item => item.initiativeId === initiativeId).length,
+      milestones: (state.workflow?.milestones || []).filter(item => item.initiativeId === initiativeId).length
+    };
+  }
+
+  function countLabel(count, singular, plural = `${singular}s`) {
+    return `${count} ${count === 1 ? singular : plural}`;
+  }
+
+  async function setInitiativeArchivedFromSettings(initiative, archived) {
+    const token = workspaceOperationToken();
+    const revision = state.workflow.revision;
+    const counts = initiativeRelationshipCounts(initiative.id);
+    const approved = await confirmAction(
+      archived ? 'Archive Initiative' : 'Restore Initiative',
+      archived ? [
+        node('p', { text: `Archive “${initiative.name}”?` }),
+        node('p', { className: 'notice', text: 'Archive is reversible. The stable ID and existing records are preserved; nothing is deleted.' }),
+        node('p', { text: 'Archived Initiatives are removed from ordinary new-assignment and parent choices until restored.' }),
+        node('p', { className: 'meta', text: `Current related records: ${countLabel(counts.workstreams, 'Workstream')} · ${countLabel(counts.jiraEpicMappings, 'Jira Epic mapping')} · ${countLabel(counts.workItems, 'Work Item')} · ${countLabel(counts.milestones, 'Milestone')}. Existing Briefing history is preserved.` })
+      ] : [
+        node('p', { text: `Restore “${initiative.name}”?` }),
+        node('p', { className: 'notice', text: `The same stable ID (${initiative.id}) will return to ordinary Initiative selectors.` })
+      ],
+      archived ? 'Archive Initiative' : 'Restore Initiative'
+    );
+    if (!approved || !workspaceOperationCurrent(token)) return;
+    try {
+      await requestJson(`/api/v2/organizations/${encoded(token.organizationId)}/workspaces/${encoded(token.workspaceId)}/initiatives/${encoded(initiative.id)}/archive`, mutationOptions({
+        expectedRevision: revision,
+        actor: 'local-target-ui',
+        archived
+      }));
+      if (!workspaceOperationCurrent(token)) return;
+      state.workflow = null;
+      await loadWorkflow();
+      if (!workspaceOperationCurrent(token)) return;
+      renderSettings();
+      setStatus(`Initiative ${archived ? 'archived' : 'restored'}. Stable ID and existing relationships were preserved.`, 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      setStatus(error.code === 'REVISION_CONFLICT'
+        ? 'The workspace changed. Review the Initiative and try again.'
+        : error.message, 'error');
+    }
+  }
+
+  function initiativeSettingsCard(initiatives, workspaceRoute, workspace) {
+    const settingsInitiatives = workflowModule.initiativeChoices(initiatives, 'settings');
+    const controls = {
+      name: node('input', { attrs: { maxlength: '200', required: 'required', 'aria-label': 'Initiative name' }, placeholder: 'Initiative name' }),
+      description: node('textarea', { attrs: { maxlength: '4000', rows: '3', 'aria-label': 'Initiative description' }, placeholder: 'Optional description' }),
+      owner: node('input', { attrs: { maxlength: '300', 'aria-label': 'Initiative owner' }, placeholder: 'Optional owner' })
+    };
+    const form = node('form', { className: 'initiative-create-form', attrs: { novalidate: 'novalidate', id: 'create-initiative' } }, [
+      node('h4', { text: 'Create Initiative' }),
+      node('p', { className: 'meta', text: `Parent Workspace: ${workspace.name}` }),
+      node('div', { className: 'field-group' }, [
+        node('label', { className: 'field' }, [node('span', { text: 'Initiative name' }), controls.name]),
+        node('label', { className: 'field' }, [node('span', { text: 'Optional owner' }), controls.owner])
+      ]),
+      node('label', { className: 'field' }, [node('span', { text: 'Optional description' }), controls.description]),
+      node('button', { className: 'button primary', type: 'submit', text: 'Create Initiative' })
+    ]);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      createInitiativeFromSettings(controls);
+    });
+    let records;
+    if (settingsInitiatives.length === 0) {
+      records = node('div', { className: 'empty empty-state' }, [
+        node('p', { text: 'No Initiatives exist in this Workspace yet.' }),
+        node('button', { className: 'button primary', type: 'button', text: 'Create Initiative', on: { click: () => controls.name.focus() } })
+      ]);
+    } else {
+      records = recordList(settingsInitiatives, initiative => {
+        const counts = initiativeRelationshipCounts(initiative.id);
+        return [
+          node('div', { className: 'row-head' }, [
+            node('strong', { text: initiative.name }),
+            badge(initiative.archived ? 'Archived' : 'Active', initiative.archived ? 'muted-badge' : '')
+          ]),
+          node('p', { className: 'meta', text: `Stable ID: ${initiative.id} · ${initiative.description || 'No description'} · Owner: ${initiative.owner || 'Not set'}` }),
+          node('p', { className: 'meta', text: `${countLabel(counts.workstreams, 'Workstream')} · ${countLabel(counts.jiraEpicMappings, 'Jira Epic mapping')} · ${countLabel(counts.workItems, 'Work Item')} · ${countLabel(counts.milestones, 'Milestone')}` }),
+          renameControl('Initiative', initiative.name, `${workspaceRoute}/initiatives/${encoded(initiative.id)}`, body => { initiative.name = body.initiative.name; }),
+          node('div', { className: 'actions status-actions' }, [
+            node('button', {
+              className: `button ${initiative.archived ? 'secondary' : 'danger'}`,
+              type: 'button',
+              text: initiative.archived ? 'Restore Initiative' : 'Archive Initiative',
+              on: { click: () => setInitiativeArchivedFromSettings(initiative, !initiative.archived) }
+            })
+          ])
+        ];
+      }, 'No Initiatives configured.');
+    }
+    return node('section', { className: 'card settings-card' }, [
+      node('h3', { text: 'Initiatives' }),
+      node('p', { className: 'meta', text: 'Create and manage Initiatives independently from optional Workstreams and Jira Epic mappings.' }),
+      form,
+      node('h4', { text: 'Existing Initiatives' }),
+      records
     ]);
   }
 
@@ -1310,7 +1538,8 @@
   }
 
   function workstreamSettingsCard(initiatives, workstreams) {
-    const initiativeSelect = node('select', {}, initiatives.filter(initiative => !initiative.archived).map(initiative => option(initiative.id, initiative.name)));
+    const activeInitiatives = workflowModule.initiativeChoices(initiatives, 'workstream-parent');
+    const initiativeSelect = node('select', {}, activeInitiatives.map(initiative => option(initiative.id, initiative.name)));
     const name = node('input', { attrs: { maxlength: '200', 'aria-label': 'New Workstream name' }, placeholder: 'Workstream name' });
     const description = node('input', { attrs: { maxlength: '4000', 'aria-label': 'New Workstream description' }, placeholder: 'Optional Workstream description' });
     const rows = recordList(workstreams, workstream => {
@@ -1324,16 +1553,16 @@
           if (current) current.name = body.workstream.name;
         })
       ];
-    }, 'No Workstreams configured. Jira Epic mappings remain a separate Initiative integration.');
-    return node('section', { className: 'card' }, [
-      node('h2', { text: 'Workstreams' }),
-      node('p', { className: 'meta', text: 'Workstreams are internal Initiative children. Creating or renaming one does not call Jira or change Jira Epic mappings.' }),
+    }, 'No Workstreams have been added. Workstreams are optional and belong to an Initiative.');
+    return node('section', { className: 'card settings-card' }, [
+      node('h3', { text: 'Workstreams' }),
+      node('p', { className: 'meta', text: 'Workstreams are optional Initiative children. Creating or renaming one does not call Jira or change Jira Epic mappings.' }),
       node('div', { className: 'field-group' }, [
         node('label', { className: 'field' }, [node('span', { text: 'Parent Initiative' }), initiativeSelect]),
         node('label', { className: 'field' }, [node('span', { text: 'Workstream name' }), name]),
         node('label', { className: 'field' }, [node('span', { text: 'Description' }), description])
       ]),
-      node('button', { className: 'button primary', type: 'button', text: 'Create Workstream', disabled: initiatives.length === 0, on: { click: () => createWorkstreamFromSettings(initiativeSelect.value, name.value, description.value) } }),
+      node('button', { className: 'button primary', type: 'button', text: 'Create Workstream', disabled: activeInitiatives.length === 0, on: { click: () => createWorkstreamFromSettings(initiativeSelect.value, name.value, description.value) } }),
       rows
     ]);
   }
@@ -1348,7 +1577,7 @@
       provenance: controls.provenance.value.trim()
     };
     if (!initiativeId || !mapping.jiraProjectKey || !mapping.jiraEpicKey || !mapping.jiraEpicName || !mapping.provenance) {
-      setStatus('Parent Initiative, Jira keys, Jira Epic name, and provenance are required.', 'error');
+      setStatus('Parent Initiative, Jira keys, Jira Epic name, and how the mapping was confirmed are required.', 'error');
       return;
     }
     try {
@@ -1379,7 +1608,7 @@
       verifiedAt: controls.status.value === 'verified' ? (mapping.verifiedAt || new Date().toISOString()) : null
     };
     if (!changes.jiraProjectKey || !changes.jiraEpicKey || !changes.jiraEpicName || !changes.provenance) {
-      setStatus('Jira keys, Jira Epic name, and provenance are required.', 'error');
+      setStatus('Jira keys, Jira Epic name, and how the mapping was confirmed are required.', 'error');
       return;
     }
     try {
@@ -1409,7 +1638,7 @@
         option('verified', 'Verified', mapping?.mappingStatus === 'verified'),
         option('inactive', 'Inactive', mapping?.mappingStatus === 'inactive')
       ]),
-      provenance: node('input', { value: mapping?.provenance || '', attrs: { maxlength: '2000', 'aria-label': 'Mapping provenance' }, placeholder: 'How this local mapping was reviewed' })
+      provenance: node('input', { value: mapping?.provenance || '', attrs: { maxlength: '2000', 'aria-label': 'How this mapping was confirmed' }, placeholder: 'How this local mapping was reviewed' })
     };
   }
 
@@ -1419,16 +1648,16 @@
       node('label', { className: 'field' }, [node('span', { text: 'Jira Epic key' }), controls.epicKey]),
       node('label', { className: 'field' }, [node('span', { text: 'Jira Epic name' }), controls.epicName]),
       node('label', { className: 'field' }, [node('span', { text: 'Mapping status' }), controls.status]),
-      node('label', { className: 'field' }, [node('span', { text: 'Provenance' }), controls.provenance])
+      node('label', { className: 'field' }, [node('span', { text: 'How this mapping was confirmed' }), controls.provenance])
     ]);
   }
 
   function jiraEpicSettingsCard(initiatives, mappings) {
-    const activeInitiatives = initiatives.filter(initiative => !initiative.archived);
+    const activeInitiatives = workflowModule.initiativeChoices(initiatives, 'jira-epic-parent');
     const initiativeSelect = node('select', {}, activeInitiatives.map(initiative => option(initiative.id, initiative.name)));
     const createControls = jiraMappingControls();
-    return node('section', { className: 'card' }, [
-      node('h2', { text: 'Jira Epic mappings' }),
+    return node('section', { className: 'card settings-card' }, [
+      node('h3', { text: 'Jira Epic mappings' }),
       node('p', { className: 'notice', text: 'This creates or updates a Priorena mapping only. It does not create or modify anything in Jira.' }),
       node('p', { className: 'meta', text: 'Jira Epic mappings are independent integration records. Metadata and status never rename an Initiative or Workstream.' }),
       node('label', { className: 'field' }, [node('span', { text: 'Parent Initiative' }), initiativeSelect]),
@@ -1447,7 +1676,18 @@
             ]);
           })()
         ])
-      ], 'No Jira Epic mappings configured.')
+      ], 'No Jira Epic mappings have been added. Mappings are optional local references and do not create anything in Jira.')
+    ]);
+  }
+
+  function settingsGroup(id, title, description, children) {
+    const headingId = `${id}-title`;
+    return node('section', { className: 'settings-group', attrs: { id, 'aria-labelledby': headingId } }, [
+      node('div', { className: 'settings-group-heading' }, [
+        node('h2', { id: headingId, text: title }),
+        node('p', { text: description })
+      ]),
+      node('div', { className: 'settings-card-grid' }, children)
     ]);
   }
 
@@ -1459,21 +1699,76 @@
     const workspace = selectedWorkspace();
     const organizationRoute = `/api/v2/organizations/${encoded(organization.id)}`;
     const workspaceRoute = `${organizationRoute}/workspaces/${encoded(workspace.id)}`;
-    elements.view.replaceChildren(node('div', { className: 'card-grid' }, [
-      node('section', { className: 'card' }, [node('h2', { text: 'User preferences' }), node('p', { text: 'Active Organization and Workspace preferences use stable IDs and are revalidated before use.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Organization' }), node('p', { text: organization?.name || 'Organization required' }), node('p', { className: 'meta', text: 'Only truly Organization-wide settings belong here.' }), renameControl('Organization', organization.name, organizationRoute, body => { organization.name = body.organization.name; })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Workspace' }), node('p', { text: workspace?.name || 'Workspace required' }), node('p', { className: 'meta', text: 'Sprint vocabulary, behavior thresholds, and drafting guidance remain Workspace-owned.' }), renameControl('Workspace', workspace.name, workspaceRoute, body => { workspace.name = body.workspace.name; })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Initiatives' }), node('p', { className: 'meta', text: 'Initiative names are managed independently from Workstreams and Jira Epic mappings.' }), recordList(initiatives, initiative => [
-        node('strong', { text: initiative.name }),
-        node('p', { className: 'meta', text: initiative.archived ? 'Archived Initiative' : 'Active Initiative' }),
-        renameControl('Initiative', initiative.name, `${workspaceRoute}/initiatives/${encoded(initiative.id)}`, body => { initiative.name = body.initiative.name; })
-      ], 'No Initiatives configured.')]),
-      workstreamSettingsCard(initiatives, workstreams),
-      jiraEpicSettingsCard(initiatives, jiraEpicMappings),
-      node('section', { className: 'card' }, [node('h2', { text: 'Behavior' }), node('p', { text: 'Deterministic status and milestone logic is system-defined unless a schema-supported Workspace threshold is explicitly edited.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'AI — Advanced' }), node('p', { text: 'Optional AI enhancement is disabled in the target UI. Deterministic Briefings remain fully available without it.' })]),
-      node('section', { className: 'card' }, [node('h2', { text: 'Data & Privacy' }), node('p', { text: 'Target data stays in the explicitly selected local schema-v5 file. There is no analytics, telemetry, automatic publishing, or cross-Organization view.' })])
-    ]));
+    const settingsNavigation = node('nav', { className: 'settings-navigation', attrs: { 'aria-label': 'Settings sections' } }, [
+      node('a', { text: 'Structure', attrs: { href: '#settings-structure' } }),
+      node('a', { text: 'Behavior and drafting', attrs: { href: '#settings-behavior-drafting' } }),
+      node('a', { text: 'Data and privacy', attrs: { href: '#settings-data-privacy' } })
+    ]);
+    const firstUseGuide = node('aside', { className: 'panel first-use-guide', attrs: { 'aria-labelledby': 'structure-guide-title' } }, [
+      node('h2', { id: 'structure-guide-title', text: 'Set up your delivery structure' }),
+      node('ol', {}, [
+        node('li', { text: 'Name your Organization and Workspace.' }),
+        node('li', { text: 'Create or rename Initiatives.' }),
+        node('li', { text: 'Add optional Workstreams.' }),
+        node('li', { text: 'Add local Jira Epic mappings when needed.' })
+      ]),
+      node('p', { className: 'notice', text: 'Workstreams and Jira Epic mappings are optional and independent. A Work Item may use either, both, or neither under an Initiative.' })
+    ]);
+    const structure = settingsGroup(
+      'settings-structure',
+      'Structure',
+      'Manage the Organization, Workspace, Initiatives, and optional delivery groupings used in this Workspace.',
+      [
+        node('section', { className: 'card settings-card' }, [
+          node('h3', { text: 'Current context' }),
+          node('p', { text: `${organization.name} · ${workspace.name}` }),
+          node('p', { className: 'meta', text: 'Priorena remembers this selection and checks that the Workspace still belongs to the Organization.' })
+        ]),
+        node('section', { className: 'card settings-card' }, [
+          node('h3', { text: 'Organization' }),
+          node('p', { text: organization?.name || 'Organization required' }),
+          node('p', { className: 'meta', text: 'Only Organization-wide settings belong here.' }),
+          renameControl('Organization', organization.name, organizationRoute, body => { organization.name = body.organization.name; })
+        ]),
+        node('section', { className: 'card settings-card' }, [
+          node('h3', { text: 'Workspace' }),
+          node('p', { text: workspace?.name || 'Workspace required' }),
+          node('p', { className: 'meta', text: 'Sprint terms, behavior thresholds, and drafting guidance stay with this Workspace.' }),
+          renameControl('Workspace', workspace.name, workspaceRoute, body => { workspace.name = body.workspace.name; })
+        ]),
+        initiativeSettingsCard(initiatives, workspaceRoute, workspace),
+        workstreamSettingsCard(initiatives, workstreams),
+        jiraEpicSettingsCard(initiatives, jiraEpicMappings)
+      ]
+    );
+    const behaviorAndDrafting = settingsGroup(
+      'settings-behavior-drafting',
+      'Behavior and drafting',
+      'Review Workspace behavior and optional drafting assistance.',
+      [
+        node('section', { className: 'card settings-card' }, [
+          node('h3', { text: 'Behavior' }),
+          node('p', { text: 'Status and milestone rules are consistent across this Workspace. Supported thresholds remain Workspace-specific.' })
+        ]),
+        node('section', { className: 'card settings-card' }, [
+          node('h3', { text: 'AI — Advanced' }),
+          node('p', { text: 'AI drafting is off. You can still prepare, review, and copy Briefings without it.' })
+        ])
+      ]
+    );
+    const dataAndPrivacy = settingsGroup(
+      'settings-data-privacy',
+      'Data and privacy',
+      'Review where Priorena data stays and what the application does not send.',
+      [
+        node('section', { className: 'card settings-card' }, [
+          node('h3', { text: 'Data & Privacy' }),
+          node('p', { text: 'Your Priorena data stays in the selected local data file. Priorena does not send analytics or telemetry.' }),
+          node('p', { className: 'meta', text: 'Priorena runs only on this computer, keeps Organizations separate, and never publishes or communicates automatically.' })
+        ])
+      ]
+    );
+    elements.view.replaceChildren(settingsNavigation, firstUseGuide, structure, behaviorAndDrafting, dataAndPrivacy);
   }
 
   async function renderActiveView() {
@@ -1499,7 +1794,7 @@
       if (generation === state.generation) setStatus(`${pageDefinitions[state.activeView][0]} loaded.`, 'success');
     } catch (error) {
       if (generation !== state.generation) return;
-      clearOperationalUi('The requested target page could not be loaded.');
+      clearOperationalUi('The requested page could not be loaded.');
       setStatus(error.message, 'error');
     }
   }
@@ -1595,7 +1890,7 @@
     if (state.initialized) return;
     state.initialized = true;
     elements.initialize.disabled = true;
-    elements.initialize.textContent = 'Initializing…';
+    elements.initialize.textContent = 'Opening…';
     try {
       const result = await requestJson('/api/v2/organizations');
       state.organizations = result.body.organizations || [];
@@ -1603,7 +1898,7 @@
       elements.shell.hidden = false;
       fillOrganizations();
       if (!state.organizations.length) {
-        clearOperationalUi('No Organizations exist in this target store.');
+        clearOperationalUi('No Organizations are available in this local data file.');
         setStatus('No Organization context is available.', 'error');
         return;
       }
@@ -1616,7 +1911,7 @@
     } catch (error) {
       state.initialized = false;
       elements.initialize.disabled = false;
-      elements.initialize.textContent = 'Retry initialization';
+      elements.initialize.textContent = 'Try opening again';
       const message = node('p', { className: 'risk', text: error.message });
       elements.start.querySelector('.start-card').append(message);
     }
@@ -1628,13 +1923,7 @@
   elements.navigation.addEventListener('click', event => {
     const button = event.target.closest('button[data-view]');
     if (!button) return;
-    state.activeView = button.dataset.view;
-    state.initiativeFilter = 'all';
-    state.workstreamFilter = 'all';
-    state.jiraEpicFilter = 'all';
-    state.itemTypeFilter = 'all';
-    state.selectedWorkItemIds.clear();
-    renderActiveView();
+    activateView(button.dataset.view);
   });
   elements.dialogCancel.addEventListener('click', () => { elements.dialog.returnValue = 'cancel'; });
   elements.dialogConfirm.addEventListener('click', () => { elements.dialog.returnValue = 'confirm'; });

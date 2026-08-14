@@ -60,7 +60,9 @@ test('isolated target entry exposes the canonical hierarchy and operational navi
   assert.match(markup, /<main[^>]+id="target-main"/);
   assert.match(markup, /aria-live="polite"/);
   assert.match(markup, /<dialog[^>]+aria-labelledby="dialog-title"/);
-  assert.match(markup, /No operational request runs before initialization/);
+  assert.match(markup, /Open workspace/);
+  assert.match(markup, /No workspace data is loaded until you open it/);
+  assert.doesNotMatch(markup, /schema-v5|LOCAL · TARGET/);
 });
 
 test('target client renders untrusted values as text and avoids blocking browser dialogs', async () => {
@@ -87,17 +89,113 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.match(client, /function workstreamOptionLabel\(workstream\)/);
   assert.match(client, /Stable ID: \$\{workstream\.id\}/);
   assert.match(client, /Create Workstream/);
-  assert.match(client, /Preview association changes/);
+  assert.match(client, /Preview changes/);
   assert.match(client, /All Jira Epics/);
   assert.match(client, /No Jira Epic/);
   assert.match(client, /function jiraEpicOptionLabel\(mapping\)/);
-  assert.match(client, /jiraEpicAssignment\.disabled = initiativeId === 'unassigned'/);
+  assert.match(client, /jiraEpicAssignment\.disabled = controls\.jiraEpicDisabled/);
   assert.match(client, /result\.kind === 'workItem'/);
   assert.match(client, /Work Item Jira key/);
   assert.match(client, /Preview \$\{entityLabel\} rename/);
   assert.match(client, /onApplied\(result\.body\);[\s\S]*state\.workflow = null;[\s\S]*await loadWorkflow\(\);[\s\S]*renderSettings\(\);/);
   assert.match(client, /Existing frozen Briefing snapshots are not rewritten/);
   assert.doesNotMatch(client, /sendBriefing|sendOutput|autoPublish/);
+});
+
+test('Settings exposes complete Initiative setup through the accepted revision-aware services', async () => {
+  const client = await source('public/target/app.js');
+  const create = functionSlice(client, 'createInitiativeFromSettings', 'initiativeRelationshipCounts');
+  const lifecycle = functionSlice(client, 'setInitiativeArchivedFromSettings', 'initiativeSettingsCard');
+  const settings = functionSlice(client, 'renderSettings', 'renderActiveView');
+
+  assert.match(create, /Initiative name is required/);
+  assert.match(create, /expectedRevision: state\.workflow\.revision/);
+  assert.match(create, /description: controls\.description\.value\.trim\(\)/);
+  assert.match(create, /owner: controls\.owner\.value\.trim\(\) \|\| null/);
+  assert.match(create, /state\.workflow = null;[\s\S]*await loadWorkflow\(\);[\s\S]*renderSettings\(\)/);
+  assert.match(lifecycle, /confirmAction\(/);
+  assert.match(lifecycle, /Archive is reversible/);
+  assert.match(lifecycle, /nothing is deleted/);
+  assert.match(lifecycle, /expectedRevision: revision/);
+  assert.match(lifecycle, /archived/);
+  assert.match(client, /Stable ID: \$\{initiative\.id\}/);
+  assert.match(client, /Restore Initiative/);
+  assert.match(client, /No Initiatives exist in this Workspace yet/);
+  assert.doesNotMatch(client, /deleteInitiative|method:\s*'DELETE'/);
+
+  for (const label of ['Structure', 'Behavior and drafting', 'Data and privacy', 'Organization', 'Workspace', 'Initiatives', 'Workstreams', 'Jira Epic mappings', 'Behavior', 'AI — Advanced', 'Data & Privacy']) {
+    assert.match(settings, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  for (const instruction of [
+    'Name your Organization and Workspace.',
+    'Create or rename Initiatives.',
+    'Add optional Workstreams.',
+    'Add local Jira Epic mappings when needed.'
+  ]) assert.match(settings, new RegExp(instruction.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(settings, /Workstreams and Jira Epic mappings are optional and independent/);
+  assert.match(settings, /aria-label': 'Settings sections'/);
+  for (const href of ['#settings-structure', '#settings-behavior-drafting', '#settings-data-privacy']) {
+    assert.match(settings, new RegExp(href));
+  }
+});
+
+test('Work Item filters, bulk assignment, selection state, and empty states are separate and deterministic', async () => {
+  const client = await source('public/target/app.js');
+  const work = functionSlice(client, 'renderWorkItems', 'renderFollowUp');
+  assert.match(work, /node\('fieldset', \{ className: 'control-group filters-group'/);
+  assert.match(work, /node\('legend', \{ text: 'Filters' \}\)/);
+  assert.match(work, /node\('fieldset', \{ className: 'control-group bulk-assignment-group'/);
+  assert.match(work, /node\('legend', \{ text: 'Bulk assignment' \}\)/);
+  assert.match(work, /workflowModule\.workItemControlState/);
+  assert.match(work, /selectedCount\.textContent = controls\.selectedCountLabel/);
+  assert.match(work, /assignment\.disabled = controls\.initiativeDisabled/);
+  assert.match(work, /workstreamAssignment\.disabled = controls\.workstreamDisabled/);
+  assert.match(work, /jiraEpicAssignment\.disabled = controls\.jiraEpicDisabled/);
+  assert.match(work, /previewButton\.disabled = controls\.previewDisabled/);
+  assert.match(work, /Select one or more Work Items to change their associations/);
+  assert.match(work, /state\.selectedWorkItemIds\.(?:add|delete)/);
+  assert.match(work, /No Work Items have been added to this Workspace yet/);
+  assert.match(work, /Add and review source material to begin building the delivery view/);
+  assert.match(work, /No Work Items match the current filters/);
+  assert.match(work, /Clear or change the filters to see more work/);
+  assert.match(work, /activateView\('add-source'\)/);
+  assert.match(work, /clearWorkItemFilters/);
+  assert.match(work, /workItemEmptyState\(totalWorkItems, items\.length\)/);
+  assert.doesNotMatch(work, /Import Feed/);
+});
+
+test('ordinary interface copy is plain while local-only and no-send safeguards remain visible', async () => {
+  const markup = await source('public/target/index.html');
+  const client = await source('public/target/app.js');
+  const visible = `${markup}\n${client}`;
+  assert.match(client, /How this mapping was confirmed/);
+  assert.match(client, /Priorena creates drafts for you to review and copy/);
+  assert.match(client, /It never sends them automatically/);
+  assert.match(client, /Your Priorena data stays in the selected local data file/);
+  assert.match(client, /does not send analytics or telemetry/);
+  assert.match(client, /does not create or modify anything in Jira/);
+  assert.doesNotMatch(client, /Target-safe Organization, Workspace, behavior, and privacy settings/);
+  assert.doesNotMatch(client, /Target data stays in the explicitly selected local schema-v5 file/);
+  for (const phrase of [
+    'The target data changed',
+    'Target data changed while Briefings were loading',
+    'The requested target page could not be loaded',
+    'No Organizations exist in this target store'
+  ]) assert.doesNotMatch(client, new RegExp(phrase));
+  assert.match(markup, /<title>Priorena workspace<\/title>/);
+  assert.match(markup, /aria-label="Priorena navigation"/);
+  assert.match(markup, /aria-label="Priorena application"/);
+  assert.doesNotMatch(visible, /Import Feed/);
+});
+
+test('release note records the accepted External Feed follow-up without adding unfinished UI', async () => {
+  const note = await source('docs/release/STRUCTURE_SETUP_AND_EMPTY_STATE_UX.md');
+  assert.match(note, /External Feed Import and Review UI/);
+  assert.match(note, /backend already supports strict import parsing/);
+  for (const capability of ['JSON and CSV upload', 'paste option', 'validation before persistence', 'duplicate review', 'Initiative mapping', 'Workstream mapping', 'Jira Epic mapping review', 'per-record and bulk approval', 'explicit apply', 'no automatic Jira write or communication']) {
+    assert.match(note, new RegExp(capability.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  }
+  assert.match(note, /not implemented by this release/);
 });
 
 test('target DOM integration rejects late context renders and keeps page context truthful', async () => {
@@ -172,6 +270,11 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(css, /overflow-wrap: anywhere/);
   assert.match(css, /max-height: calc\(100vh - 2rem\)/);
+  assert.match(css, /\.control-group/);
+  assert.match(css, /\.settings-navigation/);
+  assert.match(css, /\.settings-navigation a:hover, \.settings-navigation a:focus-visible/);
+  assert.match(css, /\.settings-card-grid/);
+  assert.match(css, /\.settings-card \.actions input \{[^}]*min-width: 0/);
   assert.doesNotMatch(css, /min-width:\s*[7-9]\d\dpx/);
 });
 
