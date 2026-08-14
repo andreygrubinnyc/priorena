@@ -9,7 +9,11 @@ const {
   commentCaptureLabel,
   createTargetWorkflowApiClient,
   createTargetWorkflowController,
-  filterWorkItems
+  defaultWorkItemUiState,
+  filterWorkItems,
+  initiativeChoices,
+  workItemControlState,
+  workItemEmptyState
 } = require('../public/target-workflow-state');
 
 const REVISION_A = 'a'.repeat(64);
@@ -84,6 +88,100 @@ test('workflow filtering uses stable Initiative IDs and preserves Unassigned sem
   );
   assert.equal(commentCaptureLabel(null), 'No comment date captured');
   assert.equal(commentCaptureLabel('2026-08-11T12:00:00.000Z'), '2026-08-11T12:00:00.000Z');
+});
+
+test('Initiative create, archive, and restore propagate one stable ID across every selector surface', () => {
+  const selectorSurfaces = [
+    'work-item-filter',
+    'bulk-assignment',
+    'workstream-parent',
+    'jira-epic-parent',
+    'briefing'
+  ];
+  let initiatives = [
+    { id: 'initiative-existing', name: 'Existing Initiative', archived: false }
+  ];
+
+  const created = { id: 'initiative-server-generated', name: 'New Initiative', archived: false };
+  initiatives = [...initiatives, created];
+  assert.deepEqual(initiativeChoices(initiatives, 'settings').map(item => item.id), [
+    'initiative-existing',
+    'initiative-server-generated'
+  ]);
+  selectorSurfaces.forEach(surface => {
+    assert.ok(initiativeChoices(initiatives, surface).some(item => item.id === created.id), surface);
+  });
+
+  initiatives = initiatives.map(item => item.id === created.id ? { ...item, archived: true } : item);
+  assert.equal(initiativeChoices(initiatives, 'settings').find(item => item.id === created.id).archived, true);
+  selectorSurfaces.forEach(surface => {
+    assert.equal(initiativeChoices(initiatives, surface).some(item => item.id === created.id), false, surface);
+  });
+
+  initiatives = initiatives.map(item => item.id === created.id ? { ...item, archived: false } : item);
+  selectorSurfaces.forEach(surface => {
+    assert.ok(initiativeChoices(initiatives, surface).some(item => item.id === created.id), surface);
+  });
+  assert.equal(initiatives.find(item => item.name === 'New Initiative').id, created.id);
+});
+
+test('Work Item controls track zero, one, and multiple selections with exact valid enablement', () => {
+  assert.deepEqual(workItemControlState([], 'unassigned'), {
+    count: 0,
+    selectedCountLabel: '0 Work Items selected',
+    initiativeDisabled: true,
+    workstreamDisabled: true,
+    jiraEpicDisabled: true,
+    previewDisabled: true,
+    helperVisible: true
+  });
+  assert.deepEqual(workItemControlState(['work-item-one'], 'unassigned'), {
+    count: 1,
+    selectedCountLabel: '1 Work Item selected',
+    initiativeDisabled: false,
+    workstreamDisabled: true,
+    jiraEpicDisabled: true,
+    previewDisabled: false,
+    helperVisible: false
+  });
+  assert.deepEqual(workItemControlState(['work-item-one', 'work-item-two'], 'initiative-one'), {
+    count: 2,
+    selectedCountLabel: '2 Work Items selected',
+    initiativeDisabled: false,
+    workstreamDisabled: false,
+    jiraEpicDisabled: false,
+    previewDisabled: false,
+    helperVisible: false
+  });
+  assert.throws(() => workItemControlState(['work-item-one', 'work-item-one']), /unique selection/);
+});
+
+test('filter clearing restores records and Workspace changes discard stale Work Item selection', async () => {
+  const data = payload('org-client', 'workspace-client');
+  const filtered = filterWorkItems(data.workItems, {
+    initiativeId: 'all', workstreamId: 'all', jiraEpicMappingId: 'all', itemType: 'Bug', search: ''
+  });
+  assert.equal(workItemEmptyState(data.workItems.length, filtered.length), 'filtered-no-results');
+  const reset = defaultWorkItemUiState();
+  const restored = filterWorkItems(data.workItems, { ...reset.filters, search: '' });
+  assert.equal(workItemEmptyState(data.workItems.length, restored.length), 'results');
+  assert.equal(restored.length, 2);
+  assert.equal(workItemEmptyState(0, 0), 'no-data');
+
+  const controller = createTargetWorkflowController({
+    async loadWorkspace(organizationId, workspaceId) { return payload(organizationId, workspaceId); },
+    async previewBulkWorkItems() { throw new Error('not used'); },
+    async applyBulkWorkItems() { throw new Error('not used'); }
+  });
+  controller.setContext('org-client', 'workspace-client');
+  await controller.load();
+  controller.selectWorkItems(['workspace-client-assigned', 'workspace-client-unassigned']);
+  assert.equal(controller.snapshot().selectedWorkItemIds.length, 2);
+  assert.equal(controller.setInitiativeFilter('unassigned').selectedWorkItemIds.length, 0);
+  controller.selectWorkItems(['workspace-client-unassigned']);
+  const changed = controller.setContext('org-next', 'workspace-next');
+  assert.deepEqual(changed.selectedWorkItemIds, []);
+  assert.deepEqual(changed.filters, { ...defaultWorkItemUiState().filters, search: '' });
 });
 
 test('workflow API client uses only stable parent-scoped routes and explicit JSON mutations', async () => {

@@ -4,6 +4,15 @@ const WORKFLOW_COLLECTIONS = Object.freeze([
   'initiatives', 'workstreams', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence', 'proposedChanges'
 ]);
 
+const INITIATIVE_SELECTOR_SURFACES = Object.freeze([
+  'settings',
+  'work-item-filter',
+  'bulk-assignment',
+  'workstream-parent',
+  'jira-epic-parent',
+  'briefing'
+]);
+
 function stableId(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 160 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
     throw new TypeError('Target workflow state requires stable opaque IDs');
@@ -197,6 +206,54 @@ function filterWorkItems(workItems, filters) {
       .some(value => String(value || '').toLocaleLowerCase('en-US').includes(search));
     return initiativeMatch && workstreamMatch && jiraEpicMatch && typeMatch && searchMatch;
   });
+}
+
+function initiativeChoices(initiatives, surface) {
+  if (!Array.isArray(initiatives) || !INITIATIVE_SELECTOR_SURFACES.includes(surface)) {
+    throw new TypeError('Initiative choices require a supported selector surface');
+  }
+  initiatives.forEach(initiative => stableId(initiative?.id));
+  return initiatives.filter(initiative => surface === 'settings' || !initiative.archived);
+}
+
+function defaultWorkItemUiState() {
+  return {
+    filters: {
+      initiativeId: 'all',
+      workstreamId: 'all',
+      jiraEpicMappingId: 'all',
+      itemType: 'all'
+    },
+    selectedWorkItemIds: []
+  };
+}
+
+function workItemControlState(selectedWorkItemIds, initiativeId = 'unassigned') {
+  if (!Array.isArray(selectedWorkItemIds) || new Set(selectedWorkItemIds).size !== selectedWorkItemIds.length) {
+    throw new TypeError('Work Item control state requires a unique selection');
+  }
+  selectedWorkItemIds.forEach(stableId);
+  if (initiativeId !== 'unassigned') stableId(initiativeId);
+  const count = selectedWorkItemIds.length;
+  const hasSelection = count > 0;
+  return Object.freeze({
+    count,
+    selectedCountLabel: `${count} Work Item${count === 1 ? '' : 's'} selected`,
+    initiativeDisabled: !hasSelection,
+    workstreamDisabled: !hasSelection || initiativeId === 'unassigned',
+    jiraEpicDisabled: !hasSelection || initiativeId === 'unassigned',
+    previewDisabled: !hasSelection,
+    helperVisible: !hasSelection
+  });
+}
+
+function workItemEmptyState(totalCount, filteredCount) {
+  if (!Number.isInteger(totalCount) || !Number.isInteger(filteredCount) || totalCount < 0 || filteredCount < 0 || filteredCount > totalCount) {
+    throw new TypeError('Work Item empty-state counts are invalid');
+  }
+  if (totalCount === 0) return 'no-data';
+  if (filteredCount === 0) return 'filtered-no-results';
+  return 'results';
 }
 
 function commentCaptureLabel(timestamp) {
@@ -396,14 +453,19 @@ function createTargetWorkflowController(api) {
 }
 
 const targetWorkflowApi = {
+  INITIATIVE_SELECTOR_SURFACES,
   WORKFLOW_COLLECTIONS,
   clearWorkflowData,
   commentCaptureLabel,
   createTargetWorkflowApiClient,
   createTargetWorkflowController,
   createTargetWorkflowState,
+  defaultWorkItemUiState,
   emptyWorkflowData,
   filterWorkItems,
+  initiativeChoices,
+  workItemControlState,
+  workItemEmptyState,
   validateWorkspacePayload
 };
 

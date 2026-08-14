@@ -323,7 +323,7 @@ test('target UI exposes independent stable-ID Jira Epic controls without native 
   assert.match(appSource, /mappingStatus: controls\.status\.value/);
   assert.match(appSource, /Nothing was written to Jira/);
   assert.match(appSource, /filter\(mapping => mapping\.initiativeId === initiativeId\)/);
-  assert.match(appSource, /jiraEpicAssignment\.disabled = initiativeId === 'unassigned'/);
+  assert.match(appSource, /jiraEpicAssignment\.disabled = controls\.jiraEpicDisabled/);
   assert.match(appSource, /result\.kind === 'workItem'/);
   assert.match(appSource, /Work Item Jira key: \$\{result\.workItemJiraKey/);
   assert.match(appSource, /Jira Epic: \$\{result\.jiraEpicKey/);

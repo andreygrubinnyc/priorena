@@ -154,6 +154,88 @@ test('Initiative lifecycle and optional Jira mappings are parent-scoped, indepen
   assert.deepEqual(foreign.json(), unknown.json());
 });
 
+test('Initiative archive and restore preserve stable IDs, children, Briefing references, and parent isolation', async t => {
+  const { app, targetDataFile } = await createTargetApiHarness(t);
+  const initiativeId = 'initiative-alpha-multiple-mappings';
+  const before = await persisted(targetDataFile);
+  const relatedBefore = {
+    workstreams: before.document.workstreams.filter(item => item.initiativeId === initiativeId),
+    jiraEpicMappings: before.document.jiraEpicMappings.filter(item => item.initiativeId === initiativeId),
+    workItems: before.document.workItems.filter(item => item.initiativeId === initiativeId),
+    milestones: before.document.milestones.filter(item => item.initiativeId === initiativeId),
+    briefings: before.document.briefings.filter(item => item.initiativeIds.includes(initiativeId)),
+    briefingVersions: before.document.briefingVersions.filter(item => item.initiativeIds.includes(initiativeId))
+  };
+
+  const missingName = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives`, {
+    expectedRevision: before.revision,
+    actor: ACTOR,
+    initiative: { description: 'A name is required.' }
+  });
+  assert.equal(missingName.status, 400);
+  assert.equal((await persisted(targetDataFile)).revision, before.revision);
+
+  let response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/archive`, {
+    expectedRevision: before.revision,
+    actor: ACTOR,
+    archived: true
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.json().initiative.id, initiativeId);
+  assert.equal(response.json().initiative.archived, true);
+  const archivedRevision = revisionOf(response);
+
+  const archivedList = await requestApp(app, { url: `${workspaceBase(ALPHA)}/initiatives` });
+  assert.equal(archivedList.status, 200);
+  assert.equal(archivedList.json().initiatives.find(item => item.id === initiativeId).archived, true);
+  const archived = await persisted(targetDataFile);
+  assert.deepEqual({
+    workstreams: archived.document.workstreams.filter(item => item.initiativeId === initiativeId),
+    jiraEpicMappings: archived.document.jiraEpicMappings.filter(item => item.initiativeId === initiativeId),
+    workItems: archived.document.workItems.filter(item => item.initiativeId === initiativeId),
+    milestones: archived.document.milestones.filter(item => item.initiativeId === initiativeId),
+    briefings: archived.document.briefings.filter(item => item.initiativeIds.includes(initiativeId)),
+    briefingVersions: archived.document.briefingVersions.filter(item => item.initiativeIds.includes(initiativeId))
+  }, relatedBefore);
+
+  const staleRestore = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/archive`, {
+    expectedRevision: before.revision,
+    actor: ACTOR,
+    archived: false
+  });
+  assert.equal(staleRestore.status, 409);
+
+  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/archive`, {
+    expectedRevision: archivedRevision,
+    actor: ACTOR,
+    archived: false
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.json().initiative.id, initiativeId);
+  assert.equal(response.json().initiative.archived, false);
+  const restored = await persisted(targetDataFile);
+  assert.deepEqual(
+    restored.document.auditEvents.slice(-2).map(event => event.action),
+    ['initiative-archived', 'initiative-restored']
+  );
+
+  const wrongParent = await jsonRequest(app, 'POST', `${workspaceBase(BETA)}/initiatives/${initiativeId}/archive`, {
+    expectedRevision: restored.revision,
+    actor: ACTOR,
+    archived: true
+  });
+  const unknown = await jsonRequest(app, 'POST', `${workspaceBase(BETA)}/initiatives/initiative-unknown/archive`, {
+    expectedRevision: restored.revision,
+    actor: ACTOR,
+    archived: true
+  });
+  assert.equal(wrongParent.status, 404);
+  assert.deepEqual(wrongParent.json(), unknown.json());
+
+  const physicalDelete = await requestApp(app, { method: 'DELETE', url: `${workspaceBase(ALPHA)}/initiatives/${initiativeId}` });
+  assert.equal(physicalDelete.status, 405);
+});
+
 test('Jira mapping canonical identity is unique per Workspace and reusable across Organizations', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   let revision = (await persisted(targetDataFile)).revision;
