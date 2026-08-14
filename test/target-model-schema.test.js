@@ -11,18 +11,18 @@ const {
   TargetResourceLimitError,
   TargetSchemaVersionError,
   TargetValidationError,
-  UNASSIGNED_SCOPE,
+  UNASSIGNED_INITIATIVE,
   createStableId,
   validateRootCollectionBounds,
   validateTargetData
 } = require('../target-model/schema');
 const {
-  createFeatureIndependenceFixture,
+  createWorkstreamIndependenceFixture,
   createInvalidCrossOrganizationFixture,
   createInvalidCrossWorkspaceFixture,
   createMultiOrganizationFixture,
   followUp
-} = require('../test-support/target-v3-fixtures');
+} = require('../test-support/target-v5-fixtures');
 
 function clonedFixture() {
   return createMultiOrganizationFixture();
@@ -61,7 +61,7 @@ function documentWithAggregateRootCount(count) {
   return document;
 }
 
-test('the deterministic clean seed is a valid complete schema-v4 document', () => {
+test('the deterministic clean seed is a valid complete schema-v5 document', () => {
   const first = createCleanSeed();
   const second = createCleanSeed();
   assert.equal(first.schemaVersion, TARGET_SCHEMA_VERSION);
@@ -86,16 +86,16 @@ test('the clean seed contains exactly the approved fictional hierarchy', () => {
     {
       id: 'workspace-1',
       organizationId: 'org-1',
-      name: 'PM Workspace 1'
+      name: 'Workspace 1'
     }
   ]);
-  assert.deepEqual(seed.scopes.map(({ id, name }) => ({ id, name })), [
-    { id: 'scope-1', name: 'Scope 1' },
-    { id: 'scope-2', name: 'Scope 2' },
-    { id: 'scope-3', name: 'Scope 3' },
-    { id: 'scope-4', name: 'Scope 4' }
+  assert.deepEqual(seed.initiatives.map(({ id, name }) => ({ id, name })), [
+    { id: 'initiative-1', name: 'Initiative 1' },
+    { id: 'initiative-2', name: 'Initiative 2' },
+    { id: 'initiative-3', name: 'Initiative 3' },
+    { id: 'initiative-4', name: 'Initiative 4' }
   ]);
-  assert.ok(seed.scopes.every(scope => scope.organizationId === 'org-1' && scope.workspaceId === 'workspace-1'));
+  assert.ok(seed.initiatives.every(initiative => initiative.organizationId === 'org-1' && initiative.workspaceId === 'workspace-1'));
   assert.deepEqual(seed.userPreferences, {
     activeOrganizationId: 'org-1',
     activeWorkspaceIdsByOrganization: { 'org-1': 'workspace-1' }
@@ -105,7 +105,7 @@ test('the clean seed contains exactly the approved fictional hierarchy', () => {
 test('the clean seed contains none of the prohibited data collections or catch-all records', () => {
   const seed = createCleanSeed();
   [
-    'features', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence',
+    'workstreams', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence',
     'proposedChanges', 'briefings', 'briefingVersions', 'auditEvents'
   ].forEach(collection => assert.deepEqual(seed[collection], []));
   assert.equal('projects' in seed, false);
@@ -114,6 +114,7 @@ test('the clean seed contains none of the prohibited data collections or catch-a
   assert.equal('timeline' in seed, false);
   assert.equal('transcripts' in seed, false);
   assert.doesNotMatch(JSON.stringify(seed), /Miscellaneous \/ No Epic|No Epic|catch-all/i);
+  assert.doesNotMatch(JSON.stringify(seed), /PM Workspace|Scope|Feature|PJM|scope-|feature-/i);
 });
 
 test('schemaVersion is mandatory', () => {
@@ -124,7 +125,7 @@ test('schemaVersion is mandatory', () => {
 
 test('unsupported past schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 3;
+  document.schemaVersion = 4;
   assert.throws(() => validateTargetData(document), error => {
     assert.equal(error instanceof TargetSchemaVersionError, true);
     assert.equal(error.code, 'UNSUPPORTED_TARGET_SCHEMA_VERSION');
@@ -134,9 +135,9 @@ test('unsupported past schema versions fail closed', () => {
 
 test('unknown future schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 5;
+  document.schemaVersion = 6;
   assert.throws(() => validateTargetData(document), TargetSchemaVersionError);
-  assert.equal(document.schemaVersion, 5);
+  assert.equal(document.schemaVersion, 6);
 });
 
 test('every root collection is mandatory and must be an array', () => {
@@ -157,6 +158,18 @@ test('unsupported root and entity fields are rejected instead of normalized', ()
   const legacyRelationship = clonedFixture();
   legacyRelationship.workItems[0].deliveryProjectId = 'legacy-project';
   assertInvalid(legacyRelationship, /unsupported field "deliveryProjectId"/);
+
+  for (const legacyCollection of ['scopes', 'features']) {
+    const document = createCleanSeed();
+    document[legacyCollection] = [];
+    assertInvalid(document, new RegExp(`unsupported field "${legacyCollection}"`));
+  }
+
+  for (const legacyField of ['scopeId', 'featureId']) {
+    const document = clonedFixture();
+    document.workItems[0][legacyField] = null;
+    assertInvalid(document, new RegExp(`unsupported field "${legacyField}"`));
+  }
 });
 
 test('malformed entity records and missing required parent IDs are rejected', () => {
@@ -165,24 +178,24 @@ test('malformed entity records and missing required parent IDs are rejected', ()
   assertInvalid(malformed, /archived.*boolean/);
 
   const incomplete = clonedFixture();
-  delete incomplete.scopes[0].organizationId;
+  delete incomplete.initiatives[0].organizationId;
   assertInvalid(incomplete, /organizationId.*required/);
 });
 
 test('generated stable IDs are opaque and display-name changes preserve identity', () => {
-  const stableId = createStableId('scope', { uuid: '123e4567-e89b-12d3-a456-426614174000' });
-  assert.equal(stableId, 'scope-123e4567-e89b-12d3-a456-426614174000');
+  const stableId = createStableId('initiative', { uuid: '123e4567-e89b-12d3-a456-426614174000' });
+  assert.equal(stableId, 'initiative-123e4567-e89b-12d3-a456-426614174000');
 
   const document = clonedFixture();
   const workspace = document.workspaces[0];
-  const scope = document.scopes[0];
+  const initiative = document.initiatives[0];
   const workItem = document.workItems[0];
-  const ids = [workspace.id, scope.id, workItem.id];
+  const ids = [workspace.id, initiative.id, workItem.id];
   workspace.name = 'Renamed Fictional Workspace';
-  scope.name = 'Renamed Fictional Scope';
+  initiative.name = 'Renamed Fictional Initiative';
   workItem.summary = 'Renamed fictional Work Item';
   validateTargetData(document);
-  assert.deepEqual([workspace.id, scope.id, workItem.id], ids);
+  assert.deepEqual([workspace.id, initiative.id, workItem.id], ids);
 });
 
 test('duplicate Workspace names across Organizations are valid and IDs remain the lookup boundary', () => {
@@ -206,58 +219,60 @@ test('Workspace parent mismatches invalidate every dependent parent chain', () =
   assertInvalid(document, /matching Organization|matching Organization and Workspace/);
 });
 
-test('duplicate Scope names are valid in different Workspaces and Organizations', () => {
+test('duplicate Initiative names are valid in different Workspaces and Organizations', () => {
   const document = clonedFixture();
-  const sharedScopes = document.scopes.filter(item => item.name === 'Shared Scope');
-  assert.equal(sharedScopes.length, 3);
-  assert.equal(new Set(sharedScopes.map(item => item.workspaceId)).size, 3);
-  assert.equal(new Set(sharedScopes.map(item => item.organizationId)).size, 2);
+  const sharedInitiatives = document.initiatives.filter(item => item.name === 'Shared Initiative');
+  assert.equal(sharedInitiatives.length, 3);
+  assert.equal(new Set(sharedInitiatives.map(item => item.workspaceId)).size, 3);
+  assert.equal(new Set(sharedInitiatives.map(item => item.organizationId)).size, 2);
   validateTargetData(document);
 });
 
-test('Features are first-class Scope children and duplicate display names remain ID-scoped', () => {
+test('Workstreams are first-class Initiative children and duplicate display names remain ID-scoped', () => {
   const document = clonedFixture();
-  assert.equal(document.features.length, 4);
-  assert.equal(new Set(document.features.map(item => item.name)).size, 1);
-  assert.equal(new Set(document.features.map(item => item.id)).size, 4);
+  assert.equal(document.workstreams.length, 4);
+  assert.equal(new Set(document.workstreams.map(item => item.name)).size, 1);
+  assert.equal(new Set(document.workstreams.map(item => item.id)).size, 4);
   validateTargetData(document);
 
-  const wrongScope = clonedFixture();
-  wrongScope.features.find(item => item.id === 'feature-alpha-mapped').scopeId = 'scope-beta-shared';
-  assertInvalid(wrongScope, /Scope with matching Organization and Workspace/);
+  const wrongInitiative = clonedFixture();
+  wrongInitiative.workstreams.find(item => item.id === 'workstream-alpha-mapped').initiativeId = 'initiative-beta-shared';
+  assertInvalid(wrongInitiative, /Initiative with matching Organization and Workspace/);
 
   const extraField = clonedFixture();
-  extraField.features[0].archived = false;
+  extraField.workstreams[0].archived = false;
   assertInvalid(extraField, /unsupported field "archived"/);
 });
 
-test('Work Item Feature references require an exact Organization, Workspace, and Scope match', () => {
+test('Work Item Workstream references require an exact Organization, Workspace, and Initiative match', () => {
   const document = clonedFixture();
-  const featured = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
-  assert.equal(featured.featureId, 'feature-alpha-mapped');
+  const workstreamAssigned = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
+  assert.equal(workstreamAssigned.workstreamId, 'workstream-alpha-mapped');
   validateTargetData(document);
 
   const unscoped = clonedFixture();
   const unassigned = unscoped.workItems.find(item => item.id === 'work-item-alpha-unassigned');
-  unassigned.featureId = 'feature-alpha-mapped';
-  assertInvalid(unscoped, /requires a non-null Scope/);
+  unassigned.workstreamId = 'workstream-alpha-mapped';
+  assertInvalid(unscoped, /requires a non-null Initiative/);
 
-  const wrongScope = clonedFixture();
-  wrongScope.workItems.find(item => item.id === 'work-item-alpha-assigned').featureId = 'feature-alpha-zero';
-  assertInvalid(wrongScope, /Feature with matching Organization, Workspace, and Scope/);
+  const wrongInitiative = clonedFixture();
+  wrongInitiative.workItems.find(item => item.id === 'work-item-alpha-assigned').workstreamId = 'workstream-alpha-zero';
+  assertInvalid(wrongInitiative, /Workstream with matching Organization, Workspace, and Initiative/);
 
   const foreign = clonedFixture();
-  foreign.workItems.find(item => item.id === 'work-item-alpha-assigned').featureId = 'feature-beta-shared';
-  assertInvalid(foreign, /Feature with matching Organization, Workspace, and Scope/);
+  foreign.workItems.find(item => item.id === 'work-item-alpha-assigned').workstreamId = 'workstream-beta-shared';
+  assertInvalid(foreign, /Workstream with matching Organization, Workspace, and Initiative/);
 });
 
-test('Feature is not a Work Item type and old type values fail closed', () => {
-  const document = clonedFixture();
-  document.workItems[0].itemType = 'Feature';
-  assertInvalid(document, /Story, Task, Bug, Other, Unknown/);
+test('hierarchy, Jira, and Sub-task labels are not Work Item types', () => {
+  for (const rejectedType of ['Initiative', 'Workstream', 'Feature', 'Epic', 'Sub-task']) {
+    const document = clonedFixture();
+    document.workItems[0].itemType = rejectedType;
+    assertInvalid(document, /Story, Task, Bug, Other, Unknown/);
+  }
 });
 
-test('the complete schema-v4 Work Item type set is accepted', () => {
+test('the complete schema-v5 Work Item type set is accepted', () => {
   for (const itemType of ['Story', 'Task', 'Bug', 'Other', 'Unknown']) {
     const document = clonedFixture();
     document.workItems[0].itemType = itemType;
@@ -265,7 +280,7 @@ test('the complete schema-v4 Work Item type set is accepted', () => {
   }
 });
 
-test('schema-v4 Work Items require an explicit nullable Jira Epic mapping reference', () => {
+test('schema-v5 Work Items require an explicit nullable Jira Epic mapping reference', () => {
   const document = clonedFixture();
   const assigned = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
   const unassigned = document.workItems.find(item => item.id === 'work-item-alpha-unassigned');
@@ -282,29 +297,29 @@ test('schema-v4 Work Items require an explicit nullable Jira Epic mapping refere
   assertInvalid(malformed, /jiraEpicMappingId.*must be text/);
 });
 
-test('Work Item Jira Epic references require exact Organization, Workspace, and Scope parents', () => {
+test('Work Item Jira Epic references require exact Organization, Workspace, and Initiative parents', () => {
   const unscoped = clonedFixture();
   const unassigned = unscoped.workItems.find(item => item.id === 'work-item-alpha-unassigned');
   unassigned.jiraEpicMappingId = 'jira-mapping-alpha-one';
-  assertInvalid(unscoped, /jiraEpicMappingId.*requires a non-null Scope/);
+  assertInvalid(unscoped, /jiraEpicMappingId.*requires a non-null Initiative/);
 
-  const wrongScope = clonedFixture();
-  wrongScope.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-alpha-secondary';
-  assertInvalid(wrongScope, /Jira Epic mapping with matching Organization, Workspace, and Scope/);
+  const wrongInitiative = clonedFixture();
+  wrongInitiative.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-alpha-secondary';
+  assertInvalid(wrongInitiative, /Jira Epic mapping with matching Organization, Workspace, and Initiative/);
 
   const foreign = clonedFixture();
   foreign.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId = 'jira-mapping-beta-shared-key';
-  assertInvalid(foreign, /Jira Epic mapping with matching Organization, Workspace, and Scope/);
+  assertInvalid(foreign, /Jira Epic mapping with matching Organization, Workspace, and Initiative/);
 });
 
-test('schema-v4 permits all five independent Scope, Feature, and Jira Epic association states', () => {
+test('schema-v5 permits all five independent Initiative, Workstream, and Jira Epic association states', () => {
   const document = clonedFixture();
   const template = structuredClone(document.workItems.find(item => item.id === 'work-item-alpha-assigned'));
   document.workItems = [
-    { ...structuredClone(template), id: 'work-item-state-unassigned', scopeId: null, featureId: null, jiraEpicMappingId: null },
-    { ...structuredClone(template), id: 'work-item-state-scope', featureId: null, jiraEpicMappingId: null },
-    { ...structuredClone(template), id: 'work-item-state-feature', jiraEpicMappingId: null },
-    { ...structuredClone(template), id: 'work-item-state-jira', featureId: null },
+    { ...structuredClone(template), id: 'work-item-state-unassigned', initiativeId: null, workstreamId: null, jiraEpicMappingId: null },
+    { ...structuredClone(template), id: 'work-item-state-initiative', workstreamId: null, jiraEpicMappingId: null },
+    { ...structuredClone(template), id: 'work-item-state-workstream', jiraEpicMappingId: null },
+    { ...structuredClone(template), id: 'work-item-state-jira', workstreamId: null },
     { ...structuredClone(template), id: 'work-item-state-both' }
   ];
   document.milestones.forEach(milestone => { milestone.linkedWorkItemIds = []; });
@@ -314,55 +329,55 @@ test('schema-v4 permits all five independent Scope, Feature, and Jira Epic assoc
   document.auditEvents = [];
   validateTargetData(document);
   assert.deepEqual(
-    document.workItems.map(item => [item.scopeId, item.featureId, item.jiraEpicMappingId]),
+    document.workItems.map(item => [item.initiativeId, item.workstreamId, item.jiraEpicMappingId]),
     [
       [null, null, null],
-      ['scope-alpha-multiple-mappings', null, null],
-      ['scope-alpha-multiple-mappings', 'feature-alpha-mapped', null],
-      ['scope-alpha-multiple-mappings', null, 'jira-mapping-alpha-one'],
-      ['scope-alpha-multiple-mappings', 'feature-alpha-mapped', 'jira-mapping-alpha-one']
+      ['initiative-alpha-multiple-mappings', null, null],
+      ['initiative-alpha-multiple-mappings', 'workstream-alpha-mapped', null],
+      ['initiative-alpha-multiple-mappings', null, 'jira-mapping-alpha-one'],
+      ['initiative-alpha-multiple-mappings', 'workstream-alpha-mapped', 'jira-mapping-alpha-one']
     ]
   );
 });
 
-test('Scopes support zero, one, and multiple Jira Epic mappings', () => {
+test('Initiatives support zero, one, and multiple Jira Epic mappings', () => {
   const document = clonedFixture();
-  const counts = Object.fromEntries(document.scopes.map(scope => [
-    scope.id,
-    document.jiraEpicMappings.filter(mapping => mapping.scopeId === scope.id).length
+  const counts = Object.fromEntries(document.initiatives.map(initiative => [
+    initiative.id,
+    document.jiraEpicMappings.filter(mapping => mapping.initiativeId === initiative.id).length
   ]));
-  assert.equal(counts['scope-alpha-zero-mapping'], 0);
-  assert.equal(counts['scope-alpha-secondary'], 1);
-  assert.equal(counts['scope-alpha-multiple-mappings'], 2);
+  assert.equal(counts['initiative-alpha-zero-mapping'], 0);
+  assert.equal(counts['initiative-alpha-secondary'], 1);
+  assert.equal(counts['initiative-alpha-multiple-mappings'], 2);
   validateTargetData(document);
 });
 
-test('Jira mappings and Features remain independent for mapped Scopes and scoped Work Items', () => {
-  const document = createFeatureIndependenceFixture();
-  const scopeId = 'scope-alpha-mapping-only';
-  const mapping = document.jiraEpicMappings.find(item => item.scopeId === scopeId);
-  const assigned = document.workItems.find(item => item.id === 'work-item-alpha-scoped-no-feature');
+test('Jira mappings and Workstreams remain independent for mapped Initiatives and scoped Work Items', () => {
+  const document = createWorkstreamIndependenceFixture();
+  const initiativeId = 'initiative-alpha-mapping-only';
+  const mapping = document.jiraEpicMappings.find(item => item.initiativeId === initiativeId);
+  const assigned = document.workItems.find(item => item.id === 'work-item-alpha-initiative-only-no-workstream');
   assert.ok(mapping);
-  assert.equal(document.features.some(item => item.scopeId === scopeId), false);
-  assert.equal(assigned.scopeId, scopeId);
-  assert.equal(assigned.featureId, null);
+  assert.equal(document.workstreams.some(item => item.initiativeId === initiativeId), false);
+  assert.equal(assigned.initiativeId, initiativeId);
+  assert.equal(assigned.workstreamId, null);
   validateTargetData(document);
 
-  const featuresBefore = structuredClone(document.features);
-  mapping.jiraEpicName = 'Fictional Renamed Mapping Without Feature';
+  const workstreamsBefore = structuredClone(document.workstreams);
+  mapping.jiraEpicName = 'Fictional Renamed Mapping Without Workstream';
   mapping.jiraEpicKey = 'FICTA-302';
   validateTargetData(document);
-  assert.deepEqual(document.features, featuresBefore);
+  assert.deepEqual(document.workstreams, workstreamsBefore);
 });
 
-test('a Jira Epic mapping rejects missing or foreign Scope parents', () => {
+test('a Jira Epic mapping rejects missing or foreign Initiative parents', () => {
   const missing = clonedFixture();
-  missing.jiraEpicMappings[0].scopeId = 'scope-missing';
-  assertInvalid(missing, /Scope with matching/);
+  missing.jiraEpicMappings[0].initiativeId = 'initiative-missing';
+  assertInvalid(missing, /Initiative with matching/);
 
   const foreign = clonedFixture();
-  foreign.jiraEpicMappings[0].scopeId = 'scope-beta-shared';
-  assertInvalid(foreign, /Scope with matching/);
+  foreign.jiraEpicMappings[0].initiativeId = 'initiative-beta-shared';
+  assertInvalid(foreign, /Initiative with matching/);
 });
 
 test('a Jira Epic mapping rejects mismatched Organization or Workspace parents', () => {
@@ -406,17 +421,17 @@ test('Jira project and Epic keys reject leading or trailing whitespace without n
   });
 });
 
-test('case- and whitespace-equivalent active Jira mappings cannot bypass one-Scope ownership', () => {
+test('case- and whitespace-equivalent active Jira mappings cannot bypass one-Initiative ownership', () => {
   const caseEquivalent = clonedFixture();
   const caseDuplicate = caseEquivalent.jiraEpicMappings[1];
-  caseDuplicate.scopeId = 'scope-alpha-zero-mapping';
+  caseDuplicate.initiativeId = 'initiative-alpha-zero-mapping';
   caseDuplicate.jiraProjectKey = caseEquivalent.jiraEpicMappings[0].jiraProjectKey.toLowerCase();
   caseDuplicate.jiraEpicKey = caseEquivalent.jiraEpicMappings[0].jiraEpicKey.toLowerCase();
   assertInvalid(caseEquivalent, /duplicates an active Jira Epic mapping/);
 
   const whitespaceEquivalent = clonedFixture();
   const whitespaceDuplicate = whitespaceEquivalent.jiraEpicMappings[1];
-  whitespaceDuplicate.scopeId = 'scope-alpha-zero-mapping';
+  whitespaceDuplicate.initiativeId = 'initiative-alpha-zero-mapping';
   whitespaceDuplicate.jiraProjectKey = ` ${whitespaceEquivalent.jiraEpicMappings[0].jiraProjectKey}`;
   whitespaceDuplicate.jiraEpicKey = `${whitespaceEquivalent.jiraEpicMappings[0].jiraEpicKey} `;
   assertInvalid(whitespaceEquivalent, /leading or trailing whitespace/);
@@ -434,41 +449,41 @@ test('canonical Jira keys remain valid and equivalent keys remain permitted acro
   validateTargetData(document);
 });
 
-test('changing Jira keys or names never renames or re-identifies a Scope', () => {
+test('changing Jira keys or names never renames or re-identifies an Initiative', () => {
   const document = clonedFixture();
-  const scope = document.scopes.find(item => item.id === 'scope-alpha-multiple-mappings');
-  const original = { id: scope.id, name: scope.name };
+  const initiative = document.initiatives.find(item => item.id === 'initiative-alpha-multiple-mappings');
+  const original = { id: initiative.id, name: initiative.name };
   document.jiraEpicMappings[0].jiraEpicKey = 'FICTA-999';
   document.jiraEpicMappings[0].jiraEpicName = 'Renamed Fictional External Epic';
   validateTargetData(document);
-  assert.deepEqual({ id: scope.id, name: scope.name }, original);
+  assert.deepEqual({ id: initiative.id, name: initiative.name }, original);
 });
 
-test('missing Jira metadata leaves Work Items Unassigned and never creates a Scope', () => {
+test('missing Jira metadata leaves Work Items Unassigned and never creates an Initiative', () => {
   const document = clonedFixture();
   const unassigned = document.workItems.find(item => item.id === 'work-item-alpha-unassigned');
-  const scopeCount = document.scopes.length;
-  assert.equal(unassigned.scopeId, null);
+  const initiativeCount = document.initiatives.length;
+  assert.equal(unassigned.initiativeId, null);
   assert.equal(unassigned.jiraId, null);
   assert.equal(unassigned.jiraKey, null);
   validateTargetData(document);
-  assert.equal(document.scopes.length, scopeCount);
-  assert.equal(UNASSIGNED_SCOPE.label, 'Unassigned');
-  assert.equal(UNASSIGNED_SCOPE.scopeId, null);
+  assert.equal(document.initiatives.length, initiativeCount);
+  assert.equal(UNASSIGNED_INITIATIVE.label, 'Unassigned');
+  assert.equal(UNASSIGNED_INITIATIVE.initiativeId, null);
 });
 
-test('Unassigned and no-Epic labels cannot be persisted as fake Scope entities', () => {
+test('Unassigned and no-Epic labels cannot be persisted as fake Initiative entities', () => {
   for (const forbiddenName of ['Unassigned', 'Miscellaneous / No Epic', 'No Epic']) {
     const document = clonedFixture();
-    document.scopes[0].name = forbiddenName;
-    assertInvalid(document, /must not create an Unassigned or no-Epic catch-all Scope/);
+    document.initiatives[0].name = forbiddenName;
+    assertInvalid(document, /must not create an Unassigned or no-Epic catch-all Initiative/);
   }
 });
 
-test('Work Items accept null or a valid same-parent Scope', () => {
+test('Work Items accept null or a valid same-parent Initiative', () => {
   const document = clonedFixture();
-  assert.equal(document.workItems.find(item => item.id === 'work-item-alpha-unassigned').scopeId, null);
-  assert.equal(document.workItems.find(item => item.id === 'work-item-alpha-assigned').scopeId, 'scope-alpha-multiple-mappings');
+  assert.equal(document.workItems.find(item => item.id === 'work-item-alpha-unassigned').initiativeId, null);
+  assert.equal(document.workItems.find(item => item.id === 'work-item-alpha-assigned').initiativeId, 'initiative-alpha-multiple-mappings');
   validateTargetData(document);
 });
 
@@ -504,15 +519,15 @@ test('missing or malformed Work Item current-state provenance is rejected', () =
   assertInvalid(malformedTimestamp, /ISO-8601 UTC timestamp/);
 });
 
-test('Work Items reject cross-Workspace and cross-Organization Scope references', () => {
-  assertInvalid(createInvalidCrossWorkspaceFixture(), /Scope with matching Organization and Workspace/);
-  assertInvalid(createInvalidCrossOrganizationFixture(), /Scope with matching Organization and Workspace/);
+test('Work Items reject cross-Workspace and cross-Organization Initiative references', () => {
+  assertInvalid(createInvalidCrossWorkspaceFixture(), /Initiative with matching Organization and Workspace/);
+  assertInvalid(createInvalidCrossOrganizationFixture(), /Initiative with matching Organization and Workspace/);
 });
 
-test('Work Items reject missing Scope references', () => {
+test('Work Items reject missing Initiative references', () => {
   const document = clonedFixture();
-  document.workItems[0].scopeId = 'scope-missing';
-  assertInvalid(document, /Scope with matching/);
+  document.workItems[0].initiativeId = 'initiative-missing';
+  assertInvalid(document, /Initiative with matching/);
 });
 
 test('Follow-Up none, open, waiting, and resolved remain nested on Work Items', () => {
@@ -538,20 +553,20 @@ test('Follow-Up cannot become a top-level hierarchy or independent record', () =
   assertInvalid(document, /unsupported field "followUps"/);
 });
 
-test('Workspace-level and Scope-level Milestones validate canonical links', () => {
+test('Workspace-level and Initiative-level Milestones validate canonical links', () => {
   const document = clonedFixture();
   const workspaceMilestone = document.milestones.find(item => item.id === 'milestone-alpha-workspace');
-  const scopeMilestone = document.milestones.find(item => item.id === 'milestone-alpha-scope');
-  assert.equal(workspaceMilestone.scopeId, null);
-  assert.equal(scopeMilestone.scopeId, 'scope-alpha-multiple-mappings');
-  assert.deepEqual(scopeMilestone.linkedWorkItemIds, ['work-item-alpha-assigned']);
+  const initiativeMilestone = document.milestones.find(item => item.id === 'milestone-alpha-initiative');
+  assert.equal(workspaceMilestone.initiativeId, null);
+  assert.equal(initiativeMilestone.initiativeId, 'initiative-alpha-multiple-mappings');
+  assert.deepEqual(initiativeMilestone.linkedWorkItemIds, ['work-item-alpha-assigned']);
   validateTargetData(document);
 });
 
-test('Milestones reject foreign Scopes and missing linked Work Items', () => {
-  const foreignScope = clonedFixture();
-  foreignScope.milestones[0].scopeId = 'scope-beta-shared';
-  assertInvalid(foreignScope, /Scope with matching/);
+test('Milestones reject foreign Initiatives and missing linked Work Items', () => {
+  const foreignInitiative = clonedFixture();
+  foreignInitiative.milestones[0].initiativeId = 'initiative-beta-shared';
+  assertInvalid(foreignInitiative, /Initiative with matching/);
 
   const missingWorkItem = clonedFixture();
   missingWorkItem.milestones[0].linkedWorkItemIds.push('work-item-missing');
@@ -570,7 +585,7 @@ test('Milestones reject foreign-Workspace and foreign-Organization linked Work I
 
 test('Work Items cannot store a competing canonical milestone relationship', () => {
   const document = clonedFixture();
-  document.workItems[0].milestoneId = 'milestone-alpha-scope';
+  document.workItems[0].milestoneId = 'milestone-alpha-initiative';
   assertInvalid(document, /unsupported field "milestoneId"/);
 });
 
@@ -587,7 +602,7 @@ test('Finding extraction method and version preserve explicit extraction provena
   const document = clonedFixture();
   const finding = document.findings[0];
   assert.equal(finding.extractionMethod, 'deterministic-test-extraction');
-  assert.equal(finding.extractionVersion, 'target-v4-fixture-1');
+  assert.equal(finding.extractionVersion, 'target-v5-fixture-1');
   validateTargetData(document);
 });
 
@@ -622,25 +637,25 @@ test('Evidence requires accepted exact provenance with matching parents', () => 
   assertInvalid(foreignSource, /Source with matching/);
 });
 
-test('Evidence with matching Work Item and Scope succeeds, including Workspace-level Evidence', () => {
+test('Evidence with matching Work Item and Initiative succeeds, including Workspace-level Evidence', () => {
   const matching = clonedFixture();
   validateTargetData(matching);
 
   const workspaceLevel = clonedFixture();
-  workspaceLevel.evidence[0].scopeId = null;
+  workspaceLevel.evidence[0].initiativeId = null;
   workspaceLevel.evidence[0].workItemId = null;
   validateTargetData(workspaceLevel);
 });
 
-test('Evidence rejects a Scope that disagrees with its Work Item', () => {
+test('Evidence rejects an Initiative that disagrees with its Work Item', () => {
   const mismatched = clonedFixture();
-  mismatched.evidence[0].scopeId = 'scope-alpha-zero-mapping';
-  assertInvalid(mismatched, /must match the Scope of the referenced Work Item/);
+  mismatched.evidence[0].initiativeId = 'initiative-alpha-zero-mapping';
+  assertInvalid(mismatched, /must match the Initiative of the referenced Work Item/);
 
   const unassignedMismatch = clonedFixture();
   unassignedMismatch.evidence[0].workItemId = 'work-item-alpha-unassigned';
-  unassignedMismatch.evidence[0].scopeId = 'scope-alpha-zero-mapping';
-  assertInvalid(unassignedMismatch, /must match the Scope of the referenced Work Item/);
+  unassignedMismatch.evidence[0].initiativeId = 'initiative-alpha-zero-mapping';
+  assertInvalid(unassignedMismatch, /must match the Initiative of the referenced Work Item/);
 });
 
 test('Proposed Changes require valid same-parent targets and supporting Evidence', () => {
@@ -661,7 +676,7 @@ test('Proposed Changes reject Evidence associated with a different Work Item', (
   const otherWorkItemEvidence = {
     ...structuredClone(document.evidence[0]),
     id: 'evidence-alpha-other-work-item',
-    scopeId: null,
+    initiativeId: null,
     workItemId: 'work-item-alpha-unassigned'
   };
   document.evidence.push(otherWorkItemEvidence);
@@ -677,7 +692,7 @@ test('Proposed Changes accept compatible Work Item Evidence and generic Workspac
   const workspaceEvidence = {
     ...structuredClone(generic.evidence[0]),
     id: 'evidence-alpha-workspace-level',
-    scopeId: null,
+    initiativeId: null,
     workItemId: null
   };
   generic.evidence.push(workspaceEvidence);
@@ -698,7 +713,7 @@ test('accepted Evidence remains separate from current Work Item state', () => {
   assert.equal(workItem.canonicalStatus, 'Planned');
 });
 
-test('Briefings may select only Workspaces and Scopes inside one Organization', () => {
+test('Briefings may select only Workspaces and Initiatives inside one Organization', () => {
   const document = clonedFixture();
   validateTargetData(document);
 
@@ -707,11 +722,11 @@ test('Briefings may select only Workspaces and Scopes inside one Organization', 
   assertInvalid(crossOrganization, /matching Organization/);
 
   const unselectedWorkspace = clonedFixture();
-  unselectedWorkspace.briefings[1].scopeIds = ['scope-alpha-multiple-mappings'];
+  unselectedWorkspace.briefings[1].initiativeIds = ['initiative-alpha-multiple-mappings'];
   assertInvalid(unselectedWorkspace, /selected Workspaces and matching Organization/);
 });
 
-test('Briefing Versions validate Briefing, Organization, Workspace, and Scope parents', () => {
+test('Briefing Versions validate Briefing, Organization, Workspace, and Initiative parents', () => {
   const document = clonedFixture();
   validateTargetData(document);
 
@@ -720,7 +735,7 @@ test('Briefing Versions validate Briefing, Organization, Workspace, and Scope pa
   assertInvalid(wrongBriefing, /Briefing with matching Organization/);
 
   const crossWorkspace = clonedFixture();
-  crossWorkspace.briefingVersions[1].scopeIds = ['scope-alpha-multiple-mappings'];
+  crossWorkspace.briefingVersions[1].initiativeIds = ['initiative-alpha-multiple-mappings'];
   assertInvalid(crossWorkspace, /version Workspaces and matching Organization/);
 });
 
@@ -792,7 +807,7 @@ test('saved User Preference IDs are revalidated against their parents', () => {
 
 test('IDs cannot collide across entity collections', () => {
   const document = clonedFixture();
-  document.scopes[0].id = document.workspaces[0].id;
+  document.initiatives[0].id = document.workspaces[0].id;
   assertInvalid(document, /duplicates an ID/);
 });
 
@@ -813,7 +828,7 @@ test('Workspace prompt overrides and drafting guidance are rejected from global 
 test('validation is fail-closed and never normalizes malformed relationships', () => {
   const document = createInvalidCrossOrganizationFixture();
   const before = structuredClone(document);
-  assertInvalid(document, /Scope with matching/);
+  assertInvalid(document, /Initiative with matching/);
   assert.deepEqual(document, before);
 });
 

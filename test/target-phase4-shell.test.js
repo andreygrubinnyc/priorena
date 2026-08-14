@@ -47,14 +47,14 @@ test('target release launcher requires explicit private paths and binds only to 
 test('isolated target entry exposes the canonical hierarchy and operational navigation', async () => {
   const markup = await source('public/target/index.html');
   for (const expected of [
-    'Organization', 'PM Workspace', 'Portfolio', 'Today', 'Work Items', 'Feature', 'Follow-Up', 'Milestones',
-    'Add Source', 'Source Library', 'Review', 'Briefings', 'Settings', 'All scopes'
+    'Organization', 'Workspace', 'Portfolio', 'Today', 'Work Items', 'Workstream', 'Follow-Up', 'Milestones',
+    'Add Source', 'Source Library', 'Review', 'Briefings', 'Settings', 'All initiatives'
   ]) assert.match(markup, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
   for (const prohibited of [
     'Project / Jira Epic', 'Project/Epic', 'All projects', 'whole PM workspace', 'Project stream',
     'Briefing stream', 'Project not identified', 'Miscellaneous / No Epic', 'Evidence pending',
-    'Extracted DSU updates', 'Teams Draft', 'Status Summary'
+    'Extracted DSU updates', 'Teams Draft', 'Status Summary', 'Strategy', 'Sub-task', 'PM Workspace', 'Scope', 'Feature'
   ]) assert.doesNotMatch(markup, new RegExp(prohibited.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 
   assert.match(markup, /<main[^>]+id="target-main"/);
@@ -83,15 +83,15 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.match(client, /Snapshot prepared/);
   assert.match(client, /Priorena does not send/);
   assert.match(client, /Priorena sent nothing/);
-  assert.match(client, /All Features/);
-  assert.match(client, /function featureOptionLabel\(feature\)/);
-  assert.match(client, /Stable ID: \$\{feature\.id\}/);
-  assert.match(client, /Create Feature/);
+  assert.match(client, /All Workstreams/);
+  assert.match(client, /function workstreamOptionLabel\(workstream\)/);
+  assert.match(client, /Stable ID: \$\{workstream\.id\}/);
+  assert.match(client, /Create Workstream/);
   assert.match(client, /Preview association changes/);
   assert.match(client, /All Jira Epics/);
   assert.match(client, /No Jira Epic/);
   assert.match(client, /function jiraEpicOptionLabel\(mapping\)/);
-  assert.match(client, /jiraEpicAssignment\.disabled = scopeId === 'unassigned'/);
+  assert.match(client, /jiraEpicAssignment\.disabled = initiativeId === 'unassigned'/);
   assert.match(client, /result\.kind === 'workItem'/);
   assert.match(client, /Work Item Jira key/);
   assert.match(client, /Preview \$\{entityLabel\} rename/);
@@ -100,7 +100,7 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.doesNotMatch(client, /sendBriefing|sendOutput|autoPublish/);
 });
 
-test('target DOM integration rejects late context renders and keeps page scope truthful', async () => {
+test('target DOM integration rejects late context renders and keeps page context truthful', async () => {
   const client = await source('public/target/app.js');
   const portfolio = functionSlice(client, 'renderPortfolio', 'renderToday');
   const today = functionSlice(client, 'renderToday', 'visibleWorkItems');
@@ -113,17 +113,17 @@ test('target DOM integration rejects late context renders and keeps page scope t
   assert.match(organizationSelector, /const generation = \+\+state\.generation;[\s\S]*if \(generation !== state\.generation\) return;/);
   assert.match(workspaceSelector, /const generation = \+\+state\.generation;[\s\S]*if \(generation !== state\.generation\) return;/);
   assert.match(client, /const organizationScoped = \['portfolio', 'briefings'\]\.includes\(state\.activeView\)/);
-  assert.match(client, /elements\.scope\.hidden = true/);
+  assert.match(client, /elements\.initiative\.hidden = true/);
 });
 
 test('Follow-Up filtering retains its surface and communication channel is independent of output format', async () => {
   const client = await source('public/target/app.js');
-  const filter = functionSlice(client, 'scopeFilterControl', 'previewScopeAssignment');
+  const filter = functionSlice(client, 'initiativeFilterControl', 'previewInitiativeAssignment');
   const followUp = functionSlice(client, 'renderFollowUp', 'renderMilestones');
   const finalized = functionSlice(client, 'renderFinalizedEditor', 'renderCommunicatedEditor');
   assert.match(filter, /renderFilteredView = renderWorkItems/);
   assert.match(filter, /renderFilteredView\(\)/);
-  assert.match(followUp, /scopeFilterControl\(renderFollowUp\)/);
+  assert.match(followUp, /initiativeFilterControl\(renderFollowUp\)/);
   assert.match(finalized, /External communication channel/);
   assert.match(finalized, /option\('other', 'Other'\)/);
   assert.match(finalized, /channel: channel\.value/);
@@ -160,7 +160,7 @@ test('Briefing client uses stable parent routes and explicit lifecycle placement
     history: [{ id: 'history', status: 'communicated' }]
   });
   assert.throws(() => validateBriefingResponse({
-    briefings: [{ organizationId: 'org-fixture-beta', workspaces: [], scopes: [] }]
+    briefings: [{ organizationId: 'org-fixture-beta', workspaces: [], initiatives: [] }]
   }, 'org-fixture-alpha'), /crossed its Organization context/);
 });
 
@@ -177,7 +177,7 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
 
 test('target UI is the release root and does not mutate target data', async t => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase4-shell-'));
-  const targetDataFile = path.join(tempRoot, 'target-v4.json');
+  const targetDataFile = path.join(tempRoot, 'target-v5.json');
   const sourceFilesRoot = path.join(tempRoot, 'source-files');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });

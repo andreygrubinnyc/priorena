@@ -75,7 +75,7 @@ function categorizeVersions(versions) {
 function validateBriefingResponse(value, organizationId) {
   if (!value || !Array.isArray(value.briefings)) throw new Error('Target Briefing response is invalid');
   value.briefings.forEach(briefing => {
-    if (briefing.organizationId !== organizationId || !Array.isArray(briefing.workspaces) || !Array.isArray(briefing.scopes)) {
+    if (briefing.organizationId !== organizationId || !Array.isArray(briefing.workspaces) || !Array.isArray(briefing.initiatives)) {
       throw new Error('Target Briefing response crossed its Organization context');
     }
   });

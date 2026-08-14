@@ -20,7 +20,7 @@ const { ROLLBACK_REVISION } = require('../scripts/release/rehearse');
 
 async function harness(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase5-hardening-'));
-  const targetDataFile = path.join(root, 'target-v4.json');
+  const targetDataFile = path.join(root, 'target-v5.json');
   const sourceFilesRoot = path.join(root, 'sources');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });
@@ -28,7 +28,7 @@ async function harness(t) {
   return { root, sourceFilesRoot, targetDataFile };
 }
 
-test('release startup validates strict schema-v4 bytes before listening', async t => {
+test('release startup validates strict schema-v5 bytes before listening', async t => {
   const context = await harness(t);
   const before = await fs.readFile(context.targetDataFile);
   const validated = await validateTargetStartup(context);
@@ -107,7 +107,7 @@ test('private bootstrap output cannot enter the repository through a symlinked a
   await fs.writeFile(inputPath, JSON.stringify({
     organization: { name: 'Fictional Organization' },
     workspace: { name: 'Fictional Workspace' },
-    scopes: [{ name: 'Fictional Scope' }]
+    initiatives: [{ name: 'Fictional Initiative' }]
   }), { mode: 0o600 });
   await assert.rejects(runBootstrap([
     '--input', inputPath,
@@ -159,12 +159,12 @@ test('bounded-log failures cannot replace the safe client error response', async
 test('generic private bootstrap is deterministic, strict, and target-only', () => {
   const definition = {
     organization: { name: 'Organization 1' },
-    workspace: { name: 'PM Workspace 1' },
-    scopes: [
-      { name: 'Scope 1' },
-      { name: 'Scope 2' },
-      { name: 'Scope 3' },
-      { name: 'Scope 4' }
+    workspace: { name: 'Workspace 1' },
+    initiatives: [
+      { name: 'Initiative 1' },
+      { name: 'Initiative 2' },
+      { name: 'Initiative 3' },
+      { name: 'Initiative 4' }
     ]
   };
   const first = createBootstrapSeed(definition);
@@ -173,21 +173,21 @@ test('generic private bootstrap is deterministic, strict, and target-only', () =
   assert.equal(serializeTargetData(first), serializeTargetData(second));
   assertBootstrapOnly(first);
   assert.equal(first.workItems.length, 0);
-  assert.equal(first.features.length, 0);
+  assert.equal(first.workstreams.length, 0);
   assert.equal(first.jiraEpicMappings.length, 0);
   assert.equal(first.briefings.length, 0);
   assert.doesNotMatch(JSON.stringify(first), /Miscellaneous|No Epic/i);
   assert.deepEqual(first.organizations.map(item => item.id), ['org-1']);
   assert.deepEqual(first.workspaces.map(item => item.id), ['workspace-1']);
-  assert.deepEqual(first.scopes.map(item => item.id), ['scope-1', 'scope-2', 'scope-3', 'scope-4']);
+  assert.deepEqual(first.initiatives.map(item => item.id), ['initiative-1', 'initiative-2', 'initiative-3', 'initiative-4']);
   assert.throws(() => normalizeBootstrapDefinition({ ...definition, unexpected: true }), /unsupported fields/);
-  assert.throws(() => normalizeBootstrapDefinition({ ...definition, scopes: [{ name: 'Same' }, { name: 'same' }] }), /unique/);
+  assert.throws(() => normalizeBootstrapDefinition({ ...definition, initiatives: [{ name: 'Same' }, { name: 'same' }] }), /unique/);
 });
 
 test('staged-seed validation rejects operational history and permissive modes', async t => {
   const context = await harness(t);
   const result = await validateSeed(context.targetDataFile);
-  assert.equal(result.schemaVersion, 4);
+  assert.equal(result.schemaVersion, 5);
   assert.equal(result.counts.operationalRecords, 0);
 
   const withHistory = createCleanSeed();
@@ -203,28 +203,42 @@ test('staged-seed validation rejects operational history and permissive modes', 
 test('legacy regression scan catches active behavior and permits only narrow enforcement references', () => {
   const legacyCollection = 'delivery' + 'Projects';
   const nativePopup = 'con' + 'firm(';
-  const catchAllScope = ['miscellaneous', ' / ', 'no epic'].join('');
-  const compactCatchAllScope = ['miscellaneous', '/', 'no epic'].join('');
+  const catchAllInitiative = ['miscellaneous', ' / ', 'no epic'].join('');
+  const compactCatchAllInitiative = ['miscellaneous', '/', 'no epic'].join('');
   const legacyRootCollection = ['pro', 'jects'].join('');
   assert.ok(scanLegacyText('target-server/example.js', `const value = document.${legacyCollection};`).length);
   assert.ok(scanLegacyText('public/target/example.js', `window.${nativePopup}\"Apply?\")`).length);
-  const safeSchemaLine = `const FORBIDDEN_SCOPE_NAMES = new Set(['unassigned', '${catchAllScope}', '${compactCatchAllScope}', 'no epic']);`;
+  const safeSchemaLine = `const FORBIDDEN_INITIATIVE_NAMES = new Set(['unassigned', '${catchAllInitiative}', '${compactCatchAllInitiative}', 'no epic']);`;
   assert.deepEqual(scanLegacyText('target-model/schema.js', safeSchemaLine), []);
-  assert.ok(scanLegacyText('target-model/schema.js', `${safeSchemaLine}\nfunction defaultScope(){ return '${catchAllScope}'; }`).length);
+  assert.ok(scanLegacyText('target-model/schema.js', `${safeSchemaLine}\nfunction defaultInitiative(){ return '${catchAllInitiative}'; }`).length);
   assert.ok(scanLegacyText('scripts/release/rehearse.js', `const legacyBytes = Buffer.from('{"${legacyRootCollection}": {}}\\n');\nconst releaseData = { ${legacyRootCollection}: { active: true } };`).length);
-  assert.ok(scanLegacyText('target-server/example.js', catchAllScope).length);
+  assert.ok(scanLegacyText('target-server/example.js', catchAllInitiative).length);
+  assert.deepEqual(scanLegacyText('public/target/example.js', 'const label = "whole Workspace";'), []);
+  assert.ok(scanLegacyText('public/target/example.js', 'const label = "whole PM workspace";').length);
+  assert.ok(scanLegacyText('test/example.test.js', 'const collection = document.scopes;').length);
+  assert.ok(scanLegacyText('test-support/example.js', 'const relationship = value.featureId;').length);
 });
 
 test('CI fetches the known rollback commit history before running the exact-revision rehearsal', async () => {
   const workflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'security-gate.yml'), 'utf8');
   assert.match(workflow, /uses: actions\/checkout@[^\n]+[\s\S]{0,200}fetch-depth: 0[\s\S]{0,100}persist-credentials: false/);
-  assert.equal(ROLLBACK_REVISION, '49e59a3fbb56c9ec6ea01c6f0c58d0c9d66113a5');
+  assert.equal(ROLLBACK_REVISION, '363a321648aba0e2d10a812644a298b9abe5e7bb');
   const rollbackSource = await fs.readFile(path.join(__dirname, '..', 'scripts', 'release', 'rollback-application.js'), 'utf8');
   assert.match(rollbackSource, /target-server\/start\.js/);
   assert.match(rollbackSource, /api\/v2\/organizations/);
   const legacyRoute = ['api', 'projects'].join('/');
   const legacyDataSelector = ['PMDS', 'DATA', 'FILE'].join('_');
   assert.doesNotMatch(rollbackSource, new RegExp(`${legacyRoute}|${legacyDataSelector}`));
+});
+
+test('schema-v5 cutover runbook orders backup, primary fast-forward, and atomic replacement', async () => {
+  const runbook = await fs.readFile(path.join(__dirname, '..', 'docs', 'release', 'SCHEMA_V5_INITIATIVE_WORKSTREAM_CUTOVER.md'), 'utf8');
+  const backup = runbook.indexOf('Create a timestamped byte-for-byte backup');
+  const updatePrimary = runbook.indexOf('fast-forward-only');
+  const replace = runbook.indexOf('Atomically replace');
+  assert.ok(backup >= 0 && updatePrimary > backup && replace > updatePrimary);
+  assert.match(runbook, /If the primary update fails,[^\n]+leave the live runtime unchanged[^\n]+restart the old release/i);
+  assert.match(runbook, /Do not merge, rebase, reset, force-push, or discard local changes/i);
 });
 
 test('CI provides fail-closed process inspection before the release rehearsal', async () => {

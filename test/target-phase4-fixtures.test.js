@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const { validateTargetData } = require('../target-model/schema');
 const { buildCandidateFacts } = require('../target-server/briefing-services');
-const { createPhase4BriefingFixture } = require('../test-support/target-v3-fixtures');
+const { createPhase4BriefingFixture } = require('../test-support/target-v5-fixtures');
 
 test('Phase 4 fixture is deterministic, valid, fictional, and covers every Briefing lifecycle placement', () => {
   const first = createPhase4BriefingFixture();
@@ -22,11 +22,11 @@ test('Phase 4 fixture is deterministic, valid, fictional, and covers every Brief
   assert.ok(alphaVersions.find(version => version.status === 'communicated').communication);
   const selections = first.briefings.filter(item => item.organizationId === 'org-fixture-alpha').map(item => ({
     workspaces: item.workspaceIds.length,
-    scopes: item.scopeIds.length
+    initiatives: item.initiativeIds.length
   }));
-  assert.ok(selections.some(item => item.workspaces === 1 && item.scopes === 0));
-  assert.ok(selections.some(item => item.workspaces === 1 && item.scopes === 1));
-  assert.ok(selections.some(item => item.workspaces === 1 && item.scopes > 1));
+  assert.ok(selections.some(item => item.workspaces === 1 && item.initiatives === 0));
+  assert.ok(selections.some(item => item.workspaces === 1 && item.initiatives === 1));
+  assert.ok(selections.some(item => item.workspaces === 1 && item.initiatives > 1));
   assert.ok(selections.some(item => item.workspaces > 1));
   assert.equal(first.organizations[0].name, first.organizations[1].name);
   assert.match(JSON.stringify(first), /Fictional/);
@@ -39,7 +39,7 @@ test('Phase 4 candidate fixture keeps unreviewed prompt-like Source text inert a
   const candidates = buildCandidateFacts(document, {
     organizationId: briefing.organizationId,
     workspaceIds: briefing.workspaceIds,
-    scopeIds: briefing.scopeIds,
+    initiativeIds: briefing.initiativeIds,
     defaultSections: briefing.defaultSections
   });
   const serialized = JSON.stringify(candidates);

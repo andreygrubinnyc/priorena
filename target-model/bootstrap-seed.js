@@ -4,11 +4,11 @@ const { createCleanSeed } = require('./clean-seed');
 const { validateTargetData } = require('./schema');
 
 const BOOTSTRAP_TIMESTAMP = '2026-08-11T00:00:00.000Z';
-const MAX_BOOTSTRAP_SCOPES = 100;
+const MAX_BOOTSTRAP_INITIATIVES = 100;
 const GENERIC_BOOTSTRAP_NAMES = Object.freeze({
   organization: 'Organization 1',
-  workspace: 'PM Workspace 1',
-  scopes: Object.freeze(['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4'])
+  workspace: 'Workspace 1',
+  initiatives: Object.freeze(['Initiative 1', 'Initiative 2', 'Initiative 3', 'Initiative 4'])
 });
 
 function plainObject(value, label) {
@@ -33,27 +33,27 @@ function boundedText(value, label, { optional = false, maximum = 300 } = {}) {
 
 function normalizeBootstrapDefinition(input) {
   const root = plainObject(input, 'Bootstrap input');
-  exactKeys(root, new Set(['organization', 'workspace', 'scopes']), 'Bootstrap input');
+  exactKeys(root, new Set(['organization', 'workspace', 'initiatives']), 'Bootstrap input');
   const organization = plainObject(root.organization, 'Organization');
   const workspace = plainObject(root.workspace, 'Workspace');
   exactKeys(organization, new Set(['name', 'description']), 'Organization');
   exactKeys(workspace, new Set(['name', 'description']), 'Workspace');
-  if (!Array.isArray(root.scopes) || root.scopes.length > MAX_BOOTSTRAP_SCOPES) {
-    throw new TypeError(`Scopes must be an array with at most ${MAX_BOOTSTRAP_SCOPES} entries`);
+  if (!Array.isArray(root.initiatives) || root.initiatives.length > MAX_BOOTSTRAP_INITIATIVES) {
+    throw new TypeError(`Initiatives must be an array with at most ${MAX_BOOTSTRAP_INITIATIVES} entries`);
   }
-  const scopes = root.scopes.map((value, index) => {
-    const scope = plainObject(value, `Scope ${index + 1}`);
-    exactKeys(scope, new Set(['name', 'description', 'owner']), `Scope ${index + 1}`);
+  const initiatives = root.initiatives.map((value, index) => {
+    const initiative = plainObject(value, `Initiative ${index + 1}`);
+    exactKeys(initiative, new Set(['name', 'description', 'owner']), `Initiative ${index + 1}`);
     return {
-      name: boundedText(scope.name, `Scope ${index + 1} name`),
-      description: boundedText(scope.description, `Scope ${index + 1} description`, { optional: true, maximum: 2_000 }),
-      owner: scope.owner === undefined || scope.owner === null
+      name: boundedText(initiative.name, `Initiative ${index + 1} name`),
+      description: boundedText(initiative.description, `Initiative ${index + 1} description`, { optional: true, maximum: 2_000 }),
+      owner: initiative.owner === undefined || initiative.owner === null
         ? null
-        : boundedText(scope.owner, `Scope ${index + 1} owner`)
+        : boundedText(initiative.owner, `Initiative ${index + 1} owner`)
     };
   });
-  const names = scopes.map(scope => scope.name.toLocaleLowerCase('en-US'));
-  if (new Set(names).size !== names.length) throw new TypeError('Scope names must be unique within the bootstrap Workspace');
+  const names = initiatives.map(initiative => initiative.name.toLocaleLowerCase('en-US'));
+  if (new Set(names).size !== names.length) throw new TypeError('Initiative names must be unique within the bootstrap Workspace');
   return {
     organization: {
       name: boundedText(organization.name, 'Organization name'),
@@ -63,20 +63,20 @@ function normalizeBootstrapDefinition(input) {
       name: boundedText(workspace.name, 'Workspace name'),
       description: boundedText(workspace.description, 'Workspace description', { optional: true, maximum: 2_000 })
     },
-    scopes
+    initiatives
   };
 }
 
 function createBootstrapSeed(input) {
   const normalized = normalizeBootstrapDefinition(input);
-  const names = normalized.scopes.map(scope => scope.name);
+  const names = normalized.initiatives.map(initiative => initiative.name);
   if (normalized.organization.name !== GENERIC_BOOTSTRAP_NAMES.organization ||
       normalized.workspace.name !== GENERIC_BOOTSTRAP_NAMES.workspace ||
-      JSON.stringify(names) !== JSON.stringify(GENERIC_BOOTSTRAP_NAMES.scopes)) {
-    throw new TypeError('Bootstrap input must describe the exact authorized generic Organization, PM Workspace, and four Scopes');
+      JSON.stringify(names) !== JSON.stringify(GENERIC_BOOTSTRAP_NAMES.initiatives)) {
+    throw new TypeError('Bootstrap input must describe the exact authorized generic Organization, Workspace, and four Initiatives');
   }
-  if (normalized.scopes.some(scope => scope.owner !== null)) {
-    throw new TypeError('The authorized generic bootstrap Scopes must not have owners');
+  if (normalized.initiatives.some(initiative => initiative.owner !== null)) {
+    throw new TypeError('The authorized generic bootstrap Initiatives must not have owners');
   }
   const document = createCleanSeed();
   validateTargetData(document);
@@ -86,7 +86,7 @@ function createBootstrapSeed(input) {
 module.exports = {
   BOOTSTRAP_TIMESTAMP,
   GENERIC_BOOTSTRAP_NAMES,
-  MAX_BOOTSTRAP_SCOPES,
+  MAX_BOOTSTRAP_INITIATIVES,
   createBootstrapSeed,
   normalizeBootstrapDefinition
 };

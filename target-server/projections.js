@@ -17,8 +17,8 @@ const SAFE_BRIEFING_MEDIA_TYPES = new Set([
   'text/plain'
 ]);
 const WORKSPACE_OWNED_COLLECTIONS = Object.freeze([
-  'scopes',
-  'features',
+  'initiatives',
+  'workstreams',
   'jiraEpicMappings',
   'workItems',
   'milestones',
@@ -51,27 +51,27 @@ function publicWorkspace(workspace) {
   };
 }
 
-function publicScope(scope) {
+function publicInitiative(initiative) {
   return {
-    id: scope.id,
-    organizationId: scope.organizationId,
-    workspaceId: scope.workspaceId,
-    name: scope.name,
-    description: scope.description,
-    owner: scope.owner,
-    archived: scope.archived,
-    primaryMilestoneId: scope.primaryMilestoneId
+    id: initiative.id,
+    organizationId: initiative.organizationId,
+    workspaceId: initiative.workspaceId,
+    name: initiative.name,
+    description: initiative.description,
+    owner: initiative.owner,
+    archived: initiative.archived,
+    primaryMilestoneId: initiative.primaryMilestoneId
   };
 }
 
-function publicFeature(feature) {
+function publicWorkstream(workstream) {
   return {
-    id: feature.id,
-    organizationId: feature.organizationId,
-    workspaceId: feature.workspaceId,
-    scopeId: feature.scopeId,
-    name: feature.name,
-    description: feature.description
+    id: workstream.id,
+    organizationId: workstream.organizationId,
+    workspaceId: workstream.workspaceId,
+    initiativeId: workstream.initiativeId,
+    name: workstream.name,
+    description: workstream.description
   };
 }
 
@@ -80,7 +80,7 @@ function publicJiraEpicMapping(mapping) {
     id: mapping.id,
     organizationId: mapping.organizationId,
     workspaceId: mapping.workspaceId,
-    scopeId: mapping.scopeId,
+    initiativeId: mapping.initiativeId,
     jiraProjectKey: mapping.jiraProjectKey,
     jiraEpicKey: mapping.jiraEpicKey,
     jiraEpicName: mapping.jiraEpicName,
@@ -90,22 +90,22 @@ function publicJiraEpicMapping(mapping) {
   };
 }
 
-function publicWorkItem(workItem, scopeIndex, featureIndex = new Map(), jiraEpicMappingIndex = new Map()) {
-  const scope = workItem.scopeId === null ? null : scopeIndex.get(workItem.scopeId);
-  const feature = workItem.featureId === null ? null : featureIndex.get(workItem.featureId);
+function publicWorkItem(workItem, initiativeIndex, workstreamIndex = new Map(), jiraEpicMappingIndex = new Map()) {
+  const initiative = workItem.initiativeId === null ? null : initiativeIndex.get(workItem.initiativeId);
+  const workstream = workItem.workstreamId === null ? null : workstreamIndex.get(workItem.workstreamId);
   const jiraEpicMapping = workItem.jiraEpicMappingId === null ? null : jiraEpicMappingIndex.get(workItem.jiraEpicMappingId);
   return {
     id: workItem.id,
     organizationId: workItem.organizationId,
     workspaceId: workItem.workspaceId,
-    scopeId: workItem.scopeId,
-    scope: scope ? { id: scope.id, name: scope.name } : null,
-    featureId: workItem.featureId,
-    feature: feature ? { id: feature.id, scopeId: feature.scopeId, name: feature.name } : null,
+    initiativeId: workItem.initiativeId,
+    initiative: initiative ? { id: initiative.id, name: initiative.name } : null,
+    workstreamId: workItem.workstreamId,
+    workstream: workstream ? { id: workstream.id, initiativeId: workstream.initiativeId, name: workstream.name } : null,
     jiraEpicMappingId: workItem.jiraEpicMappingId,
     jiraEpic: jiraEpicMapping ? {
       id: jiraEpicMapping.id,
-      scopeId: jiraEpicMapping.scopeId,
+      initiativeId: jiraEpicMapping.initiativeId,
       jiraProjectKey: jiraEpicMapping.jiraProjectKey,
       jiraEpicKey: jiraEpicMapping.jiraEpicKey,
       jiraEpicName: jiraEpicMapping.jiraEpicName,
@@ -148,15 +148,15 @@ function milestoneOptions(workspace, options = {}) {
   return { ...options, dueSoonDays };
 }
 
-function publicMilestone(milestone, scopeIndex, options = {}) {
-  const scope = milestone.scopeId === null ? null : scopeIndex.get(milestone.scopeId);
+function publicMilestone(milestone, initiativeIndex, options = {}) {
+  const initiative = milestone.initiativeId === null ? null : initiativeIndex.get(milestone.initiativeId);
   return {
     id: milestone.id,
     organizationId: milestone.organizationId,
     workspaceId: milestone.workspaceId,
-    scopeId: milestone.scopeId,
-    scope: scope ? { id: scope.id, name: scope.name } : null,
-    applicability: scope ? { kind: 'scope', scopeId: scope.id, label: scope.name } : { kind: 'workspace', scopeId: null, label: 'Entire workspace' },
+    initiativeId: milestone.initiativeId,
+    initiative: initiative ? { id: initiative.id, name: initiative.name } : null,
+    applicability: initiative ? { kind: 'initiative', initiativeId: initiative.id, label: initiative.name } : { kind: 'workspace', initiativeId: null, label: 'Entire workspace' },
     title: milestone.title,
     date: milestone.date,
     timing: milestoneTiming(milestone.date, options),
@@ -219,13 +219,13 @@ function publicProposedChange(change) {
 
 function publicBriefing(briefing, resolvers) {
   const workspaces = briefing.workspaceIds.map(workspaceId => resolvers.resolveWorkspace(briefing.organizationId, workspaceId));
-  const scopes = briefing.scopeIds.map(scopeId => resolvers.indexes.scopes.get(scopeId));
+  const initiatives = briefing.initiativeIds.map(initiativeId => resolvers.indexes.initiatives.get(initiativeId));
   return {
     id: briefing.id,
     organizationId: briefing.organizationId,
     name: briefing.name,
     workspaces: workspaces.map(workspace => ({ id: workspace.id, name: workspace.name })),
-    scopes: scopes.map(scope => ({ id: scope.id, workspaceId: scope.workspaceId, name: scope.name })),
+    initiatives: initiatives.map(initiative => ({ id: initiative.id, workspaceId: initiative.workspaceId, name: initiative.name })),
     audienceProfile: briefing.audienceProfile,
     briefingType: briefing.briefingType || 'status-update',
     draftingGuidance: briefing.draftingGuidance || '',
@@ -321,7 +321,7 @@ function publicBriefingVersion(document, version, options = {}) {
     organizationId: version.organizationId,
     briefingId: version.briefingId,
     workspaceIds: [...version.workspaceIds],
-    scopeIds: [...version.scopeIds],
+    initiativeIds: [...version.initiativeIds],
     status: version.status,
     comparisonVersionId: version.comparisonVersionId,
     outputMetadata: outputMetadata(version.outputs),
@@ -396,8 +396,8 @@ function buildPortfolio(document, organizationId) {
   const organization = resolvers.resolveOrganization(organizationId);
   const workspaces = recordsForOrganization(document, 'workspaces', organization.id);
   const workspaceRows = workspaces.map(workspace => {
-    const scopes = recordsForWorkspace(document, 'scopes', organization.id, workspace.id);
-    const features = recordsForWorkspace(document, 'features', organization.id, workspace.id);
+    const initiatives = recordsForWorkspace(document, 'initiatives', organization.id, workspace.id);
+    const workstreams = recordsForWorkspace(document, 'workstreams', organization.id, workspace.id);
     const workItems = recordsForWorkspace(document, 'workItems', organization.id, workspace.id).filter(item => !item.archived);
     const milestones = recordsForWorkspace(document, 'milestones', organization.id, workspace.id);
     const sources = recordsForWorkspace(document, 'sources', organization.id, workspace.id);
@@ -406,10 +406,10 @@ function buildPortfolio(document, organizationId) {
     return {
       ...publicWorkspace(workspace),
       counts: {
-        scopes: scopes.filter(scope => !scope.archived).length,
-        features: features.length,
+        initiatives: initiatives.filter(initiative => !initiative.archived).length,
+        workstreams: workstreams.length,
         workItems: workItems.length,
-        unassignedWorkItems: workItems.filter(item => item.scopeId === null).length,
+        unassignedWorkItems: workItems.filter(item => item.initiativeId === null).length,
         openFollowUps: workItems.filter(item => ['open', 'waiting'].includes(item.followUp.state)).length,
         milestones: milestones.length,
         sources: sources.length,
@@ -425,7 +425,7 @@ function buildPortfolio(document, organizationId) {
       workspaces: workspaceRows.length,
       activeWorkspaces: workspaceRows.filter(workspace => !workspace.archived).length,
       workItems: total('workItems'),
-      features: total('features'),
+      workstreams: total('workstreams'),
       unassignedWorkItems: total('unassignedWorkItems'),
       openFollowUps: total('openFollowUps'),
       milestones: total('milestones'),
@@ -442,10 +442,10 @@ function buildToday(document, organizationId, workspaceId) {
   const resolvers = createTargetResolvers(document);
   const organization = resolvers.resolveOrganization(organizationId);
   const workspace = resolvers.resolveWorkspace(organization.id, workspaceId);
-  const scopes = recordsForWorkspace(document, 'scopes', organization.id, workspace.id);
-  const scopeIndex = new Map(scopes.map(scope => [scope.id, scope]));
-  const features = recordsForWorkspace(document, 'features', organization.id, workspace.id);
-  const featureIndex = new Map(features.map(feature => [feature.id, feature]));
+  const initiatives = recordsForWorkspace(document, 'initiatives', organization.id, workspace.id);
+  const initiativeIndex = new Map(initiatives.map(initiative => [initiative.id, initiative]));
+  const workstreams = recordsForWorkspace(document, 'workstreams', organization.id, workspace.id);
+  const workstreamIndex = new Map(workstreams.map(workstream => [workstream.id, workstream]));
   const jiraEpicMappings = recordsForWorkspace(document, 'jiraEpicMappings', organization.id, workspace.id);
   const jiraEpicMappingIndex = new Map(jiraEpicMappings.map(mapping => [mapping.id, mapping]));
   const workItems = recordsForWorkspace(document, 'workItems', organization.id, workspace.id).filter(item => !item.archived);
@@ -458,26 +458,27 @@ function buildToday(document, organizationId, workspaceId) {
     workspace: publicWorkspace(workspace),
     counts: {
       workItems: workItems.length,
-      features: features.length,
-      assignedWorkItems: workItems.filter(item => item.scopeId !== null).length,
-      unassignedWorkItems: workItems.filter(item => item.scopeId === null).length,
+      workstreams: workstreams.length,
+      assignedWorkItems: workItems.filter(item => item.initiativeId !== null).length,
+      unassignedWorkItems: workItems.filter(item => item.initiativeId === null).length,
       blockedWorkItems: workItems.filter(item => blockedStatuses.has(item.canonicalStatus.trim().toLowerCase())).length,
       openFollowUps: workItems.filter(item => ['open', 'waiting'].includes(item.followUp.state)).length,
       milestones: milestones.length,
       findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').length,
       acceptedEvidence: evidence.length
     },
-    features: features.map(publicFeature),
+    initiatives: initiatives.map(publicInitiative),
+    workstreams: workstreams.map(publicWorkstream),
     jiraEpicMappings: jiraEpicMappings.map(publicJiraEpicMapping),
-    workItems: workItems.map(item => publicWorkItem(item, scopeIndex, featureIndex, jiraEpicMappingIndex)),
+    workItems: workItems.map(item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex)),
     attention: {
       blockedWorkItems: workItems
         .filter(item => blockedStatuses.has(item.canonicalStatus.trim().toLowerCase()))
-        .map(item => publicWorkItem(item, scopeIndex, featureIndex, jiraEpicMappingIndex)),
+        .map(item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex)),
       followUps: workItems
         .filter(item => ['open', 'waiting'].includes(item.followUp.state))
-        .map(item => publicWorkItem(item, scopeIndex, featureIndex, jiraEpicMappingIndex)),
-      milestones: milestones.map(milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace))),
+        .map(item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex)),
+      milestones: milestones.map(milestone => publicMilestone(milestone, initiativeIndex, milestoneOptions(workspace))),
       findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').map(publicFinding)
     }
   };
@@ -498,8 +499,8 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
   const resolvers = createTargetResolvers(document);
   const workspace = resolvers.resolveWorkspace(organizationId, workspaceId);
   const needle = normalizeSearchQuery(query);
-  const scopeIndex = new Map(recordsForWorkspace(document, 'scopes', organizationId, workspace.id).map(scope => [scope.id, scope]));
-  const featureIndex = new Map(recordsForWorkspace(document, 'features', organizationId, workspace.id).map(feature => [feature.id, feature]));
+  const initiativeIndex = new Map(recordsForWorkspace(document, 'initiatives', organizationId, workspace.id).map(initiative => [initiative.id, initiative]));
+  const workstreamIndex = new Map(recordsForWorkspace(document, 'workstreams', organizationId, workspace.id).map(workstream => [workstream.id, workstream]));
   const jiraEpicMappingIndex = new Map(recordsForWorkspace(document, 'jiraEpicMappings', organizationId, workspace.id).map(mapping => [mapping.id, mapping]));
   const contains = values => values.some(value => String(value || '').toLocaleLowerCase('en-US').includes(needle));
   const results = [];
@@ -507,11 +508,33 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
     if (results.length < MAX_SEARCH_RESULTS) results.push(result);
   };
 
-  recordsForWorkspace(document, 'scopes', organizationId, workspace.id).forEach(scope => {
-    if (contains([scope.name, scope.description, scope.owner])) add({ kind: 'scope', id: scope.id, title: scope.name, workspaceId: workspace.id, scopeId: scope.id });
+  recordsForWorkspace(document, 'initiatives', organizationId, workspace.id).forEach(initiative => {
+    if (contains([initiative.name, initiative.description, initiative.owner])) add({ kind: 'initiative', id: initiative.id, title: initiative.name, workspaceId: workspace.id, initiativeId: initiative.id });
   });
-  recordsForWorkspace(document, 'features', organizationId, workspace.id).forEach(feature => {
-    if (contains([feature.name, feature.description])) add({ kind: 'feature', id: feature.id, title: feature.name, workspaceId: workspace.id, scopeId: feature.scopeId });
+  recordsForWorkspace(document, 'workstreams', organizationId, workspace.id).forEach(workstream => {
+    if (contains([workstream.name, workstream.description])) add({ kind: 'workstream', id: workstream.id, title: workstream.name, workspaceId: workspace.id, initiativeId: workstream.initiativeId });
+  });
+  recordsForWorkspace(document, 'jiraEpicMappings', organizationId, workspace.id).forEach(mapping => {
+    if (contains([
+      mapping.jiraProjectKey,
+      mapping.jiraEpicKey,
+      mapping.jiraEpicName,
+      mapping.mappingStatus,
+      mapping.provenance
+    ])) {
+      add({
+        kind: 'jiraEpicMapping',
+        id: mapping.id,
+        title: `${mapping.jiraEpicKey} — ${mapping.jiraEpicName}`,
+        workspaceId: workspace.id,
+        initiativeId: mapping.initiativeId,
+        jiraProjectKey: mapping.jiraProjectKey,
+        jiraEpicKey: mapping.jiraEpicKey,
+        jiraEpicName: mapping.jiraEpicName,
+        mappingStatus: mapping.mappingStatus,
+        provenance: mapping.provenance
+      });
+    }
   });
   recordsForWorkspace(document, 'workItems', organizationId, workspace.id).forEach(item => {
     const mapping = jiraEpicMappingIndex.get(item.jiraEpicMappingId);
@@ -521,7 +544,7 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
       item.canonicalStatus,
       item.assignee,
       item.sprint,
-      featureIndex.get(item.featureId)?.name,
+      workstreamIndex.get(item.workstreamId)?.name,
       mapping?.jiraEpicKey,
       mapping?.jiraEpicName
     ])) {
@@ -530,10 +553,10 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
         id: item.id,
         title: item.summary,
         workspaceId: workspace.id,
-        scopeId: item.scopeId,
-        scopeName: scopeIndex.get(item.scopeId)?.name || null,
-        featureId: item.featureId,
-        featureName: featureIndex.get(item.featureId)?.name || null,
+        initiativeId: item.initiativeId,
+        initiativeName: initiativeIndex.get(item.initiativeId)?.name || null,
+        workstreamId: item.workstreamId,
+        workstreamName: workstreamIndex.get(item.workstreamId)?.name || null,
         jiraEpicMappingId: item.jiraEpicMappingId,
         jiraEpicKey: mapping?.jiraEpicKey || null,
         jiraEpicName: mapping?.jiraEpicName || null,
@@ -543,13 +566,13 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
     }
   });
   recordsForWorkspace(document, 'milestones', organizationId, workspace.id).forEach(milestone => {
-    if (contains([milestone.title, milestone.status, milestone.notes])) add({ kind: 'milestone', id: milestone.id, title: milestone.title, workspaceId: workspace.id, scopeId: milestone.scopeId });
+    if (contains([milestone.title, milestone.status, milestone.notes])) add({ kind: 'milestone', id: milestone.id, title: milestone.title, workspaceId: workspace.id, initiativeId: milestone.initiativeId });
   });
   recordsForWorkspace(document, 'sources', organizationId, workspace.id).forEach(source => {
-    if (contains([source.title, source.type, source.sourceKind, source.date])) add({ kind: 'source', id: source.id, title: source.title, workspaceId: workspace.id, scopeId: null, date: source.date });
+    if (contains([source.title, source.type, source.sourceKind, source.date])) add({ kind: 'source', id: source.id, title: source.title, workspaceId: workspace.id, initiativeId: null, date: source.date });
   });
   recordsForWorkspace(document, 'evidence', organizationId, workspace.id).forEach(evidence => {
-    if (contains([evidence.exactExcerpt, evidence.currentness])) add({ kind: 'evidence', id: evidence.id, title: excerpt(evidence.exactExcerpt), workspaceId: workspace.id, scopeId: evidence.scopeId, sourceId: evidence.sourceId });
+    if (contains([evidence.exactExcerpt, evidence.currentness])) add({ kind: 'evidence', id: evidence.id, title: excerpt(evidence.exactExcerpt), workspaceId: workspace.id, initiativeId: evidence.initiativeId, sourceId: evidence.sourceId });
   });
   return { organizationId, workspaceId: workspace.id, query, results };
 }
@@ -557,15 +580,15 @@ function searchWorkspace(document, organizationId, workspaceId, query) {
 function listWorkspaceCollection(document, collection, organizationId, workspaceId) {
   const resolvers = createTargetResolvers(document);
   const workspace = resolvers.resolveWorkspace(organizationId, workspaceId);
-  const scopeIndex = new Map(recordsForWorkspace(document, 'scopes', organizationId, workspace.id).map(scope => [scope.id, scope]));
-  const featureIndex = new Map(recordsForWorkspace(document, 'features', organizationId, workspace.id).map(feature => [feature.id, feature]));
+  const initiativeIndex = new Map(recordsForWorkspace(document, 'initiatives', organizationId, workspace.id).map(initiative => [initiative.id, initiative]));
+  const workstreamIndex = new Map(recordsForWorkspace(document, 'workstreams', organizationId, workspace.id).map(workstream => [workstream.id, workstream]));
   const jiraEpicMappingIndex = new Map(recordsForWorkspace(document, 'jiraEpicMappings', organizationId, workspace.id).map(mapping => [mapping.id, mapping]));
   const serializers = {
-    scopes: publicScope,
-    features: publicFeature,
+    initiatives: publicInitiative,
+    workstreams: publicWorkstream,
     jiraEpicMappings: publicJiraEpicMapping,
-    workItems: item => publicWorkItem(item, scopeIndex, featureIndex, jiraEpicMappingIndex),
-    milestones: milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace)),
+    workItems: item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex),
+    milestones: milestone => publicMilestone(milestone, initiativeIndex, milestoneOptions(workspace)),
     sources: source => publicSource(source),
     findings: publicFinding,
     evidence: publicEvidence,
@@ -578,31 +601,31 @@ function getWorkspaceChild(document, collection, organizationId, workspaceId, ch
   const resolvers = createTargetResolvers(document);
   const workspace = resolvers.resolveWorkspace(organizationId, workspaceId);
   const child = resolvers.resolveWorkspaceChild(collection, organizationId, workspaceId, childId);
-  const scopeIndex = resolvers.indexes.scopes;
-  const featureIndex = resolvers.indexes.features;
+  const initiativeIndex = resolvers.indexes.initiatives;
+  const workstreamIndex = resolvers.indexes.workstreams;
   const jiraEpicMappingIndex = resolvers.indexes.jiraEpicMappings;
   const serializers = {
-    scopes: scope => ({
-      ...publicScope(scope),
-      features: recordsForWorkspace(document, 'features', organizationId, workspace.id)
-        .filter(feature => feature.scopeId === scope.id)
-        .map(publicFeature),
+    initiatives: initiative => ({
+      ...publicInitiative(initiative),
+      workstreams: recordsForWorkspace(document, 'workstreams', organizationId, workspace.id)
+        .filter(workstream => workstream.initiativeId === initiative.id)
+        .map(publicWorkstream),
       jiraEpicMappings: recordsForWorkspace(document, 'jiraEpicMappings', organizationId, workspace.id)
-        .filter(mapping => mapping.scopeId === scope.id)
+        .filter(mapping => mapping.initiativeId === initiative.id)
         .map(publicJiraEpicMapping)
     }),
-    features: publicFeature,
+    workstreams: publicWorkstream,
     jiraEpicMappings: publicJiraEpicMapping,
-    workItems: item => publicWorkItem(item, scopeIndex, featureIndex, jiraEpicMappingIndex),
-    milestones: milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace)),
+    workItems: item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex),
+    milestones: milestone => publicMilestone(milestone, initiativeIndex, milestoneOptions(workspace)),
     sources: source => publicSource(source, { includeContent: true }),
     findings: publicFinding,
     evidence: publicEvidence,
     proposedChanges: publicProposedChange
   };
   const singularKeys = {
-    scopes: 'scope',
-    features: 'feature',
+    initiatives: 'initiative',
+    workstreams: 'workstream',
     jiraEpicMappings: 'jiraEpicMapping',
     workItems: 'workItem',
     milestones: 'milestone',
@@ -688,11 +711,11 @@ function buildOrganizationArchive(document, organizationId, kind) {
   const savedWorkspaceId = document.userPreferences.activeWorkspaceIdsByOrganization[organization.id];
   return {
     schemaVersion: document.schemaVersion,
-    scope: { kind, organizationId: organization.id },
+    exportContext: { kind, organizationId: organization.id },
     organizations: [clone(organization)],
     workspaces: clone(workspaces),
-    scopes: clone(recordsForOrganization(document, 'scopes', organization.id)),
-    features: clone(recordsForOrganization(document, 'features', organization.id)),
+    initiatives: clone(recordsForOrganization(document, 'initiatives', organization.id)),
+    workstreams: clone(recordsForOrganization(document, 'workstreams', organization.id)),
     jiraEpicMappings: clone(recordsForOrganization(document, 'jiraEpicMappings', organization.id)),
     workItems: clone(recordsForOrganization(document, 'workItems', organization.id)),
     milestones: clone(recordsForOrganization(document, 'milestones', organization.id)),
@@ -715,10 +738,10 @@ function buildAiContext(document, organizationId, workspaceId) {
   const resolvers = createTargetResolvers(document);
   const organization = resolvers.resolveOrganization(organizationId);
   const workspace = resolvers.resolveWorkspace(organization.id, workspaceId);
-  const scopes = recordsForWorkspace(document, 'scopes', organization.id, workspace.id);
-  const scopeIndex = new Map(scopes.map(scope => [scope.id, scope]));
-  const features = recordsForWorkspace(document, 'features', organization.id, workspace.id);
-  const featureIndex = new Map(features.map(feature => [feature.id, feature]));
+  const initiatives = recordsForWorkspace(document, 'initiatives', organization.id, workspace.id);
+  const initiativeIndex = new Map(initiatives.map(initiative => [initiative.id, initiative]));
+  const workstreams = recordsForWorkspace(document, 'workstreams', organization.id, workspace.id);
+  const workstreamIndex = new Map(workstreams.map(workstream => [workstream.id, workstream]));
   const jiraEpicMappings = recordsForWorkspace(document, 'jiraEpicMappings', organization.id, workspace.id);
   const jiraEpicMappingIndex = new Map(jiraEpicMappings.map(mapping => [mapping.id, mapping]));
   const briefings = recordsForOrganization(document, 'briefings', organization.id)
@@ -742,13 +765,13 @@ function buildAiContext(document, organizationId, workspaceId) {
       promptOverrides: clone(workspace.promptOverrides),
       draftingGuidance: workspace.draftingGuidance
     },
-    scopes: scopes.map(publicScope),
-    features: features.map(publicFeature),
+    initiatives: initiatives.map(publicInitiative),
+    workstreams: workstreams.map(publicWorkstream),
     jiraEpicMappings: jiraEpicMappings.map(publicJiraEpicMapping),
     workItems: recordsForWorkspace(document, 'workItems', organization.id, workspace.id)
-      .map(item => publicWorkItem(item, scopeIndex, featureIndex, jiraEpicMappingIndex)),
+      .map(item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex)),
     milestones: recordsForWorkspace(document, 'milestones', organization.id, workspace.id)
-      .map(milestone => publicMilestone(milestone, scopeIndex, milestoneOptions(workspace))),
+      .map(milestone => publicMilestone(milestone, initiativeIndex, milestoneOptions(workspace))),
     sources: recordsForWorkspace(document, 'sources', organization.id, workspace.id).map(source => publicSource(source, { includeContent: true })),
     evidence: recordsForWorkspace(document, 'evidence', organization.id, workspace.id).map(publicEvidence),
     briefings,
@@ -783,7 +806,7 @@ module.exports = {
   publicOrganization,
   publicBriefing,
   publicBriefingVersion,
-  publicFeature,
+  publicWorkstream,
   publicMilestone,
   publicSource,
   publicWorkItem,

@@ -24,10 +24,10 @@ const RULES = Object.freeze([
     allowedLines: { 'test/target-phase4-shell.test.js': [/^\s*'Project \/ Jira Epic', 'Project\/Epic', 'All projects', 'whole PM workspace', 'Project stream',$/] }
   },
   {
-    label: 'catch-all Scope',
+    label: 'catch-all Initiative',
     pattern: /Miscellaneous\s*\/\s*No Epic/i,
     allowedLines: {
-      'target-model/schema.js': [/^const FORBIDDEN_SCOPE_NAMES = new Set\(\['unassigned', 'miscellaneous \/ no epic', 'miscellaneous\/no epic', 'no epic'\]\);$/],
+      'target-model/schema.js': [/^const FORBIDDEN_INITIATIVE_NAMES = new Set\(\['unassigned', 'miscellaneous \/ no epic', 'miscellaneous\/no epic', 'no epic'\]\);$/],
       'target-server/capture-services.js': [/^\s*if \(\['unassigned', 'miscellaneous \/ no epic', 'miscellaneous\/no epic', 'no epic'\]\.includes\(name\.trim\(\)\.toLowerCase\(\)\)\) throw invalidRequest\(\);$/],
       'test/target-model-schema.test.js': [
         /^\s*assert\.doesNotMatch\(JSON\.stringify\(seed\), \/Miscellaneous \\\/ No Epic\|No Epic\|catch-all\/i\);$/,
@@ -61,10 +61,17 @@ const RULES = Object.freeze([
   },
   { label: 'mutable legacy lookup', pattern: /\bgetProject\s*\(/ },
   { label: 'legacy projects map', pattern: /\bprojects\s+map\b/i },
-  { label: 'legacy DSU-only copy', pattern: /Extracted DSU updates/i, allowedLines: { 'test/target-phase4-shell.test.js': [/^\s*'Extracted DSU updates', 'Teams Draft', 'Status Summary'$/] } },
+  { label: 'legacy DSU-only copy', pattern: /Extracted DSU updates/i, allowedLines: { 'test/target-phase4-shell.test.js': [/^\s*'Extracted DSU updates', 'Teams Draft', 'Status Summary', 'Strategy', 'Sub-task', 'PM Workspace', 'Scope', 'Feature'$/] } },
   { label: 'legacy status communication', pattern: /Legacy Status Summary|Legacy Teams Draft/i },
   { label: 'legacy Briefing ownership', pattern: /\bbriefing stream\b/i, allowedLines: { 'test/target-phase4-shell.test.js': [/^\s*'Briefing stream', 'Project not identified', 'Miscellaneous \/ No Epic', 'Evidence pending',$/] } },
-  { label: 'legacy Workspace wording', pattern: /\bthis project\b|\bwhole PM workspace\b/i, allowedLines: { 'test/target-phase4-shell.test.js': [/^\s*'Project \/ Jira Epic', 'Project\/Epic', 'All projects', 'whole PM workspace', 'Project stream',$/] } },
+  {
+    label: 'legacy Workspace wording',
+    pattern: /\bthis project\b|\bwhole PM workspace\b/i,
+    allowedLines: {
+      'test/target-phase4-shell.test.js': [/^\s*'Project \/ Jira Epic', 'Project\/Epic', 'All projects', 'whole PM workspace', 'Project stream',$/],
+      'test/target-phase5-hardening.test.js': [/^\s*assert\.ok\(scanLegacyText\('public\/target\/example\.js', 'const label = "whole PM workspace";'\)\.length\);$/]
+    }
+  },
   {
     label: 'direct legacy runtime selection',
     pattern: /\bPMDS_DATA_FILE\b|\bPMDS_UPLOADS_DIR\b|\bpilot-data\.json\b/,
@@ -75,7 +82,62 @@ const RULES = Object.freeze([
     }
   },
   { label: 'native blocking popup', pattern: /\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/ },
-  { label: 'automatic external action', pattern: /\b(?:sendBriefing|sendMessage|autoPublish|writeToJira|updateJiraIssue)\s*\(/i }
+  { label: 'automatic external action', pattern: /\b(?:sendBriefing|sendMessage|autoPublish|writeToJira|updateJiraIssue)\s*\(/i },
+  {
+    label: 'active legacy Scope model',
+    pattern: /\b(?:scopes|scopeId)\b|\/scopes(?:\/|\b)|assign-scope/i,
+    excludedFiles: new Set(['scripts/release/rollback-application.js']),
+    allowedLines: {
+      'test/target-phase3-capture.test.js': [/version: 'target-v3'.*scopeId: 'scope-legacy'/],
+      'test/target-phase4-shell.test.js': [/^\s*'Extracted DSU updates', 'Teams Draft', 'Status Summary', 'Strategy', 'Sub-task', 'PM Workspace', 'Scope', 'Feature'$/],
+      'test/target-model-schema.test.js': [
+        /^\s*assert\.doesNotMatch\(JSON\.stringify\(seed\), \/PM Workspace\|Scope\|Feature\|PJM\|scope-\|feature-\/i\);$/,
+        /^\s*for \(const legacyCollection of \['scopes', 'features'\]\) \{$/,
+        /^\s*for \(const legacyField of \['scopeId', 'featureId'\]\) \{$/
+      ],
+      'test/target-phase5-hardening.test.js': [/^\s*assert\.ok\(scanLegacyText\('test\/example\.test\.js', 'const collection = document\.scopes;'\)\.length\);$/],
+      'test/target-workstream-hierarchy.test.js': [
+        /^\s*`\$\{workspaceBase\(ALPHA\)\}\/scopes`,$/,
+        /^\s*`\$\{workspaceBase\(ALPHA\)\}\/scopes\/scope-alpha\/features`$/,
+        /^\s*for \(const type of \['assign-scope', 'assign-feature'\]\) \{$/,
+        /^\s*action: \{ type, scopeId: null, featureId: null \}$/
+      ]
+    }
+  },
+  {
+    label: 'active legacy Feature model',
+    pattern: /\b(?:features|featureId)\b|\/features(?:\/|\b)|assign-feature/i,
+    excludedFiles: new Set(['scripts/release/rollback-application.js']),
+    allowedLines: {
+      'test/target-phase3-capture.test.js': [/version: 'target-v4'.*featureId: 'feature-legacy'/],
+      'test/target-phase4-shell.test.js': [/^\s*'Extracted DSU updates', 'Teams Draft', 'Status Summary', 'Strategy', 'Sub-task', 'PM Workspace', 'Scope', 'Feature'$/],
+      'test/target-model-schema.test.js': [
+        /^\s*assert\.doesNotMatch\(JSON\.stringify\(seed\), \/PM Workspace\|Scope\|Feature\|PJM\|scope-\|feature-\/i\);$/,
+        /^\s*for \(const legacyCollection of \['scopes', 'features'\]\) \{$/,
+        /^\s*for \(const legacyField of \['scopeId', 'featureId'\]\) \{$/
+      ],
+      'test/target-phase5-hardening.test.js': [/^\s*assert\.ok\(scanLegacyText\('test-support\/example\.js', 'const relationship = value\.featureId;'\)\.length\);$/],
+      'test/target-workstream-hierarchy.test.js': [
+        /^\s*`\$\{workspaceBase\(ALPHA\)\}\/features`,$/,
+        /^\s*`\$\{workspaceBase\(ALPHA\)\}\/scopes\/scope-alpha\/features`$/,
+        /^\s*for \(const type of \['assign-scope', 'assign-feature'\]\) \{$/,
+        /^\s*action: \{ type, scopeId: null, featureId: null \}$/
+      ]
+    }
+  },
+  {
+    label: 'active legacy PM Workspace wording',
+    pattern: /\bPM Workspace\b/i,
+    excludedFiles: new Set(['scripts/release/rollback-application.js']),
+    allowedLines: {
+      'test/target-phase4-shell.test.js': [
+        /^\s*'Project \/ Jira Epic', 'Project\/Epic', 'All projects', 'whole PM workspace', 'Project stream',$/,
+        /^\s*'Extracted DSU updates', 'Teams Draft', 'Status Summary', 'Strategy', 'Sub-task', 'PM Workspace', 'Scope', 'Feature'$/
+      ],
+      'test/target-model-schema.test.js': [/^\s*assert\.doesNotMatch\(JSON\.stringify\(seed\), \/PM Workspace\|Scope\|Feature\|PJM\|scope-\|feature-\/i\);$/],
+      'test/target-phase5-hardening.test.js': [/^\s*assert\.ok\(scanLegacyText\('public\/target\/example\.js', 'const label = "whole PM workspace";'\)\.length\);$/]
+    }
+  }
 ]);
 
 function activeFile(file) {
@@ -87,6 +149,7 @@ function activeFile(file) {
 function scanText(file, text) {
   const findings = [];
   for (const rule of RULES) {
+    if (rule.excludedFiles?.has(file)) continue;
     const flags = rule.pattern.flags.includes('g') ? rule.pattern.flags : `${rule.pattern.flags}g`;
     const pattern = new RegExp(rule.pattern.source, flags);
     for (const match of text.matchAll(pattern)) {

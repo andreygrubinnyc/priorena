@@ -33,7 +33,7 @@ async function run(argv = process.argv.slice(2), repositoryRoot = process.cwd())
     counts: {
       organizations: document.organizations.length,
       workspaces: document.workspaces.length,
-      scopes: document.scopes.length,
+      initiatives: document.initiatives.length,
       operationalRecords: 0
     }
   };

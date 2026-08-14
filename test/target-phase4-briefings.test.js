@@ -16,7 +16,7 @@ const {
   requestApp,
   workspaceBase
 } = require('../test-support/target-api-harness');
-const { createPhase3WorkflowFixture } = require('../test-support/target-v3-fixtures');
+const { createPhase3WorkflowFixture } = require('../test-support/target-v5-fixtures');
 
 const NOW = '2026-08-09T12:00:00.000Z';
 const COMMUNICATED_AT = '2026-08-10T12:00:00.000Z';
@@ -38,7 +38,7 @@ function definition(overrides = {}) {
   return {
     name: 'Fictional Weekly Delivery Briefing',
     workspaceIds: [ALPHA.workspaceId],
-    scopeIds: [],
+    initiativeIds: [],
     audienceProfile: 'Fictional delivery stakeholders',
     preferredFormats: ['teams', 'email', 'confluence'],
     defaultSections: ['progress', 'risk', 'milestones', 'follow-up', 'evidence'],
@@ -91,11 +91,11 @@ test('Briefing definitions are Organization-owned, stable-ID selected, revision-
   const { app, targetDataFile } = await createTargetApiHarness(t, () => {}, runtimeOptions());
   const created = await createDefinition(app, targetDataFile, {
     workspaceIds: ['workspace-alpha-shared', 'workspace-alpha-secondary'],
-    scopeIds: ['scope-alpha-multiple-mappings', 'scope-alpha-secondary']
+    initiativeIds: ['initiative-alpha-multiple-mappings', 'initiative-alpha-secondary']
   });
   assert.equal(created.briefing.organizationId, ALPHA.organizationId);
   assert.deepEqual(created.briefing.workspaces.map(item => item.id), ['workspace-alpha-shared', 'workspace-alpha-secondary']);
-  assert.deepEqual(created.briefing.scopes.map(item => item.id), ['scope-alpha-multiple-mappings', 'scope-alpha-secondary']);
+  assert.deepEqual(created.briefing.initiatives.map(item => item.id), ['initiative-alpha-multiple-mappings', 'initiative-alpha-secondary']);
   assert.equal(created.briefing.briefingType, 'status-update');
 
   let response = await jsonRequest(app, 'PATCH', `${briefingBase()}/${created.briefing.id}`, {
@@ -127,7 +127,7 @@ test('Briefing definitions are Organization-owned, stable-ID selected, revision-
   response = await jsonRequest(app, 'POST', briefingBase(), {
     expectedRevision: await currentRevision(targetDataFile),
     actor: 'phase4-test-reviewer',
-    briefing: definition({ scopeIds: ['scope-alpha-secondary'] })
+    briefing: definition({ initiativeIds: ['initiative-alpha-secondary'] })
   });
   assert.equal(response.status, 404);
 
@@ -202,7 +202,7 @@ test('Draft edit, explicit refresh, and deterministic previews preserve Manual P
     expectedRevision: prepared.revision,
     actor: 'phase4-test-reviewer',
     workItem: {
-      scopeId: null,
+      initiativeId: null,
       itemType: 'Task',
       summary: 'Fictional newly captured delivery item',
       canonicalStatus: 'Planned',
@@ -420,7 +420,7 @@ test('every Briefing lifecycle and output command rejects recursively nested for
     const candidates = buildCandidateFacts(document, {
       organizationId: briefing.organizationId,
       workspaceIds: briefing.workspaceIds,
-      scopeIds: briefing.scopeIds,
+      initiativeIds: briefing.initiativeIds,
       defaultSections: briefing.defaultSections
     });
     const definitionSnapshot = {
@@ -432,16 +432,16 @@ test('every Briefing lifecycle and output command rejects recursively nested for
       defaultSections: [...briefing.defaultSections],
       draftingGuidance: '',
       workspaceIds: [...briefing.workspaceIds],
-      scopeIds: [...briefing.scopeIds],
+      initiativeIds: [...briefing.initiativeIds],
       workspaces: briefing.workspaceIds.map(workspaceId => {
         const workspace = document.workspaces.find(item => item.id === workspaceId);
-        const selectedScopes = document.scopes.filter(scope => briefing.scopeIds.includes(scope.id) && scope.workspaceId === workspaceId);
+        const selectedInitiatives = document.initiatives.filter(initiative => briefing.initiativeIds.includes(initiative.id) && initiative.workspaceId === workspaceId);
         return {
           id: workspace.id,
           name: workspace.name,
-          selection: selectedScopes.length
-            ? { kind: 'selected-scopes', label: selectedScopes.map(scope => scope.name).join(', '), scopes: selectedScopes.map(scope => ({ id: scope.id, name: scope.name })) }
-            : { kind: 'entire-workspace', label: 'Entire workspace', scopes: [] }
+          selection: selectedInitiatives.length
+            ? { kind: 'selected-initiatives', label: selectedInitiatives.map(initiative => initiative.name).join(', '), initiatives: selectedInitiatives.map(initiative => ({ id: initiative.id, name: initiative.name })) }
+            : { kind: 'entire-workspace', label: 'Entire workspace', initiatives: [] }
         };
       })
     };
@@ -450,7 +450,7 @@ test('every Briefing lifecycle and output command rejects recursively nested for
       organizationId: briefing.organizationId,
       briefingId: briefing.id,
       workspaceIds: [...briefing.workspaceIds],
-      scopeIds: [...briefing.scopeIds],
+      initiativeIds: [...briefing.initiativeIds],
       status: 'draft',
       comparisonVersionId: null,
       frozenSnapshot: {

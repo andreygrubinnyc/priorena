@@ -4,8 +4,8 @@ const { invalidId, notFound } = require('./errors');
 
 const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const WORKSPACE_COLLECTIONS = Object.freeze([
-  'scopes',
-  'features',
+  'initiatives',
+  'workstreams',
   'jiraEpicMappings',
   'workItems',
   'milestones',
@@ -82,9 +82,9 @@ function createTargetResolvers(document) {
     if (!briefing || briefing.organizationId !== organization.id) throw notFound();
     const selectedWorkspaces = briefing.workspaceIds.map(workspaceId => resolveWorkspace(organization.id, workspaceId));
     const selectedWorkspaceIds = new Set(selectedWorkspaces.map(workspace => workspace.id));
-    briefing.scopeIds.forEach(scopeId => {
-      const scope = indexes.scopes.get(assertStableId(scopeId));
-      if (!scope || scope.organizationId !== organization.id || !selectedWorkspaceIds.has(scope.workspaceId)) throw notFound();
+    briefing.initiativeIds.forEach(initiativeId => {
+      const initiative = indexes.initiatives.get(assertStableId(initiativeId));
+      if (!initiative || initiative.organizationId !== organization.id || !selectedWorkspaceIds.has(initiative.workspaceId)) throw notFound();
     });
     return briefing;
   }
@@ -95,9 +95,9 @@ function createTargetResolvers(document) {
     if (!version || version.organizationId !== briefing.organizationId || version.briefingId !== briefing.id) throw notFound();
     const selectedWorkspaceIds = new Set(version.workspaceIds);
     version.workspaceIds.forEach(workspaceId => resolveWorkspace(briefing.organizationId, workspaceId));
-    version.scopeIds.forEach(scopeId => {
-      const scope = indexes.scopes.get(assertStableId(scopeId));
-      if (!scope || scope.organizationId !== briefing.organizationId || !selectedWorkspaceIds.has(scope.workspaceId)) throw notFound();
+    version.initiativeIds.forEach(initiativeId => {
+      const initiative = indexes.initiatives.get(assertStableId(initiativeId));
+      if (!initiative || initiative.organizationId !== briefing.organizationId || !selectedWorkspaceIds.has(initiative.workspaceId)) throw notFound();
     });
     return version;
   }

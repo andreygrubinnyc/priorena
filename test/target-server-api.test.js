@@ -14,7 +14,7 @@ const { PUBLIC_ERRORS } = require('../target-server/errors');
 const { MAX_SOURCE_FILE_BYTES } = require('../target-server/source-files');
 const { EXPECT_TARGET_ABSENT, writeTargetData } = require('../target-model/persistence');
 const { validateTargetData } = require('../target-model/schema');
-const { createMultiOrganizationFixture } = require('../test-support/target-v3-fixtures');
+const { createMultiOrganizationFixture } = require('../test-support/target-v5-fixtures');
 
 const ALPHA = Object.freeze({
   organizationId: 'org-fixture-alpha',
@@ -115,7 +115,7 @@ function prepareInitialFixture() {
 async function createHarness(t, mutate = () => {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-api-'));
   const sourceFilesRoot = path.join(root, 'source-files');
-  const targetDataFile = path.join(root, 'target-v4.json');
+  const targetDataFile = path.join(root, 'target-v5.json');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   const document = prepareInitialFixture();
 
@@ -154,8 +154,8 @@ function assertNoSentinel(value, sentinels) {
 }
 
 test('target services require explicit isolated data and Source-file paths', () => {
-  assert.throws(() => createTargetApiApp({}), /explicit schema-v4 data-file path/);
-  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v4.json' }), /explicit safe root/);
+  assert.throws(() => createTargetApiApp({}), /explicit schema-v5 data-file path/);
+  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v5.json' }), /explicit safe root/);
   const source = require('node:fs').readFileSync(path.join(__dirname, '..', 'target-server', 'services.js'), 'utf8');
   assert.doesNotMatch(source, /PMDS_DATA_FILE|PMDS_UPLOADS_DIR|\.priorena-data|pilot-data\.json/);
   assert.doesNotMatch(source, /require\(['"]\.\.\/server['"]\)/);
@@ -234,7 +234,7 @@ test('Portfolio is an Organization-only projection with stable Workspace rows an
   assert.equal(absentGlobal.status, 404);
 });
 
-test('Today is Workspace-scoped and preserves Unassigned as scopeId null', async t => {
+test('Today is Workspace-scoped and preserves Unassigned as initiativeId null', async t => {
   const { app } = await createHarness(t);
   const response = await requestApp(app, { url: `${workspaceBase(ALPHA)}/today` });
   assert.equal(response.status, 200);
@@ -243,9 +243,10 @@ test('Today is Workspace-scoped and preserves Unassigned as scopeId null', async
   assert.equal(today.workspace.id, ALPHA.workspaceId);
   assert.equal(today.counts.workItems, 2);
   assert.equal(today.counts.unassignedWorkItems, 1);
+  assert.ok(today.initiatives.some(item => item.id === 'initiative-alpha-multiple-mappings'));
   const unassigned = today.workItems.find(item => item.id === 'work-item-alpha-unassigned');
-  assert.equal(unassigned.scopeId, null);
-  assert.equal(unassigned.scope, null);
+  assert.equal(unassigned.initiativeId, null);
+  assert.equal(unassigned.initiative, null);
   assertNoSentinel(today, ['org-fixture-beta', 'workspace-beta-shared', 'BETA SENTINEL', 'BETA MILESTONE']);
 
   const foreign = await requestApp(app, { url: `${TARGET_API_NAMESPACE}/organizations/${ALPHA.organizationId}/workspaces/${BETA.workspaceId}/today` });
@@ -277,7 +278,7 @@ test('parent-scoped search validates bounds and returns only safe local metadata
 test('every Workspace-owned child route rejects known IDs under wrong parents like unknown IDs', async t => {
   const { app } = await createHarness(t);
   const cases = [
-    ['scopes', 'scope-alpha-multiple-mappings'],
+    ['initiatives', 'initiative-alpha-multiple-mappings'],
     ['jira-epic-mappings', 'jira-mapping-alpha-one'],
     ['work-items', 'work-item-alpha-assigned'],
     ['milestones', 'milestone-alpha-workspace'],
@@ -505,10 +506,10 @@ test('Organization export and ordinary backup share a bounded scoped projection 
     const response = await requestApp(app, { url: `${TARGET_API_NAMESPACE}/organizations/${ALPHA.organizationId}/${kind}` });
     assert.equal(response.status, 200);
     const archive = response.json();
-    assert.equal(archive.scope.kind, kind);
+    assert.equal(archive.exportContext.kind, kind);
     assert.deepEqual(archive.organizations.map(item => item.id), [ALPHA.organizationId]);
     assert.ok(archive.workspaces.every(item => item.organizationId === ALPHA.organizationId));
-    assert.ok(archive.scopes.every(item => archive.workspaces.some(workspace => workspace.id === item.workspaceId)));
+    assert.ok(archive.initiatives.every(item => archive.workspaces.some(workspace => workspace.id === item.workspaceId)));
     assert.equal(archive.globalTechnicalSettings, undefined);
     assertNoSentinel(archive, ['org-fixture-beta', 'workspace-beta-shared', 'BETA SENTINEL', 'BETA PROMPT', 'relativePath', 'GLOBAL CUSTOMER CONTEXT']);
     assert.match(response.headers['content-disposition'], new RegExp(`priorena-organization-${kind}-${ALPHA.organizationId}\\.json`));
@@ -714,6 +715,11 @@ test('client API consumption constructs only stable parent-scoped Workspace, Por
   ]);
   urls.forEach(url => assert.doesNotMatch(url, /all-organizations|workspaceName|organizationName/));
   assert.throws(() => client.loadToday(ALPHA.organizationId, 'Shared Delivery Workspace'), /stable opaque ID/);
+
+  const failingClient = createTargetApiClient({
+    async request() { return { ok: false, async json() { return {}; } }; }
+  });
+  await assert.rejects(failingClient.listWorkspaces(ALPHA.organizationId), /Scoped target request failed/);
 });
 
 test('adversarial cross-surface integration contains zero foreign IDs or sentinel text in both directions', async t => {
@@ -765,7 +771,7 @@ test('target API retains loopback, headers, method, request-size, and revision p
   assert.equal(response.status, 413);
 });
 
-test('all read-only API and service operations leave the schema-v4 target file unchanged', async t => {
+test('all read-only API and service operations leave the schema-v5 target file unchanged', async t => {
   const { app, services, targetDataFile } = await createHarness(t);
   const before = await fs.readFile(targetDataFile);
   await requestApp(app, { url: `${TARGET_API_NAMESPACE}/organizations/${ALPHA.organizationId}/portfolio` });

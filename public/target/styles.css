@@ -50,7 +50,7 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .page-header h1 { margin: .25rem 0; font-size: clamp(1.8rem, 4vw, 2.7rem); }
 .breadcrumb { margin: 0; overflow-wrap: anywhere; }
 .page-description { margin: 0; color: var(--muted); }
-.scope-chip, .badge { display: inline-flex; align-items: center; min-height: 1.75rem; padding: .25rem .65rem; border-radius: 999px; background: var(--accent-soft); color: #2347aa; font-size: .78rem; font-weight: 700; }
+.initiative-chip, .badge { display: inline-flex; align-items: center; min-height: 1.75rem; padding: .25rem .65rem; border-radius: 999px; background: var(--accent-soft); color: #2347aa; font-size: .78rem; font-weight: 700; }
 .status { min-height: 1.5rem; margin: .5rem 0 1rem; color: var(--muted); }
 .status.error { color: var(--danger); }
 .status.success { color: var(--success); }
@@ -120,7 +120,7 @@ dialog::backdrop { background: rgb(15 23 42 / 65%); }
   .navigation details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .navigation details summary { grid-column: 1 / -1; }
   .page-header { display: grid; }
-  .scope-chip { justify-self: start; }
+  .initiative-chip { justify-self: start; }
   .dialog-actions { flex-direction: column-reverse; }
   .dialog-actions .button { width: 100%; }
   .version-button { align-items: flex-start; flex-direction: column; }

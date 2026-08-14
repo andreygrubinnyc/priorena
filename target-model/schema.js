@@ -1,13 +1,13 @@
 const crypto = require('node:crypto');
 
-const TARGET_SCHEMA_VERSION = 4;
-const UNASSIGNED_SCOPE = Object.freeze({ scopeId: null, label: 'Unassigned' });
+const TARGET_SCHEMA_VERSION = 5;
+const UNASSIGNED_INITIATIVE = Object.freeze({ initiativeId: null, label: 'Unassigned' });
 
 const ROOT_COLLECTIONS = Object.freeze([
   'organizations',
   'workspaces',
-  'scopes',
-  'features',
+  'initiatives',
+  'workstreams',
   'jiraEpicMappings',
   'workItems',
   'milestones',
@@ -45,11 +45,11 @@ const BRIEFING_FORMATS = new Set(['teams', 'email', 'confluence']);
 const AUDIT_ACTIONS = Object.freeze({
   BRIEFING_VERSION_COMMUNICATED: 'briefing-version-communicated'
 });
-const FORBIDDEN_SCOPE_NAMES = new Set(['unassigned', 'miscellaneous / no epic', 'miscellaneous/no epic', 'no epic']);
+const FORBIDDEN_INITIATIVE_NAMES = new Set(['unassigned', 'miscellaneous / no epic', 'miscellaneous/no epic', 'no epic']);
 const WORKSPACE_OWNED_AUDIT_ENTITY_TYPES = new Set([
   'workspace',
-  'scope',
-  'feature',
+  'initiative',
+  'workstream',
   'jiraEpicMapping',
   'workItem',
   'milestone',
@@ -62,8 +62,8 @@ const WORKSPACE_OWNED_AUDIT_ENTITY_TYPES = new Set([
 const ENTITY_PREFIXES = Object.freeze({
   organization: 'org',
   workspace: 'workspace',
-  scope: 'scope',
-  feature: 'feature',
+  initiative: 'initiative',
+  workstream: 'workstream',
   jiraEpicMapping: 'jira-mapping',
   workItem: 'work-item',
   milestone: 'milestone',
@@ -301,7 +301,7 @@ function validateWorkspace(record, path) {
   assertJsonValue(record.savedViews, `${path}.savedViews`);
 }
 
-function validateScope(record, path) {
+function validateInitiative(record, path) {
   const fields = new Set([
     'id', 'organizationId', 'workspaceId', 'name', 'description', 'owner', 'archived',
     'primaryMilestoneId', 'createdAt', 'updatedAt'
@@ -311,8 +311,8 @@ function validateScope(record, path) {
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.workspaceId, `${path}.workspaceId`);
   assertString(record.name, `${path}.name`, { max: 200 });
-  if (FORBIDDEN_SCOPE_NAMES.has(record.name.trim().toLocaleLowerCase('en-US'))) {
-    fail(`${path}.name`, 'must not create an Unassigned or no-Epic catch-all Scope');
+  if (FORBIDDEN_INITIATIVE_NAMES.has(record.name.trim().toLocaleLowerCase('en-US'))) {
+    fail(`${path}.name`, 'must not create an Unassigned or no-Epic catch-all Initiative');
   }
   assertString(record.description, `${path}.description`, { allowEmpty: true, max: 4_000 });
   assertNullableString(record.owner, `${path}.owner`, { max: 300 });
@@ -322,27 +322,27 @@ function validateScope(record, path) {
   assertTimestamp(record.updatedAt, `${path}.updatedAt`);
 }
 
-function validateFeature(record, path) {
-  const fields = new Set(['id', 'organizationId', 'workspaceId', 'scopeId', 'name', 'description']);
+function validateWorkstream(record, path) {
+  const fields = new Set(['id', 'organizationId', 'workspaceId', 'initiativeId', 'name', 'description']);
   assertAllowedKeys(record, path, fields);
   assertId(record.id, `${path}.id`);
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.workspaceId, `${path}.workspaceId`);
-  assertId(record.scopeId, `${path}.scopeId`);
+  assertId(record.initiativeId, `${path}.initiativeId`);
   assertString(record.name, `${path}.name`, { max: 200 });
   assertString(record.description, `${path}.description`, { allowEmpty: true, max: 4_000 });
 }
 
 function validateJiraEpicMapping(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'workspaceId', 'scopeId', 'jiraProjectKey', 'jiraEpicKey',
+    'id', 'organizationId', 'workspaceId', 'initiativeId', 'jiraProjectKey', 'jiraEpicKey',
     'jiraEpicName', 'mappingStatus', 'provenance', 'verifiedAt'
   ]);
   assertAllowedKeys(record, path, fields);
   assertId(record.id, `${path}.id`);
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.workspaceId, `${path}.workspaceId`);
-  assertId(record.scopeId, `${path}.scopeId`);
+  assertId(record.initiativeId, `${path}.initiativeId`);
   assertCanonicalJiraKey(record.jiraProjectKey, `${path}.jiraProjectKey`);
   assertCanonicalJiraKey(record.jiraEpicKey, `${path}.jiraEpicKey`);
   assertString(record.jiraEpicName, `${path}.jiraEpicName`, { max: 500 });
@@ -370,7 +370,7 @@ function validateFollowUp(value, path) {
 
 function validateWorkItem(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'workspaceId', 'scopeId', 'featureId', 'jiraEpicMappingId', 'jiraId', 'jiraKey', 'itemType',
+    'id', 'organizationId', 'workspaceId', 'initiativeId', 'workstreamId', 'jiraEpicMappingId', 'jiraId', 'jiraKey', 'itemType',
     'summary', 'description', 'canonicalStatus', 'currentStateProvenance', 'currentStateConfidence',
     'lastCapturedCommentAt', 'sourceStatus', 'assignee', 'sprint', 'labels', 'dependencies',
     'notes', 'archived', 'followUp', 'createdAt', 'updatedAt'
@@ -379,8 +379,8 @@ function validateWorkItem(record, path) {
   assertId(record.id, `${path}.id`);
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.workspaceId, `${path}.workspaceId`);
-  assertNullableId(record.scopeId, `${path}.scopeId`);
-  assertNullableId(record.featureId, `${path}.featureId`);
+  assertNullableId(record.initiativeId, `${path}.initiativeId`);
+  assertNullableId(record.workstreamId, `${path}.workstreamId`);
   assertNullableId(record.jiraEpicMappingId, `${path}.jiraEpicMappingId`);
   assertNullableString(record.jiraId, `${path}.jiraId`, { max: 200 });
   assertNullableString(record.jiraKey, `${path}.jiraKey`, { max: 100 });
@@ -405,14 +405,14 @@ function validateWorkItem(record, path) {
 
 function validateMilestone(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'workspaceId', 'scopeId', 'title', 'date', 'status', 'notes',
+    'id', 'organizationId', 'workspaceId', 'initiativeId', 'title', 'date', 'status', 'notes',
     'linkedWorkItemIds', 'createdAt', 'updatedAt'
   ]);
   assertAllowedKeys(record, path, fields);
   assertId(record.id, `${path}.id`);
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.workspaceId, `${path}.workspaceId`);
-  assertNullableId(record.scopeId, `${path}.scopeId`);
+  assertNullableId(record.initiativeId, `${path}.initiativeId`);
   assertString(record.title, `${path}.title`, { max: 500 });
   assertDate(record.date, `${path}.date`);
   assertString(record.status, `${path}.status`, { max: 100 });
@@ -445,7 +445,7 @@ function validateSource(record, path) {
 function validateFinding(record, path) {
   const fields = new Set([
     'id', 'organizationId', 'workspaceId', 'sourceId', 'exactExcerpt', 'extractionMethod',
-    'extractionVersion', 'category', 'reviewStatus', 'proposedWorkItemId', 'proposedScopeId',
+    'extractionVersion', 'category', 'reviewStatus', 'proposedWorkItemId', 'proposedInitiativeId',
     'currentness', 'supersededBy'
   ]);
   assertAllowedKeys(record, path, fields);
@@ -459,14 +459,14 @@ function validateFinding(record, path) {
   assertString(record.category, `${path}.category`, { max: 100 });
   assertEnum(record.reviewStatus, `${path}.reviewStatus`, FINDING_REVIEW_STATUSES);
   assertNullableId(record.proposedWorkItemId, `${path}.proposedWorkItemId`);
-  assertNullableId(record.proposedScopeId, `${path}.proposedScopeId`);
+  assertNullableId(record.proposedInitiativeId, `${path}.proposedInitiativeId`);
   assertEnum(record.currentness, `${path}.currentness`, CURRENTNESS_STATES);
   assertNullableId(record.supersededBy, `${path}.supersededBy`);
 }
 
 function validateEvidence(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'workspaceId', 'sourceId', 'findingId', 'scopeId', 'workItemId',
+    'id', 'organizationId', 'workspaceId', 'sourceId', 'findingId', 'initiativeId', 'workItemId',
     'exactExcerpt', 'sourceDate', 'acceptedAt', 'acceptedBy', 'currentness', 'supersededBy'
   ]);
   assertAllowedKeys(record, path, fields);
@@ -475,7 +475,7 @@ function validateEvidence(record, path) {
   assertId(record.workspaceId, `${path}.workspaceId`);
   assertId(record.sourceId, `${path}.sourceId`);
   assertId(record.findingId, `${path}.findingId`);
-  assertNullableId(record.scopeId, `${path}.scopeId`);
+  assertNullableId(record.initiativeId, `${path}.initiativeId`);
   assertNullableId(record.workItemId, `${path}.workItemId`);
   assertString(record.exactExcerpt, `${path}.exactExcerpt`, { max: 50_000 });
   assertDate(record.sourceDate, `${path}.sourceDate`);
@@ -506,11 +506,11 @@ function validateProposedChange(record, path) {
 
 function validateBriefing(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'name', 'workspaceIds', 'scopeIds', 'audienceProfile', 'preferredFormats',
+    'id', 'organizationId', 'name', 'workspaceIds', 'initiativeIds', 'audienceProfile', 'preferredFormats',
     'defaultSections', 'briefingType', 'draftingGuidance', 'lastCommunicatedVersionId', 'archived', 'createdAt', 'updatedAt'
   ]);
   const required = new Set([
-    'id', 'organizationId', 'name', 'workspaceIds', 'scopeIds', 'audienceProfile', 'preferredFormats',
+    'id', 'organizationId', 'name', 'workspaceIds', 'initiativeIds', 'audienceProfile', 'preferredFormats',
     'defaultSections', 'lastCommunicatedVersionId', 'archived', 'createdAt', 'updatedAt'
   ]);
   assertAllowedKeys(record, path, fields, required);
@@ -518,7 +518,7 @@ function validateBriefing(record, path) {
   assertId(record.organizationId, `${path}.organizationId`);
   assertString(record.name, `${path}.name`, { max: 300 });
   assertUniqueStrings(record.workspaceIds, `${path}.workspaceIds`, { allowEmpty: false, ids: true });
-  assertUniqueStrings(record.scopeIds, `${path}.scopeIds`, { ids: true });
+  assertUniqueStrings(record.initiativeIds, `${path}.initiativeIds`, { ids: true });
   assertString(record.audienceProfile, `${path}.audienceProfile`, { max: 500 });
   assertUniqueStrings(record.preferredFormats, `${path}.preferredFormats`, { allowEmpty: false, accepted: BRIEFING_FORMATS });
   assertUniqueStrings(record.defaultSections, `${path}.defaultSections`);
@@ -541,11 +541,11 @@ function validateBriefingCommunication(value, path) {
 
 function validateBriefingVersion(record, path) {
   const fields = new Set([
-    'id', 'organizationId', 'briefingId', 'workspaceIds', 'scopeIds', 'status', 'comparisonVersionId',
+    'id', 'organizationId', 'briefingId', 'workspaceIds', 'initiativeIds', 'status', 'comparisonVersionId',
     'frozenSnapshot', 'facts', 'outputs', 'createdAt', 'finalizedAt', 'communicatedAt', 'communication'
   ]);
   const required = new Set([
-    'id', 'organizationId', 'briefingId', 'workspaceIds', 'scopeIds', 'status', 'comparisonVersionId',
+    'id', 'organizationId', 'briefingId', 'workspaceIds', 'initiativeIds', 'status', 'comparisonVersionId',
     'frozenSnapshot', 'facts', 'outputs', 'createdAt', 'finalizedAt', 'communicatedAt'
   ]);
   assertAllowedKeys(record, path, fields, required);
@@ -553,7 +553,7 @@ function validateBriefingVersion(record, path) {
   assertId(record.organizationId, `${path}.organizationId`);
   assertId(record.briefingId, `${path}.briefingId`);
   assertUniqueStrings(record.workspaceIds, `${path}.workspaceIds`, { allowEmpty: false, ids: true });
-  assertUniqueStrings(record.scopeIds, `${path}.scopeIds`, { ids: true });
+  assertUniqueStrings(record.initiativeIds, `${path}.initiativeIds`, { ids: true });
   assertEnum(record.status, `${path}.status`, BRIEFING_STATUSES);
   assertNullableId(record.comparisonVersionId, `${path}.comparisonVersionId`);
   assertJsonObject(record.frozenSnapshot, `${path}.frozenSnapshot`);
@@ -615,8 +615,8 @@ function validateUserPreferences(value, path) {
 const VALIDATORS = Object.freeze({
   organizations: validateOrganization,
   workspaces: validateWorkspace,
-  scopes: validateScope,
-  features: validateFeature,
+  initiatives: validateInitiative,
+  workstreams: validateWorkstream,
   jiraEpicMappings: validateJiraEpicMapping,
   workItems: validateWorkItem,
   milestones: validateMilestone,
@@ -660,26 +660,26 @@ function requireWorkspace(indexes, organizationId, workspaceId, path) {
   return workspace;
 }
 
-function requireScope(indexes, organizationId, workspaceId, scopeId, path) {
-  const scope = indexes.scopes.get(scopeId);
-  if (!scope || scope.organizationId !== organizationId || scope.workspaceId !== workspaceId) {
-    fail(path, 'must reference a Scope with matching Organization and Workspace parents');
+function requireInitiative(indexes, organizationId, workspaceId, initiativeId, path) {
+  const initiative = indexes.initiatives.get(initiativeId);
+  if (!initiative || initiative.organizationId !== organizationId || initiative.workspaceId !== workspaceId) {
+    fail(path, 'must reference an Initiative with matching Organization and Workspace parents');
   }
-  return scope;
+  return initiative;
 }
 
-function requireFeature(indexes, organizationId, workspaceId, scopeId, featureId, path) {
-  const feature = indexes.features.get(featureId);
-  if (!feature || feature.organizationId !== organizationId || feature.workspaceId !== workspaceId || feature.scopeId !== scopeId) {
-    fail(path, 'must reference a Feature with matching Organization, Workspace, and Scope parents');
+function requireWorkstream(indexes, organizationId, workspaceId, initiativeId, workstreamId, path) {
+  const workstream = indexes.workstreams.get(workstreamId);
+  if (!workstream || workstream.organizationId !== organizationId || workstream.workspaceId !== workspaceId || workstream.initiativeId !== initiativeId) {
+    fail(path, 'must reference a Workstream with matching Organization, Workspace, and Initiative parents');
   }
-  return feature;
+  return workstream;
 }
 
-function requireJiraEpicMapping(indexes, organizationId, workspaceId, scopeId, mappingId, path) {
+function requireJiraEpicMapping(indexes, organizationId, workspaceId, initiativeId, mappingId, path) {
   const mapping = indexes.jiraEpicMappings.get(mappingId);
-  if (!mapping || mapping.organizationId !== organizationId || mapping.workspaceId !== workspaceId || mapping.scopeId !== scopeId) {
-    fail(path, 'must reference a Jira Epic mapping with matching Organization, Workspace, and Scope parents');
+  if (!mapping || mapping.organizationId !== organizationId || mapping.workspaceId !== workspaceId || mapping.initiativeId !== initiativeId) {
+    fail(path, 'must reference a Jira Epic mapping with matching Organization, Workspace, and Initiative parents');
   }
   return mapping;
 }
@@ -705,21 +705,21 @@ function validateParentRelationships(document, indexes) {
     requireOrganization(indexes, workspace.organizationId, `workspaces[${index}].organizationId`);
   });
 
-  document.scopes.forEach((scope, index) => {
-    requireWorkspace(indexes, scope.organizationId, scope.workspaceId, `scopes[${index}].workspaceId`);
+  document.initiatives.forEach((initiative, index) => {
+    requireWorkspace(indexes, initiative.organizationId, initiative.workspaceId, `initiatives[${index}].workspaceId`);
   });
 
-  document.features.forEach((feature, index) => {
-    const path = `features[${index}]`;
-    requireWorkspace(indexes, feature.organizationId, feature.workspaceId, `${path}.workspaceId`);
-    requireScope(indexes, feature.organizationId, feature.workspaceId, feature.scopeId, `${path}.scopeId`);
+  document.workstreams.forEach((workstream, index) => {
+    const path = `workstreams[${index}]`;
+    requireWorkspace(indexes, workstream.organizationId, workstream.workspaceId, `${path}.workspaceId`);
+    requireInitiative(indexes, workstream.organizationId, workstream.workspaceId, workstream.initiativeId, `${path}.initiativeId`);
   });
 
   const activeJiraMappings = new Set();
   document.jiraEpicMappings.forEach((mapping, index) => {
     const path = `jiraEpicMappings[${index}]`;
     requireWorkspace(indexes, mapping.organizationId, mapping.workspaceId, `${path}.workspaceId`);
-    requireScope(indexes, mapping.organizationId, mapping.workspaceId, mapping.scopeId, `${path}.scopeId`);
+    requireInitiative(indexes, mapping.organizationId, mapping.workspaceId, mapping.initiativeId, `${path}.initiativeId`);
     if (mapping.mappingStatus !== 'inactive') {
       const uniquenessKey = [mapping.organizationId, mapping.workspaceId, mapping.jiraProjectKey, mapping.jiraEpicKey]
         .map(value => value.trim().toUpperCase())
@@ -732,20 +732,20 @@ function validateParentRelationships(document, indexes) {
   document.workItems.forEach((workItem, index) => {
     const path = `workItems[${index}]`;
     requireWorkspace(indexes, workItem.organizationId, workItem.workspaceId, `${path}.workspaceId`);
-    if (workItem.scopeId !== null) {
-      requireScope(indexes, workItem.organizationId, workItem.workspaceId, workItem.scopeId, `${path}.scopeId`);
+    if (workItem.initiativeId !== null) {
+      requireInitiative(indexes, workItem.organizationId, workItem.workspaceId, workItem.initiativeId, `${path}.initiativeId`);
     }
-    if (workItem.featureId !== null) {
-      if (workItem.scopeId === null) fail(`${path}.featureId`, 'requires a non-null Scope');
-      requireFeature(indexes, workItem.organizationId, workItem.workspaceId, workItem.scopeId, workItem.featureId, `${path}.featureId`);
+    if (workItem.workstreamId !== null) {
+      if (workItem.initiativeId === null) fail(`${path}.workstreamId`, 'requires a non-null Initiative');
+      requireWorkstream(indexes, workItem.organizationId, workItem.workspaceId, workItem.initiativeId, workItem.workstreamId, `${path}.workstreamId`);
     }
     if (workItem.jiraEpicMappingId !== null) {
-      if (workItem.scopeId === null) fail(`${path}.jiraEpicMappingId`, 'requires a non-null Scope');
+      if (workItem.initiativeId === null) fail(`${path}.jiraEpicMappingId`, 'requires a non-null Initiative');
       requireJiraEpicMapping(
         indexes,
         workItem.organizationId,
         workItem.workspaceId,
-        workItem.scopeId,
+        workItem.initiativeId,
         workItem.jiraEpicMappingId,
         `${path}.jiraEpicMappingId`
       );
@@ -759,19 +759,19 @@ function validateParentRelationships(document, indexes) {
   document.milestones.forEach((milestone, index) => {
     const path = `milestones[${index}]`;
     requireWorkspace(indexes, milestone.organizationId, milestone.workspaceId, `${path}.workspaceId`);
-    if (milestone.scopeId !== null) {
-      requireScope(indexes, milestone.organizationId, milestone.workspaceId, milestone.scopeId, `${path}.scopeId`);
+    if (milestone.initiativeId !== null) {
+      requireInitiative(indexes, milestone.organizationId, milestone.workspaceId, milestone.initiativeId, `${path}.initiativeId`);
     }
     milestone.linkedWorkItemIds.forEach((workItemId, workItemIndex) => {
       requireWorkItem(indexes, milestone.organizationId, milestone.workspaceId, workItemId, `${path}.linkedWorkItemIds[${workItemIndex}]`);
     });
   });
 
-  document.scopes.forEach((scope, index) => {
-    if (scope.primaryMilestoneId === null) return;
-    const milestone = indexes.milestones.get(scope.primaryMilestoneId);
-    if (!milestone || milestone.organizationId !== scope.organizationId || milestone.workspaceId !== scope.workspaceId || milestone.scopeId !== scope.id) {
-      fail(`scopes[${index}].primaryMilestoneId`, 'must reference a Milestone for this Scope and matching parents');
+  document.initiatives.forEach((initiative, index) => {
+    if (initiative.primaryMilestoneId === null) return;
+    const milestone = indexes.milestones.get(initiative.primaryMilestoneId);
+    if (!milestone || milestone.organizationId !== initiative.organizationId || milestone.workspaceId !== initiative.workspaceId || milestone.initiativeId !== initiative.id) {
+      fail(`initiatives[${index}].primaryMilestoneId`, 'must reference a Milestone for this Initiative and matching parents');
     }
   });
 
@@ -783,8 +783,8 @@ function validateParentRelationships(document, indexes) {
     const path = `findings[${index}]`;
     requireWorkspace(indexes, finding.organizationId, finding.workspaceId, `${path}.workspaceId`);
     requireOwnedRecord(indexes.sources, finding.organizationId, finding.workspaceId, finding.sourceId, `${path}.sourceId`, 'a Source');
-    if (finding.proposedScopeId !== null) {
-      requireScope(indexes, finding.organizationId, finding.workspaceId, finding.proposedScopeId, `${path}.proposedScopeId`);
+    if (finding.proposedInitiativeId !== null) {
+      requireInitiative(indexes, finding.organizationId, finding.workspaceId, finding.proposedInitiativeId, `${path}.proposedInitiativeId`);
     }
     if (finding.proposedWorkItemId !== null) {
       requireWorkItem(indexes, finding.organizationId, finding.workspaceId, finding.proposedWorkItemId, `${path}.proposedWorkItemId`);
@@ -802,13 +802,13 @@ function validateParentRelationships(document, indexes) {
     if (finding.reviewStatus !== 'accepted' || finding.sourceId !== source.id || evidence.exactExcerpt !== finding.exactExcerpt || evidence.sourceDate !== source.date) {
       fail(`${path}.findingId`, 'must preserve accepted Finding and Source provenance exactly');
     }
-    if (evidence.scopeId !== null) requireScope(indexes, evidence.organizationId, evidence.workspaceId, evidence.scopeId, `${path}.scopeId`);
+    if (evidence.initiativeId !== null) requireInitiative(indexes, evidence.organizationId, evidence.workspaceId, evidence.initiativeId, `${path}.initiativeId`);
     let linkedWorkItem = null;
     if (evidence.workItemId !== null) {
       linkedWorkItem = requireWorkItem(indexes, evidence.organizationId, evidence.workspaceId, evidence.workItemId, `${path}.workItemId`);
     }
-    if (linkedWorkItem && evidence.scopeId !== null && evidence.scopeId !== linkedWorkItem.scopeId) {
-      fail(`${path}.scopeId`, 'must match the Scope of the referenced Work Item');
+    if (linkedWorkItem && evidence.initiativeId !== null && evidence.initiativeId !== linkedWorkItem.initiativeId) {
+      fail(`${path}.initiativeId`, 'must match the Initiative of the referenced Work Item');
     }
     if (evidence.supersededBy !== null) {
       requireOwnedRecord(indexes.evidence, evidence.organizationId, evidence.workspaceId, evidence.supersededBy, `${path}.supersededBy`, 'Evidence');
@@ -827,8 +827,8 @@ function validateParentRelationships(document, indexes) {
       if (evidence.workItemId !== null && evidence.workItemId !== targetWorkItem.id) {
         fail(`${path}.evidenceIds[${evidenceIndex}]`, 'must not reference Evidence associated with a different Work Item');
       }
-      if (evidence.scopeId !== null && evidence.scopeId !== targetWorkItem.scopeId) {
-        fail(`${path}.evidenceIds[${evidenceIndex}]`, 'must reference Evidence compatible with the target Work Item Scope');
+      if (evidence.initiativeId !== null && evidence.initiativeId !== targetWorkItem.initiativeId) {
+        fail(`${path}.evidenceIds[${evidenceIndex}]`, 'must reference Evidence compatible with the target Work Item Initiative');
       }
     });
     if (!findingIsSupported) fail(`${path}.evidenceIds`, 'must include Evidence accepted from the Proposed Change Finding');
@@ -841,10 +841,10 @@ function validateParentRelationships(document, indexes) {
     briefing.workspaceIds.forEach((workspaceId, workspaceIndex) => {
       requireWorkspace(indexes, briefing.organizationId, workspaceId, `${path}.workspaceIds[${workspaceIndex}]`);
     });
-    briefing.scopeIds.forEach((scopeId, scopeIndex) => {
-      const scope = indexes.scopes.get(scopeId);
-      if (!scope || scope.organizationId !== briefing.organizationId || !selectedWorkspaces.has(scope.workspaceId)) {
-        fail(`${path}.scopeIds[${scopeIndex}]`, 'must reference a Scope in one of the selected Workspaces and matching Organization');
+    briefing.initiativeIds.forEach((initiativeId, initiativeIndex) => {
+      const initiative = indexes.initiatives.get(initiativeId);
+      if (!initiative || initiative.organizationId !== briefing.organizationId || !selectedWorkspaces.has(initiative.workspaceId)) {
+        fail(`${path}.initiativeIds[${initiativeIndex}]`, 'must reference an Initiative in one of the selected Workspaces and matching Organization');
       }
     });
   });
@@ -859,10 +859,10 @@ function validateParentRelationships(document, indexes) {
     version.workspaceIds.forEach((workspaceId, workspaceIndex) => {
       requireWorkspace(indexes, version.organizationId, workspaceId, `${path}.workspaceIds[${workspaceIndex}]`);
     });
-    version.scopeIds.forEach((scopeId, scopeIndex) => {
-      const scope = indexes.scopes.get(scopeId);
-      if (!scope || scope.organizationId !== version.organizationId || !selectedWorkspaces.has(scope.workspaceId)) {
-        fail(`${path}.scopeIds[${scopeIndex}]`, 'must reference a Scope in one of the version Workspaces and matching Organization');
+    version.initiativeIds.forEach((initiativeId, initiativeIndex) => {
+      const initiative = indexes.initiatives.get(initiativeId);
+      if (!initiative || initiative.organizationId !== version.organizationId || !selectedWorkspaces.has(initiative.workspaceId)) {
+        fail(`${path}.initiativeIds[${initiativeIndex}]`, 'must reference an Initiative in one of the version Workspaces and matching Organization');
       }
     });
     if (version.comparisonVersionId !== null) {
@@ -884,8 +884,8 @@ function validateParentRelationships(document, indexes) {
   const auditIndexes = {
     organization: indexes.organizations,
     workspace: indexes.workspaces,
-    scope: indexes.scopes,
-    feature: indexes.features,
+    initiative: indexes.initiatives,
+    workstream: indexes.workstreams,
     jiraEpicMapping: indexes.jiraEpicMappings,
     workItem: indexes.workItems,
     milestone: indexes.milestones,
@@ -985,7 +985,7 @@ module.exports = {
   TargetSchemaVersionError,
   TargetResourceLimitError,
   TargetValidationError,
-  UNASSIGNED_SCOPE,
+  UNASSIGNED_INITIATIVE,
   createStableId,
   validateRootCollectionBounds,
   validateTargetData

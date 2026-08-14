@@ -28,8 +28,8 @@ const RECORD_FIELDS = Object.freeze([
   'jiraProjectKey',
   'jiraEpicKey',
   'noEpic',
-  'requestedScopeId',
-  'scopeName',
+  'requestedInitiativeId',
+  'initiativeName',
   'canonicalStatus',
   'evidenceExcerpt',
   'category'
@@ -110,13 +110,13 @@ function rawRecords(format, content) {
     throw invalidRequest();
   }
   exactKeys(parsed, ['version', 'records'], ['version', 'records']);
-  if (parsed.version !== 'target-v3') throw invalidRequest();
+  if (parsed.version !== 'target-v4') throw invalidRequest();
   return requireArray(parsed.records, { min: 1, max: MAX_IMPORT_RECORDS });
 }
 
 function normalizeImportRecord(value) {
   exactKeys(value, RECORD_FIELDS);
-  const externalItemType = value.itemType === 'Feature' ? 'Feature' : null;
+  const externalItemType = ['Feature', 'Workstream'].includes(value.itemType) ? value.itemType : null;
   const record = {
     externalKey: value.externalKey === undefined || value.externalKey === null ? null : requireCanonicalJiraKey(value.externalKey),
     itemType: value.itemType === undefined ? 'Unknown' : (externalItemType === null ? requireEnum(value.itemType, [...ITEM_TYPES]) : null),
@@ -126,14 +126,14 @@ function normalizeImportRecord(value) {
     jiraProjectKey: value.jiraProjectKey === undefined ? null : requireCanonicalJiraKey(value.jiraProjectKey),
     jiraEpicKey: value.jiraEpicKey === undefined ? null : requireCanonicalJiraKey(value.jiraEpicKey),
     noEpic: value.noEpic === undefined ? null : (typeof value.noEpic === 'string' ? requireEnum(value.noEpic.toLowerCase(), ['true', 'false']) === 'true' : requireBoolean(value.noEpic)),
-    requestedScopeId: value.requestedScopeId === undefined ? null : nullableStableId(value.requestedScopeId),
-    scopeName: value.scopeName === undefined ? null : nullableText(value.scopeName, { max: 200 }),
+    requestedInitiativeId: value.requestedInitiativeId === undefined ? null : nullableStableId(value.requestedInitiativeId),
+    initiativeName: value.initiativeName === undefined ? null : nullableText(value.initiativeName, { max: 200 }),
     canonicalStatus: value.canonicalStatus === undefined ? null : nullableText(value.canonicalStatus, { max: 200 }),
     evidenceExcerpt: value.evidenceExcerpt === undefined ? null : nullableText(value.evidenceExcerpt, { max: MAX_IMPORT_CELL_CHARACTERS }),
     category: value.category === undefined ? 'general' : requireText(value.category, { max: 100 })
   };
   if ((record.jiraProjectKey === null) !== (record.jiraEpicKey === null)) throw invalidRequest();
-  if (record.noEpic === true && (record.jiraProjectKey !== null || record.jiraEpicKey !== null || record.requestedScopeId !== null)) throw invalidRequest();
+  if (record.noEpic === true && (record.jiraProjectKey !== null || record.jiraEpicKey !== null || record.requestedInitiativeId !== null)) throw invalidRequest();
   if (record.summary === null && record.externalKey === null && record.evidenceExcerpt === null) throw invalidRequest();
   return record;
 }
@@ -192,42 +192,47 @@ function buildImportPreview(document, organizationId, workspaceId, value, revisi
   });
 
   input.records.forEach((record, index) => {
-    if (record.externalItemType === 'Feature') {
+    if (record.externalItemType !== null) {
       add('external-item-type-review', index, {
-        externalItemType: 'Feature',
+        externalItemType: record.externalItemType,
         externalKey: record.externalKey,
         summary: record.summary,
+        targetEntityType: 'Workstream',
+        workstreamInference: 'none',
         requiresExplicitMapping: true
       });
       return;
     }
     const exactWorkItem = exactWorkItemForRecord(document, workspace.organizationId, workspace.id, record);
     const exactMapping = exactMappingForRecord(document, workspace.organizationId, workspace.id, record);
-    let exactScopeId = exactMapping?.scopeId || null;
-    if (record.requestedScopeId !== null) {
-      const requestedScopeId = resolvers.resolveWorkspaceChild(
-        'scopes',
+    let exactInitiativeId = exactMapping?.initiativeId || null;
+    if (record.requestedInitiativeId !== null) {
+      const requestedInitiativeId = resolvers.resolveWorkspaceChild(
+        'initiatives',
         workspace.organizationId,
         workspace.id,
-        record.requestedScopeId
+        record.requestedInitiativeId
       ).id;
-      if (exactMapping && exactMapping.scopeId !== requestedScopeId) throw invalidRequest();
-      exactScopeId = requestedScopeId;
+      if (exactMapping && exactMapping.initiativeId !== requestedInitiativeId) throw invalidRequest();
+      exactInitiativeId = requestedInitiativeId;
     }
 
-    let scopeProposal = null;
-    if (record.scopeName !== null && exactScopeId === null && record.noEpic !== true) {
-      scopeProposal = add('scope-create', index, { name: record.scopeName, description: '', owner: null });
+    if (record.initiativeName !== null && exactInitiativeId === null && record.noEpic !== true) {
+      add('initiative-reference-review', index, {
+        sourceInitiativeName: record.initiativeName,
+        initiativeInference: 'none',
+        requiresExactInitiativeId: true
+      });
     }
 
-    if (record.jiraEpicKey !== null && exactScopeId === null) {
-      add('jira-mapping-create', index, {
+    if (record.jiraEpicKey !== null && exactInitiativeId === null) {
+      add('jira-mapping-reference-review', index, {
         jiraProjectKey: record.jiraProjectKey,
         jiraEpicKey: record.jiraEpicKey,
-        jiraEpicName: record.scopeName || record.jiraEpicKey,
-        scopeId: record.requestedScopeId,
-        scopeProposalId: scopeProposal?.id || null
-      }, scopeProposal ? [scopeProposal.id] : []);
+        jiraEpicName: record.initiativeName || record.jiraEpicKey,
+        jiraEpicMappingInference: 'none',
+        requiresSettingsMapping: true
+      });
     }
 
     let workItemProposal = null;
@@ -238,34 +243,34 @@ function buildImportPreview(document, organizationId, workspaceId, value, revisi
         summary: record.summary,
         description: record.description,
         canonicalStatus: record.canonicalStatus || 'Unknown',
-        scopeId: null
+        initiativeId: null
       });
     }
 
-    if (exactScopeId !== null && (
+    if (exactInitiativeId !== null && (
       (exactWorkItem && (
-        exactWorkItem.scopeId !== exactScopeId ||
+        exactWorkItem.initiativeId !== exactInitiativeId ||
         (exactMapping && exactWorkItem.jiraEpicMappingId !== exactMapping.id)
       )) || workItemProposal
     )) {
-      const currentFeature = exactWorkItem?.featureId === null || exactWorkItem?.featureId === undefined
+      const currentWorkstream = exactWorkItem?.workstreamId === null || exactWorkItem?.workstreamId === undefined
         ? null
-        : document.features.find(feature => feature.id === exactWorkItem.featureId);
-      const beforeFeatureId = exactWorkItem?.featureId || null;
-      const afterFeatureId = currentFeature?.scopeId === exactScopeId ? currentFeature.id : null;
+        : document.workstreams.find(workstream => workstream.id === exactWorkItem.workstreamId);
+      const beforeWorkstreamId = exactWorkItem?.workstreamId || null;
+      const afterWorkstreamId = currentWorkstream?.initiativeId === exactInitiativeId ? currentWorkstream.id : null;
       const currentMapping = exactWorkItem?.jiraEpicMappingId === null || exactWorkItem?.jiraEpicMappingId === undefined
         ? null
         : document.jiraEpicMappings.find(mapping => mapping.id === exactWorkItem.jiraEpicMappingId);
-      const afterJiraEpicMappingId = exactMapping?.id || (currentMapping?.scopeId === exactScopeId ? currentMapping.id : null);
+      const afterJiraEpicMappingId = exactMapping?.id || (currentMapping?.initiativeId === exactInitiativeId ? currentMapping.id : null);
       add('work-item-assign', index, {
         workItemId: exactWorkItem?.id || null,
         workItemProposalId: workItemProposal?.id || null,
-        scopeId: exactScopeId,
+        initiativeId: exactInitiativeId,
         jiraEpicMappingId: afterJiraEpicMappingId,
-        featureChange: {
-          effect: afterFeatureId === beforeFeatureId ? 'retained' : (afterFeatureId === null ? 'cleared' : 'replaced'),
-          beforeFeatureId,
-          afterFeatureId
+        workstreamChange: {
+          effect: afterWorkstreamId === beforeWorkstreamId ? 'retained' : (afterWorkstreamId === null ? 'cleared' : 'replaced'),
+          beforeWorkstreamId,
+          afterWorkstreamId
         },
         jiraEpicChange: {
           effect: afterJiraEpicMappingId === (exactWorkItem?.jiraEpicMappingId || null)
@@ -284,7 +289,7 @@ function buildImportPreview(document, organizationId, workspaceId, value, revisi
         category: record.category,
         proposedWorkItemId: exactWorkItem?.id || null,
         proposedWorkItemProposalId: workItemProposal?.id || null,
-        proposedScopeId: exactScopeId
+        proposedInitiativeId: exactInitiativeId
       }, [sourceProposal.id, ...(workItemProposal ? [workItemProposal.id] : [])]);
       if (exactWorkItem && record.canonicalStatus !== null && exactWorkItem.canonicalStatus !== record.canonicalStatus) {
         add('proposed-current-state-change', index, {

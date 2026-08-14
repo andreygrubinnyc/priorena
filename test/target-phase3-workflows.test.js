@@ -26,34 +26,34 @@ function revisionOf(response) {
   return response.headers['x-priorena-target-revision'];
 }
 
-test('Scope lifecycle and optional Jira mappings are parent-scoped, independent, and audited', async t => {
+test('Initiative lifecycle and optional Jira mappings are parent-scoped, independent, and audited', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   let revision = (await persisted(targetDataFile)).revision;
-  let response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes`, {
+  let response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives`, {
     expectedRevision: revision,
     actor: ACTOR,
-    scope: { name: 'Fictional Release Readiness', description: 'Repository-safe Phase 3 test Scope.', owner: null }
+    initiative: { name: 'Fictional Release Readiness', description: 'Repository-safe Phase 3 test Initiative.', owner: null }
   });
   assert.equal(response.status, 200);
-  const scopeId = response.json().scope.id;
-  assert.match(scopeId, /^scope-/);
+  const initiativeId = response.json().initiative.id;
+  assert.match(initiativeId, /^initiative-/);
   revision = revisionOf(response);
 
-  const renamePreview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/rename/preview`, {
+  const renamePreview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/rename/preview`, {
     name: 'Fictional Release Coordination'
   });
   assert.equal(renamePreview.status, 200);
-  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/rename/apply`, {
+  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/rename/apply`, {
     expectedRevision: revision,
     actor: ACTOR,
     name: 'Fictional Release Coordination',
     previewHash: renamePreview.json().preview.previewHash
   });
   assert.equal(response.status, 200);
-  assert.equal(response.json().scope.id, scopeId);
+  assert.equal(response.json().initiative.id, initiativeId);
   revision = revisionOf(response);
 
-  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/scopes/${scopeId}`, {
+  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}`, {
     expectedRevision: revision,
     actor: ACTOR,
     changes: { owner: 'Fictional owner' }
@@ -61,16 +61,16 @@ test('Scope lifecycle and optional Jira mappings are parent-scoped, independent,
   assert.equal(response.status, 200);
   revision = revisionOf(response);
 
-  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/archive`, {
+  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/archive`, {
     expectedRevision: revision,
     actor: ACTOR,
     archived: true
   });
   assert.equal(response.status, 200);
-  assert.equal(response.json().scope.archived, true);
+  assert.equal(response.json().initiative.archived, true);
   revision = revisionOf(response);
 
-  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/archive`, {
+  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/archive`, {
     expectedRevision: revision,
     actor: ACTOR,
     archived: false
@@ -78,7 +78,7 @@ test('Scope lifecycle and optional Jira mappings are parent-scoped, independent,
   assert.equal(response.status, 200);
   revision = revisionOf(response);
 
-  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/${scopeId}/jira-epic-mappings`, {
+  response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/jira-epic-mappings`, {
     expectedRevision: revision,
     actor: ACTOR,
     mapping: {
@@ -94,25 +94,57 @@ test('Scope lifecycle and optional Jira mappings are parent-scoped, independent,
   const mappingId = response.json().jiraEpicMapping.id;
   revision = revisionOf(response);
 
-  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/scopes/${scopeId}/jira-epic-mappings/${mappingId}`, {
+  const mappingRead = await requestApp(app, { url: `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/jira-epic-mappings/${mappingId}` });
+  assert.equal(mappingRead.status, 200);
+  assert.equal(mappingRead.json().jiraEpicMapping.id, mappingId);
+  const wrongInitiativeRead = await requestApp(app, { url: `${workspaceBase(ALPHA)}/initiatives/initiative-alpha-zero-mapping/jira-epic-mappings/${mappingId}` });
+  assert.equal(wrongInitiativeRead.status, 404);
+
+  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/jira-epic-mappings/${mappingId}`, {
     expectedRevision: revision,
     actor: ACTOR,
     changes: { jiraEpicName: 'Fictional Renamed External Epic' }
   });
   assert.equal(response.status, 200);
+  revision = revisionOf(response);
+
+  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/jira-epic-mappings/${mappingId}`, {
+    expectedRevision: revision,
+    actor: ACTOR,
+    changes: { mappingStatus: 'inactive', verifiedAt: null }
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.json().jiraEpicMapping.mappingStatus, 'inactive');
+  const staleRevision = revision;
+  revision = revisionOf(response);
+
+  const stale = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/jira-epic-mappings/${mappingId}`, {
+    expectedRevision: staleRevision,
+    actor: ACTOR,
+    changes: { mappingStatus: 'verified' }
+  });
+  assert.equal(stale.status, 409);
+
+  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/${initiativeId}/jira-epic-mappings/${mappingId}`, {
+    expectedRevision: revision,
+    actor: ACTOR,
+    changes: { mappingStatus: 'verified', verifiedAt: '2026-08-11T13:00:00.000Z' }
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.json().jiraEpicMapping.mappingStatus, 'verified');
   const stored = await persisted(targetDataFile);
-  assert.equal(stored.document.scopes.find(scope => scope.id === scopeId).name, 'Fictional Release Coordination');
+  assert.equal(stored.document.initiatives.find(initiative => initiative.id === initiativeId).name, 'Fictional Release Coordination');
   assert.deepEqual(
-    stored.document.auditEvents.slice(-7).map(event => event.action),
-    ['scope-created', 'scope-renamed', 'scope-updated', 'scope-archived', 'scope-restored', 'jira-epic-mapping-created', 'jira-epic-mapping-updated']
+    stored.document.auditEvents.slice(-9).map(event => event.action),
+    ['initiative-created', 'initiative-renamed', 'initiative-updated', 'initiative-archived', 'initiative-restored', 'jira-epic-mapping-created', 'jira-epic-mapping-updated', 'jira-epic-mapping-updated', 'jira-epic-mapping-updated']
   );
 
-  const foreign = await jsonRequest(app, 'PATCH', `${workspaceBase(BETA)}/scopes/${scopeId}`, {
+  const foreign = await jsonRequest(app, 'PATCH', `${workspaceBase(BETA)}/initiatives/${initiativeId}`, {
     expectedRevision: stored.revision,
     actor: ACTOR,
     changes: { description: 'Must not apply.' }
   });
-  const unknown = await jsonRequest(app, 'PATCH', `${workspaceBase(BETA)}/scopes/scope-unknown`, {
+  const unknown = await jsonRequest(app, 'PATCH', `${workspaceBase(BETA)}/initiatives/initiative-unknown`, {
     expectedRevision: stored.revision,
     actor: ACTOR,
     changes: { description: 'Must not apply.' }
@@ -125,7 +157,7 @@ test('Scope lifecycle and optional Jira mappings are parent-scoped, independent,
 test('Jira mapping canonical identity is unique per Workspace and reusable across Organizations', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   let revision = (await persisted(targetDataFile)).revision;
-  let response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/scope-alpha-zero-mapping/jira-epic-mappings`, {
+  let response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/initiative-alpha-zero-mapping/jira-epic-mappings`, {
     expectedRevision: revision,
     actor: ACTOR,
     mapping: {
@@ -136,7 +168,7 @@ test('Jira mapping canonical identity is unique per Workspace and reusable acros
   assert.equal(response.status, 200);
   revision = revisionOf(response);
 
-  const duplicate = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/scope-alpha-multiple-mappings/jira-epic-mappings`, {
+  const duplicate = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/initiative-alpha-multiple-mappings/jira-epic-mappings`, {
     expectedRevision: revision,
     actor: ACTOR,
     mapping: {
@@ -147,7 +179,7 @@ test('Jira mapping canonical identity is unique per Workspace and reusable acros
   assert.equal(duplicate.status, 400);
   assert.equal(duplicate.json().error.code, 'INVALID_REQUEST');
 
-  const nonCanonical = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/scopes/scope-alpha-zero-mapping/jira-epic-mappings`, {
+  const nonCanonical = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/initiatives/initiative-alpha-zero-mapping/jira-epic-mappings`, {
     expectedRevision: revision,
     actor: ACTOR,
     mapping: {
@@ -157,7 +189,7 @@ test('Jira mapping canonical identity is unique per Workspace and reusable acros
   });
   assert.equal(nonCanonical.status, 400);
 
-  response = await jsonRequest(app, 'POST', `${workspaceBase(BETA)}/scopes/scope-beta-shared/jira-epic-mappings`, {
+  response = await jsonRequest(app, 'POST', `${workspaceBase(BETA)}/initiatives/initiative-beta-shared/jira-epic-mappings`, {
     expectedRevision: revision,
     actor: ACTOR,
     mapping: {
@@ -175,7 +207,7 @@ test('Work Item creation and metadata updates preserve parents and Unassigned as
     expectedRevision: revision,
     actor: ACTOR,
     workItem: {
-      scopeId: null,
+      initiativeId: null,
       itemType: 'Story',
       summary: 'Fictional unassigned Phase 3 item',
       canonicalStatus: 'Planned',
@@ -185,7 +217,7 @@ test('Work Item creation and metadata updates preserve parents and Unassigned as
   });
   assert.equal(response.status, 200);
   const workItemId = response.json().workItem.id;
-  assert.equal(response.json().workItem.scopeId, null);
+  assert.equal(response.json().workItem.initiativeId, null);
   revision = revisionOf(response);
 
   response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/work-items/${workItemId}`, {
@@ -196,7 +228,7 @@ test('Work Item creation and metadata updates preserve parents and Unassigned as
   assert.equal(response.status, 200);
   assert.equal(response.json().workItem.organizationId, ALPHA.organizationId);
   assert.equal(response.json().workItem.workspaceId, ALPHA.workspaceId);
-  assert.equal(response.json().workItem.scopeId, null);
+  assert.equal(response.json().workItem.initiativeId, null);
   revision = revisionOf(response);
 
   const attemptedParentMove = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/work-items/${workItemId}`, {
@@ -214,15 +246,15 @@ test('consequential Work Item and Follow-Up changes require exact no-write previ
   const initialBytes = await fs.readFile(targetDataFile);
   const itemId = 'work-item-alpha-unassigned';
   let preview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${itemId}/preview`, {
-    action: { type: 'assign-scope', scopeId: 'scope-alpha-multiple-mappings' }
+    action: { type: 'assign-initiative', initiativeId: 'initiative-alpha-multiple-mappings' }
   });
   assert.equal(preview.status, 200);
   assert.equal(preview.json().preview.before, null);
-  assert.equal(preview.json().preview.after, 'scope-alpha-multiple-mappings');
+  assert.equal(preview.json().preview.after, 'initiative-alpha-multiple-mappings');
   assert.deepEqual(await fs.readFile(targetDataFile), initialBytes);
   assert.equal((await persisted(targetDataFile)).revision, initial.revision);
 
-  let unrelated = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/scopes/scope-alpha-zero-mapping`, {
+  let unrelated = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/initiative-alpha-zero-mapping`, {
     expectedRevision: initial.revision,
     actor: ACTOR,
     changes: { description: 'Fictional unrelated revision advance.' }
@@ -233,22 +265,22 @@ test('consequential Work Item and Follow-Up changes require exact no-write previ
   let response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${itemId}/apply`, {
     expectedRevision: revision,
     actor: ACTOR,
-    action: { type: 'assign-scope', scopeId: 'scope-alpha-multiple-mappings' },
+    action: { type: 'assign-initiative', initiativeId: 'initiative-alpha-multiple-mappings' },
     previewHash: preview.json().preview.previewHash
   });
   assert.equal(response.status, 409);
   assert.equal(response.json().error.code, 'PREVIEW_CONFLICT');
-  assert.equal((await persisted(targetDataFile)).document.workItems.find(item => item.id === itemId).scopeId, null);
+  assert.equal((await persisted(targetDataFile)).document.workItems.find(item => item.id === itemId).initiativeId, null);
 
   preview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${itemId}/preview`, {
-    action: { type: 'assign-scope', scopeId: 'scope-alpha-multiple-mappings' }
+    action: { type: 'assign-initiative', initiativeId: 'initiative-alpha-multiple-mappings' }
   });
   assert.equal(preview.status, 200);
 
   response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${itemId}/apply`, {
     expectedRevision: revision,
     actor: ACTOR,
-    action: { type: 'assign-scope', scopeId: 'scope-alpha-multiple-mappings' },
+    action: { type: 'assign-initiative', initiativeId: 'initiative-alpha-multiple-mappings' },
     previewHash: `${'0'.repeat(63)}1`
   });
   assert.equal(response.status, 409);
@@ -258,11 +290,11 @@ test('consequential Work Item and Follow-Up changes require exact no-write previ
   response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${itemId}/apply`, {
     expectedRevision: revision,
     actor: ACTOR,
-    action: { type: 'assign-scope', scopeId: 'scope-alpha-multiple-mappings' },
+    action: { type: 'assign-initiative', initiativeId: 'initiative-alpha-multiple-mappings' },
     previewHash: preview.json().preview.previewHash
   });
   assert.equal(response.status, 200);
-  assert.equal(response.json().workItem.scopeId, 'scope-alpha-multiple-mappings');
+  assert.equal(response.json().workItem.initiativeId, 'initiative-alpha-multiple-mappings');
   revision = revisionOf(response);
 
   const followUpPreview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${itemId}/preview`, {
@@ -287,7 +319,7 @@ test('consequential Work Item and Follow-Up changes require exact no-write previ
   assert.ok((await persisted(targetDataFile)).document.auditEvents.some(event => event.action === 'work-item-follow-up-applied'));
 });
 
-test('bulk Scope, Unassigned, and Sprint assignment is bounded, atomic, and stale-safe', async t => {
+test('bulk Initiative, Unassigned, and Sprint assignment is bounded, atomic, and stale-safe', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   const ids = ['work-item-alpha-assigned', 'work-item-alpha-unassigned'];
   let before = await persisted(targetDataFile);
@@ -301,7 +333,7 @@ test('bulk Scope, Unassigned, and Sprint assignment is bounded, atomic, and stal
   assert.equal((await persisted(targetDataFile)).revision, before.revision);
   let preview = response.json().preview;
 
-  const unrelated = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/scopes/scope-alpha-zero-mapping`, {
+  const unrelated = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/initiatives/initiative-alpha-zero-mapping`, {
     expectedRevision: before.revision,
     actor: ACTOR,
     changes: { description: 'Fictional unrelated bulk revision advance.' }
@@ -339,33 +371,33 @@ test('bulk Scope, Unassigned, and Sprint assignment is bounded, atomic, and stal
 
   const duplicate = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/bulk/preview`, {
     workItemIds: [ids[0], ids[0]],
-    action: { type: 'assign-scope', scopeId: null }
+    action: { type: 'assign-initiative', initiativeId: null }
   });
   assert.equal(duplicate.status, 400);
 
   const mixedParent = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/bulk/preview`, {
     workItemIds: [ids[0], 'work-item-beta-assigned'],
-    action: { type: 'assign-scope', scopeId: null }
+    action: { type: 'assign-initiative', initiativeId: null }
   });
   assert.equal(mixedParent.status, 404);
   assert.deepEqual(mixedParent.json(), notFoundBody());
 
   response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/bulk/preview`, {
     workItemIds: ids,
-    action: { type: 'assign-scope', scopeId: null }
+    action: { type: 'assign-initiative', initiativeId: null }
   });
-  assert.deepEqual(response.json().preview.rows.find(row => row.workItemId === ids[0]).featureChange, {
-    effect: 'cleared', beforeFeatureId: 'feature-alpha-mapped', afterFeatureId: null
+  assert.deepEqual(response.json().preview.rows.find(row => row.workItemId === ids[0]).workstreamChange, {
+    effect: 'cleared', beforeWorkstreamId: 'workstream-alpha-mapped', afterWorkstreamId: null
   });
   const stalePreview = response.json().preview;
   const individualPreview = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${ids[1]}/preview`, {
-    action: { type: 'assign-scope', scopeId: 'scope-alpha-zero-mapping' }
+    action: { type: 'assign-initiative', initiativeId: 'initiative-alpha-zero-mapping' }
   });
   assert.equal(individualPreview.status, 200);
   const individualApply = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/work-items/${ids[1]}/apply`, {
     expectedRevision: revision,
     actor: ACTOR,
-    action: { type: 'assign-scope', scopeId: 'scope-alpha-zero-mapping' },
+    action: { type: 'assign-initiative', initiativeId: 'initiative-alpha-zero-mapping' },
     previewHash: individualPreview.json().preview.previewHash
   });
   assert.equal(individualApply.status, 200, individualApply.body);
@@ -374,17 +406,17 @@ test('bulk Scope, Unassigned, and Sprint assignment is bounded, atomic, and stal
     expectedRevision: revision,
     actor: ACTOR,
     workItemIds: ids,
-    action: { type: 'assign-scope', scopeId: null },
+    action: { type: 'assign-initiative', initiativeId: null },
     previewHash: stalePreview.previewHash
   });
   assert.equal(staleApply.status, 409);
   assert.equal(staleApply.json().error.code, 'PREVIEW_CONFLICT');
   const stored = await persisted(targetDataFile);
-  assert.equal(stored.document.workItems.find(item => item.id === ids[0]).scopeId, 'scope-alpha-multiple-mappings');
-  assert.equal(stored.document.workItems.find(item => item.id === ids[1]).scopeId, 'scope-alpha-zero-mapping');
+  assert.equal(stored.document.workItems.find(item => item.id === ids[0]).initiativeId, 'initiative-alpha-multiple-mappings');
+  assert.equal(stored.document.workItems.find(item => item.id === ids[1]).initiativeId, 'initiative-alpha-zero-mapping');
 });
 
-test('Milestones expose applicability and deterministic pressure while enforcing explicit cross-Scope links', async t => {
+test('Milestones expose applicability and deterministic pressure while enforcing explicit cross-Initiative links', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t, ({ document }) => {
     document.workspaces.find(workspace => workspace.id === ALPHA.workspaceId).settings.milestoneDueSoonDays = 5;
   });
@@ -393,7 +425,7 @@ test('Milestones expose applicability and deterministic pressure while enforcing
     expectedRevision: revision,
     actor: ACTOR,
     milestone: {
-      scopeId: null,
+      initiativeId: null,
       title: 'Fictional Workspace Review',
       date: '2026-08-20',
       status: 'Planned',
@@ -404,47 +436,47 @@ test('Milestones expose applicability and deterministic pressure while enforcing
   const workspaceMilestoneId = response.json().milestone.id;
   revision = revisionOf(response);
 
-  const implicitCrossScope = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/milestones`, {
+  const implicitCrossInitiative = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/milestones`, {
     expectedRevision: revision,
     actor: ACTOR,
     milestone: {
-      scopeId: 'scope-alpha-multiple-mappings',
-      title: 'Fictional Scope Review',
+      initiativeId: 'initiative-alpha-multiple-mappings',
+      title: 'Fictional Initiative Review',
       date: '2026-08-21',
       status: 'Planned',
       linkedWorkItemIds: ['work-item-alpha-unassigned']
     }
   });
-  assert.equal(implicitCrossScope.status, 400);
+  assert.equal(implicitCrossInitiative.status, 400);
 
   response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/milestones`, {
     expectedRevision: revision,
     actor: ACTOR,
     milestone: {
-      scopeId: 'scope-alpha-multiple-mappings',
-      title: 'Fictional Explicit Cross-Scope Review',
+      initiativeId: 'initiative-alpha-multiple-mappings',
+      title: 'Fictional Explicit Cross-Initiative Review',
       date: '2026-08-21',
       status: 'Planned',
       linkedWorkItemIds: ['work-item-alpha-unassigned'],
-      allowCrossScopeLinks: true
+      allowCrossInitiativeLinks: true
     }
   });
   assert.equal(response.status, 200);
-  assert.equal(response.json().crossScopeLinksExplicitlyApproved, true);
-  const scopeMilestoneId = response.json().milestone.id;
+  assert.equal(response.json().crossInitiativeLinksExplicitlyApproved, true);
+  const initiativeMilestoneId = response.json().milestone.id;
   revision = revisionOf(response);
 
-  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/milestones/${scopeMilestoneId}`, {
+  response = await jsonRequest(app, 'PATCH', `${workspaceBase(ALPHA)}/milestones/${initiativeMilestoneId}`, {
     expectedRevision: revision,
     actor: ACTOR,
-    changes: { status: 'At risk', notes: 'Fictional reviewed Milestone note.', allowCrossScopeLinks: true }
+    changes: { status: 'At risk', notes: 'Fictional reviewed Milestone note.', allowCrossInitiativeLinks: true }
   });
   assert.equal(response.status, 200);
   assert.equal(response.json().milestone.status, 'At risk');
 
   const list = await requestApp(app, { url: `${workspaceBase(ALPHA)}/milestones` });
   const workspaceMilestone = list.json().milestones.find(item => item.id === workspaceMilestoneId);
-  assert.deepEqual(workspaceMilestone.applicability, { kind: 'workspace', scopeId: null, label: 'Entire workspace' });
+  assert.deepEqual(workspaceMilestone.applicability, { kind: 'workspace', initiativeId: null, label: 'Entire workspace' });
   assert.equal(workspaceMilestone.timing.dueSoonDays, 5);
   assert.match(workspaceMilestone.timing.pressure, /scheduled|due-soon|overdue/);
   assert.deepEqual(milestoneTiming('2026-08-10', { referenceDate: '2026-08-11', dueSoonDays: 14 }), {
@@ -455,7 +487,7 @@ test('Milestones expose applicability and deterministic pressure while enforcing
     expectedRevision: revisionOf(response),
     actor: ACTOR,
     milestone: {
-      scopeId: 'scope-beta-shared', title: 'Must fail', date: '2026-08-22', status: 'Planned', linkedWorkItemIds: []
+      initiativeId: 'initiative-beta-shared', title: 'Must fail', date: '2026-08-22', status: 'Planned', linkedWorkItemIds: []
     }
   });
   assert.equal(foreign.status, 404);

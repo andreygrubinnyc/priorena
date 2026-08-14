@@ -12,7 +12,7 @@
     <div class="start-card">
       <p class="eyebrow">Local target release</p>
       <h1 id="target-start-title">Priorena</h1>
-      <p>Open the strict schema-v4 workspace explicitly. This release entry is local-only.</p>
+      <p>Open the strict schema-v5 workspace explicitly. This release entry is local-only.</p>
       <button id="initialize-target" class="button primary" type="button">Initialize target</button>
       <p class="quiet">No operational request runs before initialization.</p>
     </div>
@@ -28,7 +28,7 @@
       <div class="context-selectors">
         <label for="organization-select">Organization</label>
         <select id="organization-select" disabled></select>
-        <label for="workspace-select">PM Workspace</label>
+        <label for="workspace-select">Workspace</label>
         <select id="workspace-select" disabled></select>
       </div>
 
@@ -39,7 +39,7 @@
         <button type="button" data-view="today">Today</button>
         <details open>
           <summary>Work</summary>
-          <span class="nav-hint">Scope → Feature → Work Items</span>
+          <span class="nav-hint">Initiative → Workstream and/or Jira Epic → Work Items</span>
           <button type="button" data-view="work-items">Work Items</button>
           <button type="button" data-view="follow-up">Follow-Up</button>
           <button type="button" data-view="milestones">Milestones</button>
@@ -63,11 +63,11 @@
     <main id="target-main" class="main" tabindex="-1">
       <header class="page-header">
         <div>
-          <p id="context-breadcrumb" class="breadcrumb" aria-label="Active Organization, PM Workspace, and Scope"></p>
+          <p id="context-breadcrumb" class="breadcrumb" aria-label="Active Organization, Workspace, and Initiative"></p>
           <h1 id="page-title">Portfolio</h1>
           <p id="page-description" class="page-description"></p>
         </div>
-        <span id="scope-indicator" class="scope-chip">All scopes</span>
+        <span id="initiative-indicator" class="initiative-chip">All initiatives</span>
       </header>
       <div id="target-status" class="status" role="status" aria-live="polite"></div>
       <section id="target-view" class="view" aria-live="polite"></section>
