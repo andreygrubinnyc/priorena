@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   commentCaptureLabel,
@@ -250,6 +251,36 @@ test('workflow API client preserves bounded Import Feed validation metadata for 
       error.validation.reason === 'invalid-field' &&
       error.validation.recordIndex === 1 &&
       error.validation.field === 'jiraEpicKey'
+  );
+});
+
+test('browser-global Briefing helpers cannot replace Workflow validation response handling', async () => {
+  const context = vm.createContext({ window: {} });
+  for (const filename of ['target-workflow-state.js', 'target-briefing-state.js']) {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'public', filename), 'utf8');
+    vm.runInContext(source, context, { filename });
+  }
+  const client = context.window.PriorenaTargetWorkflow.createTargetWorkflowApiClient({
+    async request() {
+      return {
+        ok: false,
+        headers: { get: () => null },
+        async json() {
+          return {
+            error: {
+              code: 'IMPORT_VALIDATION_FAILED',
+              message: 'Import feed validation failed',
+              validation: { reason: 'unsupported-version' }
+            }
+          };
+        }
+      };
+    }
+  });
+  await assert.rejects(
+    client.previewImport('org-client', 'workspace-client', { input: {} }),
+    error => error.code === 'IMPORT_VALIDATION_FAILED' &&
+      error.validation.reason === 'unsupported-version'
   );
 });
 
