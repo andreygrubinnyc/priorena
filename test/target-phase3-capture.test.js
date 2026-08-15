@@ -44,6 +44,22 @@ function importInput(records, format = 'target-json') {
   };
 }
 
+function reviewDecision(recordIndex, changes = {}) {
+  return {
+    recordIndex,
+    includeRecord: false,
+    createWorkItem: false,
+    approvedItemType: null,
+    approvedSummary: null,
+    approvedDescription: null,
+    initiativeId: null,
+    workstreamId: null,
+    jiraEpicMappingId: null,
+    includeFinding: false,
+    ...changes
+  };
+}
+
 test('Phase 3 fixture covers review states and inert malicious content without permitting invalid evidence targets', () => {
   const fixture = createPhase3WorkflowFixture();
   assert.doesNotThrow(() => validateTargetData(fixture));
@@ -109,7 +125,7 @@ test('Source capture is bounded, parent-scoped, and creates only pending Finding
   assert.equal((await persisted(targetDataFile)).revision, stored.revision);
 });
 
-test('import preview separates decisions, performs exact matching only, and writes nothing', async t => {
+test('import preview is write-free, record-oriented, exact-match only, and starts with no approval decisions', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t, ({ document }) => {
     const item = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
     item.jiraKey = 'FICTA-10';
@@ -149,31 +165,45 @@ test('import preview separates decisions, performs exact matching only, and writ
   const response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
   assert.equal(response.status, 200);
   const preview = response.json().preview;
-  const types = preview.proposals.map(proposal => proposal.type);
-  assert.ok(types.includes('source-create'));
-  assert.ok(types.includes('initiative-reference-review'));
-  assert.ok(types.includes('jira-mapping-reference-review'));
-  assert.equal(types.includes('initiative-create'), false);
-  assert.equal(types.includes('jira-mapping-create'), false);
-  assert.ok(types.includes('work-item-create'));
-  assert.ok(types.includes('finding-create'));
-  assert.ok(types.includes('proposed-current-state-change'));
-  const explicitMove = preview.proposals.find(proposal => proposal.index === 0 && proposal.type === 'work-item-assign');
-  assert.deepEqual(explicitMove.payload.workstreamChange, {
-    effect: 'retained', beforeWorkstreamId: 'workstream-alpha-mapped', afterWorkstreamId: 'workstream-alpha-mapped'
+  assert.equal(preview.stage, 'review');
+  assert.equal(preview.source.initiallySelected, false);
+  assert.equal(preview.decisionsRequired, 3);
+  assert.equal(preview.reviewRows.length, 3);
+  assert.equal(preview.reviewRows[0].match.workItemId, 'work-item-alpha-assigned');
+  assert.deepEqual(preview.reviewRows[0].suggestedExactMapping, {
+    jiraEpicMappingId: 'jira-mapping-alpha-one',
+    initiativeId: 'initiative-alpha-multiple-mappings'
   });
-  assert.deepEqual(explicitMove.payload.jiraEpicChange, {
-    effect: 'replaced', beforeJiraEpicMappingId: null, afterJiraEpicMappingId: 'jira-mapping-alpha-one'
-  });
-  const noEpicAssignment = preview.proposals.find(proposal => proposal.index === 1 && proposal.type === 'work-item-assign');
-  assert.equal(noEpicAssignment, undefined);
-  const noEpicWorkItem = preview.proposals.find(proposal => proposal.index === 1 && proposal.type === 'work-item-create');
-  assert.equal(noEpicWorkItem.payload.initiativeId, null);
+  assert.equal(preview.reviewRows[1].match, null);
+  assert.equal(preview.reviewRows[1].requiresHumanCreationDecision, true);
+  assert.equal(preview.reviewRows[2].sourceInitiativeName, 'Fictional Explicit Import Initiative');
+  assert.equal(preview.reviewRows[2].match, null);
+  assert.equal(preview.writesPerformed, 0);
   assert.deepEqual(await fs.readFile(targetDataFile), beforeBytes);
   assert.equal((await persisted(targetDataFile)).revision, before.revision);
 });
 
-test('external Feature item types preserve source provenance without Workstream inference or creation', async t => {
+test('capabilities are parent-scoped, bounded, read-only, and expose only existing mapping choices', async t => {
+  const { app, targetDataFile } = await createTargetApiHarness(t);
+  const beforeBytes = await fs.readFile(targetDataFile);
+  const response = await requestApp(app, { url: `${workspaceBase(ALPHA)}/imports/capabilities` });
+  assert.equal(response.status, 200, response.body);
+  const capabilities = response.json().capabilities;
+  assert.equal(capabilities.contractVersion, 'target-v4');
+  assert.deepEqual(capabilities.formats, ['target-json', 'target-csv', 'structured-text']);
+  assert.deepEqual(capabilities.recordFields, [
+    'externalKey', 'itemType', 'summary', 'description', 'jiraProjectKey', 'jiraEpicKey', 'noEpic',
+    'requestedInitiativeId', 'initiativeName', 'canonicalStatus', 'evidenceExcerpt', 'category'
+  ]);
+  assert.deepEqual(capabilities.limits, { maxBytes: 524288, maxRecords: 100, maxCellCharacters: 4000 });
+  assert.deepEqual(capabilities.itemTypes, ['Story', 'Task', 'Bug', 'Other', 'Unknown']);
+  assert.ok(capabilities.initiatives.every(item => Object.keys(item).sort().join(',') === 'id,name'));
+  assert.ok(capabilities.workstreams.every(item => capabilities.initiatives.some(initiative => initiative.id === item.initiativeId)));
+  assert.ok(capabilities.jiraEpicMappings.every(item => capabilities.initiatives.some(initiative => initiative.id === item.initiativeId)));
+  assert.deepEqual(await fs.readFile(targetDataFile), beforeBytes);
+});
+
+test('unsupported external hierarchy types are review-only while source-only apply remains explicit', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   const before = await persisted(targetDataFile);
   const input = importInput([{
@@ -183,28 +213,33 @@ test('external Feature item types preserve source provenance without Workstream 
   }]);
   const previewResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
   assert.equal(previewResponse.status, 200);
-  const review = previewResponse.json().preview.proposals.find(proposal => proposal.type === 'external-item-type-review');
-  assert.deepEqual(review.payload, {
-    externalItemType: 'Feature',
-    externalKey: 'FICTA-500',
-    summary: 'Fictional external Feature requiring explicit mapping',
-    targetEntityType: 'Workstream',
-    workstreamInference: 'none',
-    requiresExplicitMapping: true
+  assert.equal(previewResponse.json().preview.reviewRows[0].reviewState, 'unsupported-item-type');
+  assert.equal(previewResponse.json().preview.reviewRows[0].supportedForApply, false);
+  const rejected = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input,
+    includeSource: true,
+    reviewDecisions: [reviewDecision(0, { includeRecord: true })]
   });
-  assert.equal(previewResponse.json().preview.proposals.some(proposal => proposal.type === 'work-item-create'), false);
-  assert.equal(previewResponse.json().preview.proposals.some(proposal => proposal.type === 'workstream-create'), false);
-
-  const sourceProposal = previewResponse.json().preview.proposals.find(proposal => proposal.type === 'source-create');
+  assert.equal(rejected.status, 400);
+  const finalResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input,
+    includeSource: true,
+    reviewDecisions: [reviewDecision(0)]
+  });
+  assert.equal(finalResponse.status, 200, finalResponse.body);
+  const finalPreview = finalResponse.json().preview;
+  assert.deepEqual(finalPreview.proposals.map(proposal => proposal.type), ['source-create']);
   const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
     expectedRevision: before.revision,
     actor: ACTOR,
     input,
-    previewHash: previewResponse.json().preview.previewHash,
-    approvedProposalIds: [sourceProposal.id, review.id]
+    includeSource: true,
+    reviewDecisions: [reviewDecision(0)],
+    previewHash: finalPreview.previewHash,
+    approvedProposalIds: finalPreview.approvableProposalIds
   });
   assert.equal(applied.status, 200, applied.body);
-  assert.deepEqual(applied.json().outcome.externalItemTypeReviews, [review.payload]);
+  assert.equal(applied.json().outcome.sources.length, 1);
   assert.equal((await persisted(targetDataFile)).document.workItems.length, before.document.workItems.length);
   assert.equal((await persisted(targetDataFile)).document.workstreams.length, before.document.workstreams.length);
 });
@@ -237,7 +272,7 @@ test('strict target-v4 import rejects the prior contract and legacy relationship
   assert.equal(legacyFields.status, 400);
 });
 
-test('an exact existing Jira Epic identifier may be explicitly approved without creating or auto-assigning mappings', async t => {
+test('exact existing Work Item and Jira mapping matches remain informational until an explicit relationship decision', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t, ({ document }) => {
     const item = document.workItems.find(candidate => candidate.id === 'work-item-alpha-assigned');
     item.jiraKey = 'FICTA-10';
@@ -253,17 +288,30 @@ test('an exact existing Jira Epic identifier may be explicitly approved without 
   const before = await persisted(targetDataFile);
   const previewResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
   assert.equal(previewResponse.status, 200, previewResponse.body);
-  const proposal = previewResponse.json().preview.proposals.find(candidate => candidate.type === 'work-item-assign');
-  assert.equal(proposal.payload.jiraEpicMappingId, 'jira-mapping-alpha-one');
-  assert.equal(previewResponse.json().preview.proposals.some(candidate => candidate.type === 'jira-mapping-create'), false);
+  assert.equal(previewResponse.json().preview.reviewRows[0].suggestedExactMapping.jiraEpicMappingId, 'jira-mapping-alpha-one');
   assert.equal((await persisted(targetDataFile)).document.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId, null);
-
+  const decision = reviewDecision(0, {
+    includeRecord: true,
+    initiativeId: 'initiative-alpha-multiple-mappings',
+    workstreamId: 'workstream-alpha-mapped',
+    jiraEpicMappingId: 'jira-mapping-alpha-one'
+  });
+  const finalResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input, includeSource: true, reviewDecisions: [decision]
+  });
+  assert.equal(finalResponse.status, 200, finalResponse.body);
+  const finalPreview = finalResponse.json().preview;
+  const proposal = finalPreview.proposals.find(candidate => candidate.type === 'work-item-assign');
+  assert.equal(proposal.payload.workstreamId, 'workstream-alpha-mapped');
+  assert.equal(proposal.payload.jiraEpicMappingId, 'jira-mapping-alpha-one');
   const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
     expectedRevision: before.revision,
     actor: ACTOR,
     input,
-    previewHash: previewResponse.json().preview.previewHash,
-    approvedProposalIds: [proposal.id]
+    includeSource: true,
+    reviewDecisions: [decision],
+    previewHash: finalPreview.previewHash,
+    approvedProposalIds: finalPreview.approvableProposalIds
   });
   assert.equal(applied.status, 200, applied.body);
   assert.equal(applied.json().outcome.assignments[0].workstreamId, 'workstream-alpha-mapped');
@@ -273,7 +321,7 @@ test('an exact existing Jira Epic identifier may be explicitly approved without 
   assert.equal(stored.document.workItems.find(item => item.id === 'work-item-alpha-assigned').workstreamId, 'workstream-alpha-mapped');
 });
 
-test('new Work Item import proposals report null Workstream retention before exact Jira Epic association', async t => {
+test('new Work Item creation uses operator-approved fields and independent existing relationship IDs', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   const input = importInput([{
     externalKey: 'FICTA-901',
@@ -283,11 +331,28 @@ test('new Work Item import proposals report null Workstream retention before exa
     jiraEpicKey: 'FICTA-101'
   }]);
   const before = await persisted(targetDataFile);
-  const response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
+  const decision = reviewDecision(0, {
+    includeRecord: true,
+    createWorkItem: true,
+    approvedItemType: 'Other',
+    approvedSummary: 'Operator-approved fictional summary',
+    approvedDescription: 'Operator-approved fictional description.',
+    initiativeId: 'initiative-alpha-multiple-mappings',
+    workstreamId: 'workstream-alpha-mapped',
+    jiraEpicMappingId: 'jira-mapping-alpha-one'
+  });
+  const response = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input, includeSource: true, reviewDecisions: [decision]
+  });
   assert.equal(response.status, 200, response.body);
+  const creation = response.json().preview.proposals.find(candidate => candidate.type === 'work-item-create');
+  assert.equal(creation.payload.itemType, 'Other');
+  assert.equal(creation.payload.summary, 'Operator-approved fictional summary');
+  assert.equal(creation.payload.description, 'Operator-approved fictional description.');
+  assert.equal(creation.payload.canonicalStatus, 'Unknown');
   const proposal = response.json().preview.proposals.find(candidate => candidate.type === 'work-item-assign');
   assert.deepEqual(proposal.payload.workstreamChange, {
-    effect: 'retained', beforeWorkstreamId: null, afterWorkstreamId: null
+    effect: 'replaced', beforeWorkstreamId: null, afterWorkstreamId: 'workstream-alpha-mapped'
   });
   assert.deepEqual(proposal.payload.jiraEpicChange, {
     effect: 'replaced', beforeJiraEpicMappingId: null, afterJiraEpicMappingId: 'jira-mapping-alpha-one'
@@ -306,38 +371,113 @@ test('import apply reconstructs the preview and applies only explicitly selected
     evidenceExcerpt: 'A fictional imported fact remains pending review.',
     category: 'progress'
   }]);
-  const previewResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
+  const decision = reviewDecision(0, {
+    includeRecord: true,
+    createWorkItem: true,
+    approvedItemType: 'Task',
+    approvedSummary: 'Human-approved fictional import',
+    approvedDescription: '',
+    includeFinding: true
+  });
+  const previewResponse = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input, includeSource: true, reviewDecisions: [decision]
+  });
   const preview = previewResponse.json().preview;
-  const selected = preview.proposals
-    .filter(proposal => ['source-create', 'work-item-create', 'finding-create'].includes(proposal.type))
-    .map(proposal => proposal.id);
+  const selected = preview.approvableProposalIds;
   const before = await persisted(targetDataFile);
 
   const altered = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
     expectedRevision: before.revision,
     actor: ACTOR,
     input,
+    includeSource: true,
+    reviewDecisions: [decision],
     previewHash: '0'.repeat(64),
     approvedProposalIds: selected
   });
   assert.equal(altered.status, 409);
   assert.equal((await persisted(targetDataFile)).revision, before.revision);
 
+  const incomplete = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
+    expectedRevision: before.revision,
+    actor: ACTOR,
+    input,
+    includeSource: true,
+    reviewDecisions: [decision],
+    previewHash: preview.previewHash,
+    approvedProposalIds: selected.slice(0, -1)
+  });
+  assert.equal(incomplete.status, 400);
+  assert.equal((await persisted(targetDataFile)).revision, before.revision);
+
   const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
     expectedRevision: before.revision,
     actor: ACTOR,
     input,
+    includeSource: true,
+    reviewDecisions: [decision],
     previewHash: preview.previewHash,
     approvedProposalIds: selected
   });
   assert.equal(applied.status, 200, applied.body);
   assert.equal(applied.json().outcome.workItems.length, 1);
+  assert.equal(applied.json().outcome.workItems[0].summary, 'Human-approved fictional import');
+  assert.equal(applied.json().outcome.workItems[0].canonicalStatus, 'Unknown');
   assert.equal(applied.json().outcome.workItems[0].initiativeId, null);
   assert.equal(applied.json().outcome.findings[0].reviewStatus, 'pending');
   const stored = await persisted(targetDataFile);
   assert.equal(stored.document.initiatives.length, before.document.initiatives.length);
   assert.equal(stored.document.jiraEpicMappings.length, before.document.jiraEpicMappings.length);
   assert.equal(stored.document.evidence.length, before.document.evidence.length);
+});
+
+test('duplicate external keys block simultaneous inclusion and can be resolved by excluding all but one row', async t => {
+  const { app, targetDataFile } = await createTargetApiHarness(t);
+  const before = await persisted(targetDataFile);
+  const input = importInput([
+    { externalKey: 'FICTA-990', itemType: 'Task', summary: 'Fictional duplicate A' },
+    { externalKey: 'FICTA-990', itemType: 'Bug', summary: 'Fictional duplicate B' }
+  ]);
+  const initial = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input });
+  assert.equal(initial.status, 200, initial.body);
+  assert.deepEqual(initial.json().preview.reviewRows.map(row => row.duplicateReasons), [
+    ['duplicate-external-key-in-feed'], ['duplicate-external-key-in-feed']
+  ]);
+  const included = summary => ({
+    includeRecord: true,
+    createWorkItem: true,
+    approvedItemType: 'Task',
+    approvedSummary: summary,
+    approvedDescription: ''
+  });
+  const conflict = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input,
+    includeSource: true,
+    reviewDecisions: [reviewDecision(0, included('Approved A')), reviewDecision(1, included('Approved B'))]
+  });
+  assert.equal(conflict.status, 400);
+  const safe = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, {
+    input,
+    includeSource: true,
+    reviewDecisions: [reviewDecision(0, included('Approved A')), reviewDecision(1)]
+  });
+  assert.equal(safe.status, 200, safe.body);
+  assert.equal(safe.json().preview.proposals.filter(proposal => proposal.type === 'work-item-create').length, 1);
+  assert.equal((await persisted(targetDataFile)).document.workItems.some(item => item.jiraKey === 'FICTA-990'), false);
+  const safePreview = safe.json().preview;
+  const applied = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/apply`, {
+    expectedRevision: before.revision,
+    actor: ACTOR,
+    input,
+    includeSource: true,
+    reviewDecisions: [reviewDecision(0, included('Approved A')), reviewDecision(1)],
+    previewHash: safePreview.previewHash,
+    approvedProposalIds: safePreview.approvableProposalIds
+  });
+  assert.equal(applied.status, 200, applied.body);
+  const matches = (await persisted(targetDataFile)).document.workItems.filter(item => item.jiraKey === 'FICTA-990');
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].summary, 'Approved A');
 });
 
 test('Finding accept/reject and bounded bulk review preserve the Evidence/current-state boundary', async t => {
@@ -617,8 +757,14 @@ test('every Phase 3 route family resolves Organization and Workspace parents bef
       }
     }],
     ['POST', '/imports/preview', { input: importValue }],
+    ['GET', '/imports/capabilities', null],
     ['POST', '/imports/apply', {
-      ...actorRevision, input: importValue, previewHash: 'a'.repeat(64), approvedProposalIds: []
+      ...actorRevision,
+      input: importValue,
+      includeSource: true,
+      reviewDecisions: [reviewDecision(0)],
+      previewHash: 'a'.repeat(64),
+      approvedProposalIds: []
     }],
     ['GET', '/findings?page=1&pageSize=10', null],
     ['POST', '/findings/finding-alpha-pending-malicious/review', { ...actorRevision, decision: 'reject' }],

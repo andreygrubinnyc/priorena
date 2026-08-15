@@ -53,10 +53,12 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .page-description { margin: 0; color: var(--muted); }
 .initiative-chip, .badge { display: inline-flex; align-items: center; min-height: 1.75rem; padding: .25rem .65rem; border-radius: 999px; background: var(--accent-soft); color: #2347aa; font-size: .78rem; font-weight: 700; }
 .badge.muted-badge { background: #eaecf0; color: #475467; }
+.badge.risk-badge { background: #fee4e2; color: var(--danger); }
 .status { min-height: 1.5rem; margin: .5rem 0 1rem; color: var(--muted); }
 .status.error { color: var(--danger); }
 .status.success { color: var(--success); }
 .view { min-width: 0; }
+.view > .panel { margin-bottom: 1rem; }
 .card-grid, .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; }
 .card, .panel { min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); }
 .card h2, .card h3, .panel h2, .panel h3 { margin-top: 0; }
@@ -129,6 +131,25 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .metadata-list dt { color: var(--muted); font-weight: 700; }
 .metadata-list dd { margin: 0; overflow-wrap: anywhere; }
 .notice { padding: .8rem 1rem; border-left: 4px solid var(--accent); background: var(--accent-soft); overflow-wrap: anywhere; }
+.import-prompt-panel { border-left: 4px solid #7f56d9; }
+.import-prepare-panel { border-left: 4px solid var(--accent); }
+.import-review-panel { border-left: 4px solid #b54708; }
+.import-final-panel, .import-outcome-panel { border-left: 4px solid var(--success); }
+.import-input-box { display: grid; gap: .65rem; margin: 1rem 0; padding: 1rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--subtle); }
+.import-input-box textarea { width: 100%; min-height: 15rem; resize: vertical; border: 1px solid var(--border); border-radius: .5rem; padding: .65rem; background: var(--surface); color: var(--ink); }
+.source-selection { display: flex; align-items: flex-start; gap: .55rem; margin: 1rem 0; padding: .85rem; border: 1px solid #a7c2ff; border-radius: .6rem; background: var(--accent-soft); font-weight: 700; }
+.import-bulk-controls { background: var(--subtle); }
+.import-bulk-controls .actions { margin-top: .65rem; }
+.import-bulk-controls select, .actions select { min-width: min(100%, 12rem); min-height: 2.65rem; border: 1px solid var(--border); border-radius: .55rem; padding: .55rem; background: var(--surface); color: var(--ink); }
+.import-review-list { gap: 1rem; }
+.import-review-row { padding: 1rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--subtle); }
+.import-review-row:last-child { border-bottom: 1px solid var(--border); }
+.import-review-row .control-group { margin-top: 1rem; background: var(--surface); }
+.import-review-row .field textarea { min-height: 5rem; }
+.import-current-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0; }
+.import-current-grid section { min-width: 0; padding: .85rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--surface); overflow-wrap: anywhere; }
+.import-current-grid h3 { margin-bottom: .4rem; font-size: .95rem; }
+.import-metrics { margin: 1rem 0; }
 .output-preview { max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #111827; color: #eef2ff; border-radius: .65rem; }
 dialog { width: min(38rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); padding: 0; border: 0; border-radius: .8rem; box-shadow: 0 1rem 4rem rgb(0 0 0 / 30%); }
 dialog::backdrop { background: rgb(15 23 42 / 65%); }
@@ -158,6 +179,9 @@ dialog::backdrop { background: rgb(15 23 42 / 65%); }
   .metadata-list { grid-template-columns: 1fr; }
   .metadata-list dd { margin-bottom: .5rem; }
   .settings-navigation { position: static; }
+  .import-current-grid { grid-template-columns: 1fr; }
+  .import-bulk-controls .actions { align-items: stretch; flex-direction: column; }
+  .import-bulk-controls .actions select, .import-bulk-controls .actions .button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -47,3 +47,11 @@ Planned capabilities:
 
 The future workflow will keep human approval before apply. This release adds no
 Import Feed navigation, placeholder, dead link, or unfinished control.
+
+## Later follow-up status
+
+The separately scoped External Feed Import and Review UI follow-up is now
+implemented in source and documented in
+`docs/release/EXTERNAL_FEED_IMPORT_REVIEW_UI.md`. This factual pointer does not
+change the historical scope, authorization, or live-runtime state of the
+Structure setup and empty-state UX release recorded above.

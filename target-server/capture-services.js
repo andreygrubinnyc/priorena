@@ -2,7 +2,7 @@
 
 const path = require('node:path');
 
-const { buildImportPreview, MAX_IMPORT_BYTES, normalizeImportInput } = require('./import-parser');
+const { buildImportPreview, importCapabilities, MAX_IMPORT_BYTES, normalizeImportInput } = require('./import-parser');
 const { invalidRequest, previewConflict } = require('./errors');
 const { createTargetResolvers } = require('./resolvers');
 const { createNoneFollowUp } = require('./work-services');
@@ -140,7 +140,8 @@ function reassignWorkItemAndEvidence(
   actor,
   timestamp,
   action,
-  jiraEpicMappingId = undefined
+  jiraEpicMappingId = undefined,
+  workstreamId = undefined
 ) {
   if (initiativeId !== null) resolvers.resolveWorkspaceChild('initiatives', context.organizationId, context.workspaceId, initiativeId);
   const before = {
@@ -151,7 +152,15 @@ function reassignWorkItemAndEvidence(
   const currentWorkstream = workItem.workstreamId === null ? null : resolvers.indexes.workstreams.get(workItem.workstreamId);
   const currentMapping = workItem.jiraEpicMappingId === null ? null : resolvers.indexes.jiraEpicMappings.get(workItem.jiraEpicMappingId);
   workItem.initiativeId = initiativeId;
-  if (!currentWorkstream || currentWorkstream.initiativeId !== initiativeId) workItem.workstreamId = null;
+  if (workstreamId !== undefined) {
+    if (workstreamId !== null) {
+      const workstream = resolvers.resolveWorkspaceChild('workstreams', context.organizationId, context.workspaceId, workstreamId);
+      if (workstream.initiativeId !== initiativeId) throw invalidRequest();
+    }
+    workItem.workstreamId = workstreamId;
+  } else if (!currentWorkstream || currentWorkstream.initiativeId !== initiativeId) {
+    workItem.workstreamId = null;
+  }
   if (jiraEpicMappingId !== undefined) {
     if (jiraEpicMappingId !== null) {
       const mapping = resolvers.resolveWorkspaceChild(
@@ -234,8 +243,10 @@ function applyImportProposals(document, runtime, context, resolvers, inputValue,
     const evidenceChanges = reassignWorkItemAndEvidence(
       document, runtime, resolvers, context, item, proposal.payload.initiativeId, actor, timestamp,
       'work-item-initiative-assigned-from-approved-import-proposal',
-      proposal.payload.jiraEpicMappingId
+      proposal.payload.jiraEpicMappingId,
+      proposal.payload.workstreamId
     );
+    if (stateHash(evidenceChanges) !== stateHash(proposal.payload.evidenceChanges)) throw previewConflict();
     created.assignments.push({
       workItemId: item.id,
       initiativeId: item.initiativeId,
@@ -271,7 +282,8 @@ function applyImportProposals(document, runtime, context, resolvers, inputValue,
     audit(document, runtime, context, 'finding', record.id, 'finding-created-from-approved-import-proposal', actor, timestamp, null, record);
   });
 
-  approved.filter(proposal => proposal.type === 'proposed-current-state-change').forEach(proposal => {
+  preview.proposals.filter(proposal => proposal.type === 'proposed-current-state-change' &&
+    proposal.dependencies.every(dependency => approvedIds.includes(dependency))).forEach(proposal => {
     created.deferredCurrentStateChanges.push({
       ...clone(proposal.payload),
       findingId: createdIdsByProposal.get(proposal.payload.findingProposalId) || null,
@@ -392,18 +404,32 @@ function createCaptureServices(options = {}) {
     },
 
     previewImport(organizationId, workspaceId, body) {
-      exactKeys(body, ['input'], ['input']);
-      return readWorkflow(targetDataFile, (document, revision) => ({ preview: buildImportPreview(document, organizationId, workspaceId, body.input, revision) }));
+      exactKeys(body, ['input', 'includeSource', 'reviewDecisions'], ['input']);
+      const hasReview = Object.hasOwn(body, 'includeSource') || Object.hasOwn(body, 'reviewDecisions');
+      if (hasReview && (!Object.hasOwn(body, 'includeSource') || !Object.hasOwn(body, 'reviewDecisions'))) throw invalidRequest();
+      const review = hasReview ? { includeSource: body.includeSource, reviewDecisions: body.reviewDecisions } : undefined;
+      return readWorkflow(targetDataFile, (document, revision) => ({
+        preview: buildImportPreview(document, organizationId, workspaceId, body.input, revision, review)
+      }));
+    },
+
+    importCapabilities(organizationId, workspaceId) {
+      return readWorkflow(targetDataFile, document => ({ capabilities: importCapabilities(document, organizationId, workspaceId) }));
     },
 
     applyImport(organizationId, workspaceId, body) {
-      const request = requestBase(body, ['input', 'previewHash', 'approvedProposalIds'], ['input', 'previewHash', 'approvedProposalIds']);
+      const request = requestBase(body, [
+        'input', 'includeSource', 'reviewDecisions', 'previewHash', 'approvedProposalIds'
+      ], ['input', 'includeSource', 'reviewDecisions', 'previewHash', 'approvedProposalIds']);
       const approvedProposalIds = uniqueStableIds(body.approvedProposalIds, { max: 700 });
       const previewHash = requireText(body.previewHash, { max: 64 });
       return writeWorkflow(targetDataFile, request.expectedRevision, (document, revision) => {
         const { resolvers, context } = contextFor(document, organizationId, workspaceId);
-        const preview = buildImportPreview(document, organizationId, workspaceId, body.input, revision);
+        const review = { includeSource: body.includeSource, reviewDecisions: body.reviewDecisions };
+        const preview = buildImportPreview(document, organizationId, workspaceId, body.input, revision, review);
         if (preview.previewHash !== previewHash) throw previewConflict();
+        if (approvedProposalIds.length !== preview.approvableProposalIds.length ||
+          preview.approvableProposalIds.some(id => !approvedProposalIds.includes(id))) throw invalidRequest();
         const outcome = applyImportProposals(document, runtime, context, resolvers, body.input, preview, approvedProposalIds, request.actor);
         return { outcome, appliedPreviewHash: previewHash };
       });
