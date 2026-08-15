@@ -12,6 +12,17 @@ const { createTargetApiApp } = require('../target-server/app');
 const { LOOPBACK_HOST, parseArguments } = require('../target-server/start');
 const { requestApp } = require('../test-support/target-api-harness');
 const {
+  TARGET_V4_TEMPLATE,
+  buildExtractionPrompt,
+  createImportFeedState,
+  decisionForRow,
+  formatForFilename,
+  importValidationMessage,
+  sourceDescriptor,
+  summarizeFinalPreview,
+  utf8ByteLength
+} = require('../public/target-import-feed-state');
+const {
   categorizeVersions,
   createTargetBriefingApiClient,
   targetStableId,
@@ -48,7 +59,7 @@ test('isolated target entry exposes the canonical hierarchy and operational navi
   const markup = await source('public/target/index.html');
   for (const expected of [
     'Organization', 'Workspace', 'Portfolio', 'Today', 'Work Items', 'Workstream', 'Follow-Up', 'Milestones',
-    'Add Source', 'Source Library', 'Review', 'Briefings', 'Settings', 'All initiatives'
+    'Add Source', 'Import Feed', 'Source Library', 'Review', 'Briefings', 'Settings', 'All initiatives'
   ]) assert.match(markup, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
   for (const prohibited of [
@@ -100,6 +111,31 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.match(client, /onApplied\(result\.body\);[\s\S]*state\.workflow = null;[\s\S]*await loadWorkflow\(\);[\s\S]*renderSettings\(\);/);
   assert.match(client, /Existing frozen Briefing snapshots are not rewritten/);
   assert.doesNotMatch(client, /sendBriefing|sendOutput|autoPublish/);
+});
+
+test('Import Feed validation errors are actionable and stale review controls are removed after failures', async () => {
+  assert.equal(importValidationMessage({
+    code: 'IMPORT_VALIDATION_FAILED',
+    validation: { reason: 'invalid-field', recordIndex: 2, field: 'externalKey' }
+  }), 'Record 3, externalKey: enter a supported value in the required format.');
+  assert.equal(importValidationMessage({
+    code: 'IMPORT_VALIDATION_FAILED',
+    validation: { reason: 'malformed-csv' }
+  }), 'CSV contains invalid quote placement.');
+  assert.equal(importValidationMessage({
+    code: 'IMPORT_VALIDATION_FAILED',
+    validation: { reason: 'field-too-long', recordIndex: 0, field: 'description' }
+  }), 'Record 1, description: use 4,000 characters or fewer.');
+
+  const client = await source('public/target/app.js');
+  const validate = functionSlice(client, 'validateImportFeed', 'importReviewCounts');
+  const preview = functionSlice(client, 'previewReviewedImport', 'importFinalPreviewPanel');
+  const apply = functionSlice(client, 'applyReviewedImport', 'importOutcomePanel');
+  assert.match(validate, /invalidateImportValidation\(\);[\s\S]*await renderImportFeed\(\);/);
+  assert.match(preview, /state\.importFeed\.finalPreview = null;[\s\S]*await renderImportFeed\(\);/);
+  assert.match(apply, /state\.importFeed\.finalPreview = null;[\s\S]*await renderImportFeed\(\);/);
+  assert.match(apply, /state\.importFeed\.applying = true;[\s\S]*await renderImportFeed\(\);/);
+  assert.match(client, /disabled: state\.importFeed\.applying/);
 });
 
 test('Settings exposes complete Initiative setup through the accepted revision-aware services', async () => {
@@ -185,10 +221,12 @@ test('ordinary interface copy is plain while local-only and no-send safeguards r
   assert.match(markup, /<title>Priorena workspace<\/title>/);
   assert.match(markup, /aria-label="Priorena navigation"/);
   assert.match(markup, /aria-label="Priorena application"/);
-  assert.doesNotMatch(visible, /Import Feed/);
+  assert.match(visible, /Import Feed/);
+  assert.match(client, /Priorena reads the selected feed locally/);
+  assert.match(client, /does not upload screenshots, contact ChatGPT, write to Jira, or send messages/);
 });
 
-test('release note records the accepted External Feed follow-up without adding unfinished UI', async () => {
+test('historical release note preserves its original scope and points to the later implemented follow-up', async () => {
   const note = await source('docs/release/STRUCTURE_SETUP_AND_EMPTY_STATE_UX.md');
   assert.match(note, /External Feed Import and Review UI/);
   assert.match(note, /backend already supports strict import parsing/);
@@ -196,6 +234,9 @@ test('release note records the accepted External Feed follow-up without adding u
     assert.match(note, new RegExp(capability.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   }
   assert.match(note, /not implemented by this release/);
+  assert.match(note, /Later follow-up status/);
+  assert.match(note, /docs\/release\/EXTERNAL_FEED_IMPORT_REVIEW_UI\.md/);
+  assert.match(note, /does not\s+change the historical scope/);
 });
 
 test('target DOM integration rejects late context renders and keeps page context truthful', async () => {
@@ -262,6 +303,97 @@ test('Briefing client uses stable parent routes and explicit lifecycle placement
   }, 'org-fixture-alpha'), /crossed its Organization context/);
 });
 
+test('local GPT extraction prompt is deterministic, target-v4 exact, and keeps screenshot review outside Priorena', () => {
+  const prompt = buildExtractionPrompt();
+  assert.equal(buildExtractionPrompt(), prompt);
+  for (const required of [
+    'screenshots remain in this separate ChatGPT conversation',
+    'Do not invent, guess, complete, embellish',
+    'outside knowledge',
+    'Omit an unreadable field value',
+    'exact visible Jira keys',
+    'current information from historical information',
+    'question, suggestion, intention, or possibility is not a decision or a current fact',
+    'Never use proximity, similar titles, tabs, neighboring rows',
+    'itemType only when that type is explicitly visible for the same Jira item',
+    'Set jiraProjectKey and jiraEpicKey only when both values are explicitly visible for the same Jira item',
+    'no Epic, None, No Epic, Unassigned',
+    'evidenceExcerpt only for a readable exact excerpt',
+    'Do not output requestedInitiativeId',
+    'Feature must never become a Workstream suggestion',
+    'Output exactly one raw JSON object and nothing else',
+    'Do not wrap the JSON in a Markdown fence',
+    '"target-v4"',
+    'no more than 100 records',
+    'review, map, and explicitly approve records inside Priorena',
+    'Organization', 'Workspace', 'Initiative', 'Workstream', 'Jira Epic', 'Work Item', 'Finding', 'Evidence'
+  ]) assert.match(prompt, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(prompt, /\/Users\/|\\Users\\|schema-v5|[a-f0-9]{64}|api[_ -]?key/i);
+  assert.doesNotMatch(prompt, /```/);
+  assert.equal(TARGET_V4_TEMPLATE, '{\n  "version": "target-v4",\n  "records": []\n}\n');
+  assert.deepEqual(JSON.parse(TARGET_V4_TEMPLATE), { version: 'target-v4', records: [] });
+});
+
+test('Import Feed shared state validates local file formats, source descriptors, decisions, bytes, and outcome counts', () => {
+  assert.equal(formatForFilename('fictional-feed.JSON'), 'target-json');
+  assert.equal(formatForFilename('fictional-feed.csv'), 'target-csv');
+  assert.throws(() => formatForFilename('fictional-feed.png'), /\.json or \.csv/);
+  assert.equal(utf8ByteLength('é'), 2);
+  assert.deepEqual(sourceDescriptor('target-json', { title: ' Feed ', date: '2026-08-14', provenance: ' Local ' }), {
+    title: 'Feed', type: 'normalized-json', sourceKind: 'normalized-feed', date: '2026-08-14', provenance: 'Local'
+  });
+  assert.deepEqual(sourceDescriptor('structured-text', { title: 'Note', date: '2026-08-14', provenance: 'Paste' }), {
+    title: 'Note', type: 'external-evidence-feed', sourceKind: 'external-evidence-metadata', date: '2026-08-14', provenance: 'Paste'
+  });
+  const state = createImportFeedState('2026-08-14');
+  assert.equal(state.filename, null);
+  assert.equal(state.sourceDate, '2026-08-14');
+  assert.equal(state.rowDrafts instanceof Map, true);
+  const row = { recordIndex: 0, match: null, findingAvailable: true };
+  assert.deepEqual(decisionForRow(row, { includeRecord: false }), {
+    recordIndex: 0, includeRecord: false, createWorkItem: false, approvedItemType: null,
+    approvedSummary: null, approvedDescription: null, initiativeId: null, workstreamId: null,
+    jiraEpicMappingId: null, includeFinding: false
+  });
+  assert.deepEqual(decisionForRow(row, {
+    includeRecord: true, createWorkItem: true, approvedItemType: 'Task', approvedSummary: 'Approved',
+    approvedDescription: '', initiativeId: 'initiative-one', workstreamId: null, jiraEpicMappingId: null, includeFinding: true
+  }), {
+    recordIndex: 0, includeRecord: true, createWorkItem: true, approvedItemType: 'Task', approvedSummary: 'Approved',
+    approvedDescription: '', initiativeId: 'initiative-one', workstreamId: null, jiraEpicMappingId: null, includeFinding: true
+  });
+  assert.deepEqual(summarizeFinalPreview({
+    reviewRows: [{ supportedForApply: true }, { supportedForApply: false }],
+    reviewDecisions: [{ includeRecord: true }, { includeRecord: false }],
+    proposals: [
+      { type: 'source-create' }, { type: 'work-item-create' }, { type: 'work-item-assign' },
+      { type: 'finding-create' }, { type: 'proposed-current-state-change' }
+    ]
+  }), {
+    sources: 1, newWorkItems: 1, relationshipChanges: 1, pendingFindings: 1,
+    deferredCurrentStateChanges: 1, evidenceReassociations: 0,
+    selectedRows: 1, excludedRows: 1, blockedRows: 1
+  });
+});
+
+test('Import Feed client uses native local file, prompt download, strict review, custom confirmation, and no external clients', async () => {
+  const client = await source('public/target/app.js');
+  const moduleSource = await source('public/target-import-feed-state.js');
+  for (const expected of [
+    "accept: '.json,.csv,application/json,text/csv,text/plain'", 'file.text()', 'file.size',
+    'navigator.clipboard?.writeText', 'new Blob', 'URL.createObjectURL', 'Download target-v4 JSON template',
+    'Accepted input: strict target-v4 JSON', 'characters per bounded cell',
+    'Validate and preview', 'Clear prepared feed', 'Validation and preview have not changed Priorena data', 'Bounded bulk review',
+    'Select eligible new Work Items', 'Set selected creation type', 'Set selected Initiative',
+    'Set selected Workstream', 'Set selected Jira Epic', 'Include selected pending Findings',
+    'Run final write-free preview', "confirmAction('Apply reviewed import'", 'approvedProposalIds: preview.approvableProposalIds',
+    'Import another feed', "activateView('work-items')", "activateView('review')", "activateView('source-library')"
+  ]) assert.match(client, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(moduleSource, /target-v4/);
+  assert.doesNotMatch(`${client}\n${moduleSource}`, /fetch\([^\n]*(?:openai|chatgpt|atlassian|jira)|XMLHttpRequest|WebSocket/i);
+  assert.doesNotMatch(client, /\bwindow\.(?:alert|confirm|prompt)\s*\(/);
+});
+
 test('target styles cover focus, responsive layouts, wrapping, dialogs, and reduced motion', async () => {
   const css = await source('public/target/styles.css');
   assert.match(css, /:focus-visible/);
@@ -294,7 +426,7 @@ test('target UI is the release root and does not mutate target data', async t =>
   const rootResponse = await requestApp(app, { url: '/' });
   assert.equal(rootResponse.status, 302);
   assert.equal(rootResponse.headers.location, '/target/');
-  for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-briefing-state.js']) {
+  for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-import-feed-state.js', 'target-briefing-state.js']) {
     const response = await requestApp(app, { url: `/target-modules/${moduleName}` });
     assert.equal(response.status, 200);
     assert.match(response.headers['content-type'], /^application\/javascript/);

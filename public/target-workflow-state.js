@@ -71,6 +71,7 @@ async function responseJson(response) {
     if (response.ok === false) {
       const error = new Error(body?.error?.message || 'Target workflow request failed');
       error.code = body?.error?.code || 'REQUEST_FAILED';
+      if (body?.error?.validation) error.validation = body.error.validation;
       throw error;
     }
     return { body, revision: responseRevision(response) };
@@ -141,6 +142,10 @@ function createTargetWorkflowApiClient(options = {}) {
     },
     captureSource(organizationId, workspaceId, value) {
       return write(`${base(organizationId, workspaceId)}/sources`, value).then(result => result.body);
+    },
+    importCapabilities(organizationId, workspaceId) {
+      return read(`${base(organizationId, workspaceId)}/imports/capabilities`)
+        .then(result => ({ ...result.body, revision: result.revision }));
     },
     previewImport(organizationId, workspaceId, value) {
       return write(`${base(organizationId, workspaceId)}/imports/preview`, value).then(result => result.body);

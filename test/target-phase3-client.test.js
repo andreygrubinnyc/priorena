@@ -226,6 +226,33 @@ test('workflow API client uses only stable parent-scoped routes and explicit JSO
   await assert.rejects(client.loadWorkspace('org-client', 'Duplicate Workspace'), /stable opaque ID/);
 });
 
+test('workflow API client preserves bounded Import Feed validation metadata for UI guidance', async () => {
+  const client = createTargetWorkflowApiClient({
+    async request() {
+      return {
+        ok: false,
+        headers: { get: () => null },
+        async json() {
+          return {
+            error: {
+              code: 'IMPORT_VALIDATION_FAILED',
+              message: 'Import feed validation failed',
+              validation: { reason: 'invalid-field', recordIndex: 1, field: 'jiraEpicKey' }
+            }
+          };
+        }
+      };
+    }
+  });
+  await assert.rejects(
+    client.previewImport('org-client', 'workspace-client', { input: {} }),
+    error => error.code === 'IMPORT_VALIDATION_FAILED' &&
+      error.validation.reason === 'invalid-field' &&
+      error.validation.recordIndex === 1 &&
+      error.validation.field === 'jiraEpicKey'
+  );
+});
+
 test('workflow controller renders an accessible confirmation model and refreshes after success', async () => {
   let current = payload('org-client', 'workspace-client');
   const calls = [];
