@@ -59,13 +59,13 @@ function clearWorkflowData(state) {
   Object.assign(state, emptyWorkflowData());
 }
 
-function responseRevision(response) {
+function workflowResponseRevision(response) {
   if (!response || !response.headers) return null;
   if (typeof response.headers.get === 'function') return response.headers.get('x-priorena-target-revision');
   return response.headers['x-priorena-target-revision'] || null;
 }
 
-async function responseJson(response) {
+async function workflowResponseJson(response) {
   if (response && typeof response.json === 'function') {
     const body = await response.json();
     if (response.ok === false) {
@@ -74,7 +74,7 @@ async function responseJson(response) {
       if (body?.error?.validation) error.validation = body.error.validation;
       throw error;
     }
-    return { body, revision: responseRevision(response) };
+    return { body, revision: workflowResponseRevision(response) };
   }
   return { body: response, revision: response?.revision || null };
 }
@@ -84,8 +84,8 @@ function createTargetWorkflowApiClient(options = {}) {
   const request = options.request;
   const base = (organizationId, workspaceId) =>
     `/api/v2/organizations/${encodedId(organizationId)}/workspaces/${encodedId(workspaceId)}`;
-  const read = async url => responseJson(await request(url, { method: 'GET' }));
-  const write = async (url, value) => responseJson(await request(url, {
+  const read = async url => workflowResponseJson(await request(url, { method: 'GET' }));
+  const write = async (url, value) => workflowResponseJson(await request(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(value)
