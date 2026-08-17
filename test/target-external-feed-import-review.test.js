@@ -114,6 +114,58 @@ test('strict target-v4 JSON, CSV, structured-text, field, byte, row, and cell bo
   assert.deepEqual(await fs.readFile(targetDataFile), before);
 });
 
+test('feed Work Item type remains evidence-only and every canonical creation type is an explicit write-free decision', async t => {
+  const { app, targetDataFile } = await createTargetApiHarness(t);
+  const before = await fs.readFile(targetDataFile);
+  const missingTypeInput = input([{ externalKey: 'FICTA-680', summary: 'Fictional missing-type candidate' }]);
+  const suggestedTypeInput = input([{ externalKey: 'FICTA-681', itemType: 'Story', summary: 'Fictional suggested-type candidate' }]);
+
+  const missingType = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input: missingTypeInput });
+  assert.equal(missingType.status, 200, missingType.body);
+  assert.equal(missingType.json().preview.reviewRows[0].sourceItemType, null);
+  assert.deepEqual(await fs.readFile(targetDataFile), before);
+
+  const suggestedType = await jsonRequest(app, 'POST', `${workspaceBase(ALPHA)}/imports/preview`, { input: suggestedTypeInput });
+  assert.equal(suggestedType.status, 200, suggestedType.body);
+  assert.equal(suggestedType.json().preview.reviewRows[0].sourceItemType, 'Story');
+  assert.deepEqual(await fs.readFile(targetDataFile), before);
+
+  const unresolved = await finalPreview(app, ALPHA, missingTypeInput, [decision(0, {
+    includeRecord: true,
+    createWorkItem: true,
+    approvedSummary: 'Human-reviewed fictional candidate',
+    approvedDescription: ''
+  })]);
+  assert.equal(unresolved.status, 400);
+  assert.deepEqual(await fs.readFile(targetDataFile), before);
+
+  for (const approvedItemType of ['Story', 'Task', 'Bug', 'Other', 'Unknown']) {
+    const reviewed = await finalPreview(app, ALPHA, missingTypeInput, [decision(0, {
+      includeRecord: true,
+      createWorkItem: true,
+      approvedItemType,
+      approvedSummary: 'Human-reviewed fictional candidate',
+      approvedDescription: ''
+    })]);
+    assert.equal(reviewed.status, 200, `${approvedItemType}: ${reviewed.body}`);
+    const creation = reviewed.json().preview.proposals.find(proposal => proposal.type === 'work-item-create');
+    assert.equal(creation.payload.itemType, approvedItemType);
+    assert.deepEqual(await fs.readFile(targetDataFile), before);
+  }
+
+  const reviewerOverridesSuggestion = await finalPreview(app, ALPHA, suggestedTypeInput, [decision(0, {
+    includeRecord: true,
+    createWorkItem: true,
+    approvedItemType: 'Task',
+    approvedSummary: 'Human-reviewed fictional suggestion',
+    approvedDescription: ''
+  })]);
+  assert.equal(reviewerOverridesSuggestion.status, 200, reviewerOverridesSuggestion.body);
+  const creation = reviewerOverridesSuggestion.json().preview.proposals.find(proposal => proposal.type === 'work-item-create');
+  assert.equal(creation.payload.itemType, 'Task');
+  assert.deepEqual(await fs.readFile(targetDataFile), before);
+});
+
 test('review-decision fields, indexes, human creation values, and parent relationships are strict and write-free', async t => {
   const { app, targetDataFile } = await createTargetApiHarness(t);
   const before = await fs.readFile(targetDataFile);

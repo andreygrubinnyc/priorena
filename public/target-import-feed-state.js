@@ -97,6 +97,7 @@ function createImportFeedState(date = new Date().toISOString().slice(0, 10)) {
     rowFilter: 'all',
     includeSource: false,
     finalPreview: null,
+    acknowledgedPreviewHash: null,
     outcome: null,
     applying: false,
     fileReadToken: 0
@@ -167,6 +168,98 @@ function emptyReviewDecision(recordIndex) {
   };
 }
 
+function createReviewDrafts(preview) {
+  return new Map(preview.reviewRows.map(row => [row.recordIndex, {
+    includeRecord: false,
+    createWorkItem: false,
+    approvedItemType: null,
+    approvedSummary: row.sourceSummary || '',
+    approvedDescription: row.sourceDescription || '',
+    initiativeId: row.match?.initiativeId || '',
+    workstreamId: row.match?.workstreamId || '',
+    jiraEpicMappingId: row.match?.jiraEpicMappingId || '',
+    includeFinding: false
+  }]));
+}
+
+function selectedConflictCounts(preview, drafts) {
+  const externalKeys = new Map();
+  const workItemIds = new Map();
+  preview.reviewRows.forEach(row => {
+    const draft = drafts.get(row.recordIndex);
+    if (!draft?.includeRecord) return;
+    if (row.externalKey) externalKeys.set(row.externalKey, (externalKeys.get(row.externalKey) || 0) + 1);
+    if (row.match?.workItemId) workItemIds.set(row.match.workItemId, (workItemIds.get(row.match.workItemId) || 0) + 1);
+  });
+  return { externalKeys, workItemIds };
+}
+
+function readinessForRow(row, draft, conflicts) {
+  if (!draft?.includeRecord) return { recordIndex: row.recordIndex, state: 'excluded', messages: [], focusTarget: null };
+  if (!row.supportedForApply) {
+    const message = row.reviewState === 'unsupported-item-type'
+      ? 'This external hierarchy type cannot create or update a Work Item.'
+      : (row.duplicateReasons.includes('multiple-local-exact-matches')
+          ? 'Multiple local exact matches block this record.'
+          : 'This record is blocked by the existing import rules.');
+    return { recordIndex: row.recordIndex, state: 'blocked', messages: [message], focusTarget: 'row' };
+  }
+
+  const messages = [];
+  let focusTarget = null;
+  if (row.externalKey && conflicts.externalKeys.get(row.externalKey) > 1) {
+    messages.push(`Exclude all but one selected record with external key ${row.externalKey}.`);
+    focusTarget ||= 'include';
+  }
+  if (row.match?.workItemId && conflicts.workItemIds.get(row.match.workItemId) > 1) {
+    messages.push('Exclude all but one selected record resolving to this exact local Work Item.');
+    focusTarget ||= 'include';
+  }
+  if (row.match === null && !draft.createWorkItem && !(draft.includeFinding && row.findingAvailable)) {
+    messages.push('Choose an action: create a Work Item, create a pending Finding when available, or exclude this record.');
+    focusTarget ||= 'create';
+  }
+  if (row.match === null && draft.createWorkItem) {
+    if (!draft.approvedItemType) {
+      messages.push('Select a Work Item type.');
+      focusTarget ||= 'item-type';
+    }
+    if (!draft.approvedSummary?.trim()) {
+      messages.push('Enter an approved summary.');
+      focusTarget ||= 'summary';
+    }
+    if (draft.approvedDescription === null || draft.approvedDescription === undefined) {
+      messages.push('Review the approved description.');
+      focusTarget ||= 'description';
+    }
+  }
+  return {
+    recordIndex: row.recordIndex,
+    state: messages.length > 0 ? 'needs-action' : 'ready',
+    messages,
+    focusTarget
+  };
+}
+
+function reviewReadiness(preview, drafts) {
+  const conflicts = selectedConflictCounts(preview, drafts);
+  const rows = preview.reviewRows.map(row => readinessForRow(row, drafts.get(row.recordIndex), conflicts));
+  const selectedRows = rows.filter(row => row.state !== 'excluded');
+  return {
+    valid: preview.reviewRows.filter(row => row.supportedForApply).length,
+    selected: selectedRows.length,
+    ready: selectedRows.filter(row => row.state === 'ready').length,
+    needsAction: selectedRows.filter(row => row.state === 'needs-action').length,
+    blocked: selectedRows.filter(row => row.state === 'blocked').length,
+    rows,
+    firstIncomplete: selectedRows.find(row => row.state === 'needs-action' || row.state === 'blocked') || null
+  };
+}
+
+function canRunFinalPreview(readiness, includeSource) {
+  return Boolean(includeSource && readiness.needsAction === 0 && readiness.blocked === 0);
+}
+
 function decisionForRow(row, draft) {
   if (!draft?.includeRecord) return emptyReviewDecision(row.recordIndex);
   const createWorkItem = row.match === null && Boolean(draft.createWorkItem);
@@ -205,16 +298,36 @@ function summarizeFinalPreview(preview) {
   };
 }
 
+function formatLiveApplyLabel(summary) {
+  const categories = [
+    [summary.sources, 'Source', 'Sources'],
+    [summary.newWorkItems, 'Work Item', 'Work Items'],
+    [summary.relationshipChanges, 'Relationship Change', 'Relationship Changes'],
+    [summary.pendingFindings, 'Pending Finding', 'Pending Findings'],
+    [summary.evidenceReassociations, 'Evidence Reassociation', 'Evidence Reassociations']
+  ].filter(([count]) => count > 0).map(([count, singular, plural]) => `${count} ${count === 1 ? singular : plural}`);
+  const description = categories.length < 2
+    ? categories[0]
+    : (categories.length === 2
+        ? `${categories[0]} and ${categories[1]}`
+        : `${categories.slice(0, -1).join(', ')}, and ${categories.at(-1)}`);
+  return `Apply ${description || 'Reviewed Changes'} to live Priorena`;
+}
+
 const targetImportFeedApi = {
   IMPORT_FORMATS,
   MAX_IMPORT_BYTES,
   TARGET_V4_TEMPLATE,
   buildExtractionPrompt,
+  canRunFinalPreview,
   createImportFeedState,
+  createReviewDrafts,
   decisionForRow,
   emptyReviewDecision,
+  formatLiveApplyLabel,
   formatForFilename,
   importValidationMessage,
+  reviewReadiness,
   sourceDescriptor,
   summarizeFinalPreview,
   utf8ByteLength

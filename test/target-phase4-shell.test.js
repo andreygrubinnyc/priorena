@@ -14,10 +14,14 @@ const { requestApp } = require('../test-support/target-api-harness');
 const {
   TARGET_V4_TEMPLATE,
   buildExtractionPrompt,
+  canRunFinalPreview,
   createImportFeedState,
+  createReviewDrafts,
   decisionForRow,
+  formatLiveApplyLabel,
   formatForFilename,
   importValidationMessage,
+  reviewReadiness,
   sourceDescriptor,
   summarizeFinalPreview,
   utf8ByteLength
@@ -349,6 +353,7 @@ test('Import Feed shared state validates local file formats, source descriptors,
   assert.equal(state.filename, null);
   assert.equal(state.sourceDate, '2026-08-14');
   assert.equal(state.rowDrafts instanceof Map, true);
+  assert.equal(state.acknowledgedPreviewHash, null);
   const row = { recordIndex: 0, match: null, findingAvailable: true };
   assert.deepEqual(decisionForRow(row, { includeRecord: false }), {
     recordIndex: 0, includeRecord: false, createWorkItem: false, approvedItemType: null,
@@ -376,9 +381,139 @@ test('Import Feed shared state validates local file formats, source descriptors,
   });
 });
 
+test('Import Feed readiness is derived from selected review decisions and never defaults canonical type', () => {
+  const row = (recordIndex, changes = {}) => ({
+    recordIndex,
+    externalKey: `FICTA-${800 + recordIndex}`,
+    sourceItemType: null,
+    sourceSummary: `Fictional row ${recordIndex + 1}`,
+    sourceDescription: '',
+    match: null,
+    duplicateReasons: [],
+    reviewState: 'new-record',
+    supportedForApply: true,
+    findingAvailable: false,
+    ...changes
+  });
+  const preview = { reviewRows: Array.from({ length: 5 }, (_, index) => row(index)) };
+  const drafts = createReviewDrafts(preview);
+  for (const draft of drafts.values()) {
+    assert.equal(draft.approvedItemType, null);
+    draft.includeRecord = true;
+    draft.createWorkItem = true;
+  }
+  drafts.get(0).approvedItemType = 'Story';
+  drafts.get(1).approvedItemType = 'Task';
+  drafts.get(2).approvedItemType = 'Bug';
+
+  let readiness = reviewReadiness(preview, drafts);
+  assert.deepEqual({
+    valid: readiness.valid,
+    selected: readiness.selected,
+    ready: readiness.ready,
+    needsAction: readiness.needsAction,
+    blocked: readiness.blocked
+  }, { valid: 5, selected: 5, ready: 3, needsAction: 2, blocked: 0 });
+  assert.equal(readiness.firstIncomplete.recordIndex, 3);
+  assert.equal(readiness.firstIncomplete.focusTarget, 'item-type');
+  assert.deepEqual(readiness.firstIncomplete.messages, ['Select a Work Item type.']);
+  assert.equal(canRunFinalPreview(readiness, true), false);
+
+  drafts.get(3).approvedItemType = 'Other';
+  drafts.get(4).approvedItemType = 'Unknown';
+  readiness = reviewReadiness(preview, drafts);
+  assert.deepEqual({ ready: readiness.ready, needsAction: readiness.needsAction, blocked: readiness.blocked }, {
+    ready: 5, needsAction: 0, blocked: 0
+  });
+  assert.equal(readiness.firstIncomplete, null);
+  assert.equal(canRunFinalPreview(readiness, true), true);
+  assert.equal(canRunFinalPreview(readiness, false), false);
+
+  drafts.get(4).approvedItemType = null;
+  assert.equal(reviewReadiness(preview, drafts).needsAction, 1);
+  drafts.get(4).includeRecord = false;
+  readiness = reviewReadiness(preview, drafts);
+  assert.deepEqual({ selected: readiness.selected, ready: readiness.ready, needsAction: readiness.needsAction }, {
+    selected: 4, ready: 4, needsAction: 0
+  });
+  assert.equal(canRunFinalPreview(readiness, true), true);
+});
+
+test('Import Feed readiness preserves blocked, duplicate, exact-match, and explicit-type behavior', () => {
+  const creation = {
+    recordIndex: 0, externalKey: 'FICTA-900', sourceSummary: 'Fictional creation', sourceDescription: '',
+    sourceItemType: 'Story', match: null, duplicateReasons: [], reviewState: 'new-record',
+    supportedForApply: true, findingAvailable: false
+  };
+  const exact = {
+    recordIndex: 1, externalKey: 'FICTA-901', sourceSummary: 'Fictional exact match', sourceDescription: '',
+    sourceItemType: 'Task', match: { workItemId: 'work-item-fixture', initiativeId: null, workstreamId: null, jiraEpicMappingId: null },
+    duplicateReasons: [], reviewState: 'existing-record', supportedForApply: true, findingAvailable: false
+  };
+  const blocked = {
+    recordIndex: 2, externalKey: 'FICTA-902', sourceSummary: 'Fictional blocked row', sourceDescription: '',
+    sourceItemType: null, match: null, duplicateReasons: ['multiple-local-exact-matches'],
+    reviewState: 'duplicate-review', supportedForApply: false, findingAvailable: false
+  };
+  const preview = { reviewRows: [creation, exact, blocked] };
+  const drafts = createReviewDrafts(preview);
+  drafts.get(0).includeRecord = true;
+  drafts.get(0).createWorkItem = true;
+  drafts.get(1).includeRecord = true;
+  drafts.get(2).includeRecord = true;
+
+  let readiness = reviewReadiness(preview, drafts);
+  assert.equal(drafts.get(0).approvedItemType, null, 'a Story suggestion must not establish canonical Story');
+  assert.equal(readiness.rows[0].state, 'needs-action');
+  assert.equal(readiness.rows[1].state, 'ready', 'an exact match does not require a creation type');
+  assert.equal(readiness.rows[2].state, 'blocked');
+  assert.equal(readiness.blocked, 1);
+  assert.equal(canRunFinalPreview(readiness, true), false);
+
+  for (const itemType of ['Story', 'Task', 'Bug', 'Other', 'Unknown']) {
+    drafts.get(0).approvedItemType = itemType;
+    assert.equal(reviewReadiness(preview, drafts).rows[0].state, 'ready');
+  }
+  drafts.get(2).includeRecord = false;
+  readiness = reviewReadiness(preview, drafts);
+  assert.equal(readiness.blocked, 0);
+  assert.equal(canRunFinalPreview(readiness, true), true);
+
+  const duplicatePreview = { reviewRows: [
+    { ...creation, recordIndex: 0, externalKey: 'FICTA-990', duplicateReasons: ['duplicate-external-key-in-feed'] },
+    { ...creation, recordIndex: 1, externalKey: 'FICTA-990', duplicateReasons: ['duplicate-external-key-in-feed'] }
+  ] };
+  const duplicateDrafts = createReviewDrafts(duplicatePreview);
+  duplicateDrafts.forEach(draft => {
+    draft.includeRecord = true;
+    draft.createWorkItem = true;
+    draft.approvedItemType = 'Task';
+  });
+  assert.equal(reviewReadiness(duplicatePreview, duplicateDrafts).needsAction, 2);
+  duplicateDrafts.get(1).includeRecord = false;
+  assert.deepEqual({
+    ready: reviewReadiness(duplicatePreview, duplicateDrafts).ready,
+    needsAction: reviewReadiness(duplicatePreview, duplicateDrafts).needsAction
+  }, { ready: 1, needsAction: 0 });
+});
+
+test('Import Feed live Apply wording uses authoritative Final Preview category counts', () => {
+  assert.equal(formatLiveApplyLabel({
+    sources: 1, newWorkItems: 5, relationshipChanges: 0, pendingFindings: 0, evidenceReassociations: 0
+  }), 'Apply 1 Source and 5 Work Items to live Priorena');
+  assert.equal(formatLiveApplyLabel({
+    sources: 1, newWorkItems: 1, relationshipChanges: 2, pendingFindings: 3, evidenceReassociations: 4
+  }), 'Apply 1 Source, 1 Work Item, 2 Relationship Changes, 3 Pending Findings, and 4 Evidence Reassociations to live Priorena');
+});
+
 test('Import Feed client uses native local file, prompt download, strict review, custom confirmation, and no external clients', async () => {
   const client = await source('public/target/app.js');
   const moduleSource = await source('public/target-import-feed-state.js');
+  const invalidateFinal = functionSlice(client, 'invalidateImportFinalPreview', 'downloadLocalText');
+  const incompleteNavigation = functionSlice(client, 'goToFirstIncompleteRecord', 'importReviewPanel');
+  const finalPreview = functionSlice(client, 'previewReviewedImport', 'importProposalEffect');
+  const finalPanel = functionSlice(client, 'importFinalPreviewPanel', 'applyReviewedImport');
+  const apply = functionSlice(client, 'applyReviewedImport', 'importOutcomePanel');
   for (const expected of [
     "accept: '.json,.csv,application/json,text/csv,text/plain'", 'file.text()', 'file.size',
     'navigator.clipboard?.writeText', 'new Blob', 'URL.createObjectURL', 'Download target-v4 JSON template',
@@ -386,10 +521,31 @@ test('Import Feed client uses native local file, prompt download, strict review,
     'Validate and preview', 'Clear prepared feed', 'Validation and preview have not changed Priorena data', 'Bounded bulk review',
     'Select eligible new Work Items', 'Set selected creation type', 'Set selected Initiative',
     'Set selected Workstream', 'Set selected Jira Epic', 'Include selected pending Findings',
-    'Run final write-free preview', "confirmAction('Apply reviewed import'", 'approvedProposalIds: preview.approvableProposalIds',
+    'Review readiness', 'Go to first incomplete record', 'Select a Work Item type',
+    'Run final write-free preview', "confirmAction('Apply to live Priorena'", 'approvedProposalIds: preview.approvableProposalIds',
+    'Dry run complete. Priorena has not been changed.', 'Stop here to leave your live Priorena data unchanged.',
+    'Apply to live Priorena', 'This will change your live Priorena data. This is no longer a preview.',
+    'I reviewed these changes and understand they will be saved to live Priorena.',
     'Import another feed', "activateView('work-items')", "activateView('review')", "activateView('source-library')"
   ]) assert.match(client, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(moduleSource, /target-v4/);
+  assert.doesNotMatch(client, /approvedItemType:\s*'Story'/);
+  assert.doesNotMatch(client, /value === 'Story'/);
+  assert.match(incompleteNavigation, /rowFilter = 'all'/);
+  assert.match(incompleteNavigation, /data-import-record/);
+  assert.match(incompleteNavigation, /scrollIntoView/);
+  assert.match(incompleteNavigation, /focus\(\{ preventScroll: true \}\)/);
+  assert.match(invalidateFinal, /acknowledgedPreviewHash = null/);
+  assert.match(finalPreview, /finalPreview = result\.preview;[\s\S]*acknowledgedPreviewHash = null/);
+  assert.match(finalPanel, /acknowledgedPreviewHash === preview\.previewHash/);
+  assert.match(finalPanel, /disabled: state\.importFeed\.applying \|\| !acknowledged/);
+  assert.match(finalPanel, /acknowledgement\.checked \? preview\.previewHash : null/);
+  assert.doesNotMatch(finalPanel, /workflowApi\.applyImport/);
+  assert.match(apply, /acknowledgedPreviewHash !== preview\.previewHash/);
+  assert.match(apply, /expectedRevision: preview\.expectedRevision/);
+  assert.match(apply, /previewHash: preview\.previewHash/);
+  assert.match(apply, /approvedProposalIds: preview\.approvableProposalIds/);
+  assert.doesNotMatch(client, /acknowledgedPreviewHash:\s*preview\.previewHash/);
   assert.doesNotMatch(`${client}\n${moduleSource}`, /fetch\([^\n]*(?:openai|chatgpt|atlassian|jira)|XMLHttpRequest|WebSocket/i);
   assert.doesNotMatch(client, /\bwindow\.(?:alert|confirm|prompt)\s*\(/);
 });
@@ -406,6 +562,9 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
   assert.match(css, /\.settings-navigation/);
   assert.match(css, /\.settings-navigation a:hover, \.settings-navigation a:focus-visible/);
   assert.match(css, /\.settings-card-grid/);
+  assert.match(css, /\.import-readiness-summary \{[^}]*position: sticky/);
+  assert.match(css, /\.import-live-apply/);
+  assert.match(css, /\.import-apply-acknowledgement/);
   assert.match(css, /\.settings-card \.actions input \{[^}]*min-width: 0/);
   assert.doesNotMatch(css, /min-width:\s*[7-9]\d\dpx/);
 });

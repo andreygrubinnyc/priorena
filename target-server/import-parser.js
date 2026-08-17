@@ -179,7 +179,7 @@ function normalizeImportRecord(value, recordIndex) {
   const externalItemType = ['Feature', 'Workstream'].includes(value.itemType) ? value.itemType : null;
   const record = {
     externalKey: value.externalKey === undefined || value.externalKey === null ? null : importField(recordIndex, 'externalKey', () => requireCanonicalJiraKey(value.externalKey)),
-    itemType: value.itemType === undefined ? 'Unknown' : (externalItemType === null ? importField(recordIndex, 'itemType', () => requireEnum(value.itemType, [...ITEM_TYPES])) : null),
+    itemType: value.itemType === undefined ? null : (externalItemType === null ? importField(recordIndex, 'itemType', () => requireEnum(value.itemType, [...ITEM_TYPES])) : null),
     externalItemType,
     summary: value.summary === undefined ? null : importField(recordIndex, 'summary', () => nullableText(value.summary, { max: 1_000 })),
     description: value.description === undefined ? '' : importField(recordIndex, 'description', () => requireText(value.description, { allowEmpty: true, max: MAX_IMPORT_CELL_CHARACTERS })),
