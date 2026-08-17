@@ -762,6 +762,7 @@
     state.importFeed.rowDrafts = new Map();
     state.importFeed.includeSource = false;
     state.importFeed.finalPreview = null;
+    state.importFeed.acknowledgedPreviewHash = null;
     state.importFeed.outcome = null;
     state.importFeed.applying = false;
     elements.view.querySelectorAll('.import-review-panel, .import-final-panel').forEach(element => element.remove());
@@ -769,6 +770,7 @@
 
   function invalidateImportFinalPreview() {
     state.importFeed.finalPreview = null;
+    state.importFeed.acknowledgedPreviewHash = null;
     state.importFeed.applying = false;
     elements.view.querySelector('.import-final-panel')?.remove();
   }
@@ -937,17 +939,7 @@
   }
 
   function initializeImportDrafts(preview) {
-    state.importFeed.rowDrafts = new Map(preview.reviewRows.map(row => [row.recordIndex, {
-      includeRecord: false,
-      createWorkItem: false,
-      approvedItemType: 'Story',
-      approvedSummary: row.sourceSummary || '',
-      approvedDescription: row.sourceDescription || '',
-      initiativeId: row.match?.initiativeId || '',
-      workstreamId: row.match?.workstreamId || '',
-      jiraEpicMappingId: row.match?.jiraEpicMappingId || '',
-      includeFinding: false
-    }]));
+    state.importFeed.rowDrafts = importFeedModule.createReviewDrafts(preview);
   }
 
   async function validateImportFeed() {
@@ -973,11 +965,7 @@
   }
 
   function importReviewCounts(preview) {
-    const drafts = state.importFeed.rowDrafts;
-    const duplicate = preview.reviewRows.filter(row => row.duplicateReasons.length > 0).length;
-    const blocked = preview.reviewRows.filter(row => !row.supportedForApply).length;
-    const selected = preview.reviewRows.filter(row => drafts.get(row.recordIndex)?.includeRecord).length;
-    return { valid: preview.reviewRows.length - blocked, duplicate, blocked, selected, unselected: preview.reviewRows.length - selected };
+    return importFeedModule.reviewReadiness(preview, state.importFeed.rowDrafts);
   }
 
   function importNameFor(collection, id, emptyLabel) {
@@ -988,32 +976,35 @@
     return item.name;
   }
 
-  function reviewRowState(row, draft) {
-    if (!row.supportedForApply) return 'blocked';
-    if (!draft.includeRecord) return row.duplicateReasons.length ? 'needs review' : 'excluded';
-    if (row.match === null && !draft.createWorkItem && !(draft.includeFinding && row.findingAvailable)) return 'needs review';
-    return 'approved for final preview';
+  function reviewRowState(readiness) {
+    return ({
+      ready: 'Ready',
+      'needs-action': 'Needs action',
+      blocked: 'Blocked',
+      excluded: 'Excluded'
+    })[readiness.state];
   }
 
-  function importReviewRow(row) {
+  function importReviewRow(row, readiness) {
     const draft = state.importFeed.rowDrafts.get(row.recordIndex);
     const capabilities = state.importFeed.capabilities;
     const include = node('input', {
       type: 'checkbox',
       checked: draft.includeRecord,
       disabled: !row.supportedForApply,
-      attrs: { 'aria-label': `Include record ${row.recordIndex + 1}` }
+      attrs: { 'aria-label': `Include record ${row.recordIndex + 1}`, 'data-import-focus': 'include' }
     });
     const create = node('input', {
       type: 'checkbox',
       checked: draft.createWorkItem,
       disabled: !draft.includeRecord || row.match !== null,
-      attrs: { 'aria-label': `Create Work Item for record ${row.recordIndex + 1}` }
+      attrs: { 'aria-label': `Create Work Item for record ${row.recordIndex + 1}`, 'data-import-focus': 'create' }
     });
     const itemType = node('select', { disabled: !draft.includeRecord || !draft.createWorkItem, attrs: { 'aria-label': `Work Item type for record ${row.recordIndex + 1}` } },
-      capabilities.itemTypes.map(value => option(value, value, value === draft.approvedItemType)));
-    const summary = node('input', { value: draft.approvedSummary, disabled: !draft.includeRecord || !draft.createWorkItem, attrs: { maxlength: '1000', 'aria-label': `Approved summary for record ${row.recordIndex + 1}` } });
-    const description = node('textarea', { value: draft.approvedDescription, disabled: !draft.includeRecord || !draft.createWorkItem, attrs: { maxlength: '4000', rows: '3', 'aria-label': `Approved description for record ${row.recordIndex + 1}` } });
+      [option('', 'Select a Work Item type', !draft.approvedItemType), ...capabilities.itemTypes.map(value => option(value, value, value === draft.approvedItemType))]);
+    itemType.setAttribute('data-import-focus', 'item-type');
+    const summary = node('input', { value: draft.approvedSummary, disabled: !draft.includeRecord || !draft.createWorkItem, attrs: { maxlength: '1000', 'aria-label': `Approved summary for record ${row.recordIndex + 1}`, 'data-import-focus': 'summary' } });
+    const description = node('textarea', { value: draft.approvedDescription, disabled: !draft.includeRecord || !draft.createWorkItem, attrs: { maxlength: '4000', rows: '3', 'aria-label': `Approved description for record ${row.recordIndex + 1}`, 'data-import-focus': 'description' } });
     const canRelate = draft.includeRecord && (row.match !== null || draft.createWorkItem);
     const initiative = node('select', { disabled: !canRelate, attrs: { 'aria-label': `Initiative for record ${row.recordIndex + 1}` } }, [
       option('', 'No Initiative / Unassigned', !draft.initiativeId),
@@ -1055,8 +1046,21 @@
       invalidateImportFinalPreview();
       renderImportFeed().catch(error => setStatus(error.message, 'error'));
     });
-    [[itemType, 'approvedItemType'], [summary, 'approvedSummary'], [description, 'approvedDescription']].forEach(([control, key]) => {
-      control.addEventListener('input', () => { draft[key] = control.value; invalidateImportFinalPreview(); });
+    itemType.addEventListener('change', () => {
+      draft.approvedItemType = itemType.value || null;
+      invalidateImportFinalPreview();
+      renderImportFeed().catch(error => setStatus(error.message, 'error'));
+    });
+    [[summary, 'approvedSummary'], [description, 'approvedDescription']].forEach(([control, key]) => {
+      control.addEventListener('input', () => {
+        invalidateImportFinalPreview();
+        const previewButton = elements.view.querySelector('[data-import-final-preview]');
+        if (previewButton) previewButton.disabled = true;
+      });
+      control.addEventListener('change', () => {
+        draft[key] = control.value;
+        renderImportFeed().catch(error => setStatus(error.message, 'error'));
+      });
     });
     initiative.addEventListener('change', () => {
       draft.initiativeId = initiative.value;
@@ -1067,7 +1071,11 @@
     });
     workstream.addEventListener('change', () => { draft.workstreamId = workstream.value; invalidateImportFinalPreview(); });
     jiraEpic.addEventListener('change', () => { draft.jiraEpicMappingId = jiraEpic.value; invalidateImportFinalPreview(); });
-    finding.addEventListener('change', () => { draft.includeFinding = finding.checked; invalidateImportFinalPreview(); });
+    finding.addEventListener('change', () => {
+      draft.includeFinding = finding.checked;
+      invalidateImportFinalPreview();
+      renderImportFeed().catch(error => setStatus(error.message, 'error'));
+    });
 
     const warnings = [];
     if (row.externalKey === null) warnings.push('No external key: this row can never match a local Work Item by title.');
@@ -1085,16 +1093,23 @@
     if (row.jiraMappingReviewState === 'unresolved') warnings.push(`No exact active local Jira Epic mapping exists for ${row.sourceJiraProjectKey} / ${row.sourceJiraEpicKey}. Choose No Jira Epic or create a mapping in Settings and validate again.`);
     if (row.proposedCurrentStateChange) warnings.push(`Status suggestion ${row.proposedCurrentStateChange.beforeValue} → ${row.proposedCurrentStateChange.proposedValue} will remain deferred for Evidence and Proposed Change review.`);
 
-    return node('li', { className: 'list-item import-review-row' }, [
+    const readinessGuidance = readiness.state === 'needs-action' || readiness.state === 'blocked'
+      ? node('div', { className: `import-row-readiness ${readiness.state === 'blocked' ? 'risk' : 'warning'}` }, [
+        node('strong', { text: `${reviewRowState(readiness)}:` }),
+        node('ul', {}, readiness.messages.map(message => node('li', { text: message })))
+      ])
+      : (readiness.state === 'ready' ? node('p', { className: 'success', text: 'Ready for Final Preview.' }) : null);
+
+    return node('li', { className: 'list-item import-review-row', attrs: { 'data-import-record': row.recordIndex, tabindex: '-1' } }, [
       node('div', { className: 'row-head' }, [
         node('span', {}, [include, ' ', node('strong', { text: `Record ${row.recordIndex + 1} · ${row.externalKey || 'No external key'}` })]),
-        badge(reviewRowState(row, draft), row.supportedForApply ? '' : 'risk-badge')
+        badge(reviewRowState(readiness), readiness.state === 'blocked' ? 'risk-badge' : (readiness.state === 'excluded' ? 'muted-badge' : ''))
       ]),
       node('div', { className: 'import-current-grid' }, [
         node('section', {}, [
           node('h3', { text: 'Feed suggestion' }),
           node('p', { text: row.sourceSummary || 'No summary supplied' }),
-          node('p', { className: 'meta', text: `Type suggestion: ${row.sourceItemType} · Status suggestion: ${row.sourceCanonicalStatus || 'None'} · Jira Epic suggestion: ${row.noEpic === true ? 'Explicitly no Epic' : (row.sourceJiraEpicKey ? `${row.sourceJiraProjectKey} / ${row.sourceJiraEpicKey}` : 'None')}` }),
+          node('p', { className: 'meta', text: `${row.sourceItemType ? `Feed suggestion: ${row.sourceItemType}` : 'No Work Item type supplied by feed.'} · Status suggestion: ${row.sourceCanonicalStatus || 'None'} · Jira Epic suggestion: ${row.noEpic === true ? 'Explicitly no Epic' : (row.sourceJiraEpicKey ? `${row.sourceJiraProjectKey} / ${row.sourceJiraEpicKey}` : 'None')}` }),
           row.evidenceExcerpt ? node('blockquote', { text: row.evidenceExcerpt }) : node('p', { className: 'meta', text: 'No pending Finding excerpt supplied.' })
         ]),
         node('section', {}, [
@@ -1102,7 +1117,9 @@
           row.match
             ? node('p', { text: `${row.match.summary} · ${row.match.itemType} · ${row.match.canonicalStatus}` })
             : node('p', { text: draft.createWorkItem
-              ? `New ${draft.approvedItemType} creation is selected with the reviewed summary below.`
+              ? (draft.approvedItemType
+                  ? `New ${draft.approvedItemType} creation is selected with the reviewed summary below.`
+                  : 'New Work Item creation is selected. Choose a canonical Work Item type below.')
               : 'No exact external-identity match. Creation remains unselected.' }),
           node('p', { className: 'meta', text: row.match
             ? `Initiative: ${importNameFor('initiatives', row.match.initiativeId, 'Unassigned')} · Workstream: ${importNameFor('workstreams', row.match.workstreamId, 'No Workstream')} · Jira Epic: ${importNameFor('jiraEpicMappings', row.match.jiraEpicMappingId, 'No Jira Epic')}`
@@ -1110,6 +1127,7 @@
         ])
       ]),
       ...warnings.map(text => node('p', { className: 'warning', text })),
+      readinessGuidance,
       row.match === null ? node('fieldset', { className: 'control-group' }, [
         node('legend', { text: 'Human creation decision' }),
         node('label', {}, [create, ' Create a new Work Item']),
@@ -1140,7 +1158,10 @@
 
   function importBulkReview() {
     const capabilities = state.importFeed.capabilities;
-    const type = node('select', { attrs: { 'aria-label': 'Bulk creation type' } }, capabilities.itemTypes.map(value => option(value, value, value === 'Story')));
+    const type = node('select', { attrs: { 'aria-label': 'Bulk creation type' } }, [
+      option('', 'Choose a Work Item type', true),
+      ...capabilities.itemTypes.map(value => option(value, value))
+    ]);
     const initiative = node('select', { attrs: { 'aria-label': 'Bulk Initiative' } }, [
       option('', 'No Initiative / Unassigned', true),
       ...capabilities.initiatives.map(item => option(item.id, `${item.name} · ${item.id}`))
@@ -1153,6 +1174,16 @@
       option('', 'No Jira Epic', true),
       ...capabilities.jiraEpicMappings.map(item => option(item.id, `${item.jiraEpicKey} — ${item.jiraEpicName} · ${item.mappingStatus}`))
     ]);
+    const setCreationType = node('button', {
+      className: 'button secondary',
+      type: 'button',
+      text: 'Set selected creation type',
+      disabled: true,
+      on: { click: () => applyBulkToImportDrafts((row, draft) => {
+        if (draft.includeRecord && row.match === null && draft.createWorkItem) draft.approvedItemType = type.value || null;
+      }) }
+    });
+    type.addEventListener('change', () => { setCreationType.disabled = !type.value; });
     return node('fieldset', { className: 'control-group import-bulk-controls' }, [
       node('legend', { text: 'Bounded bulk review' }),
       node('p', { className: 'meta', text: 'Bulk actions affect at most the 100 validated rows and remain reversible before final preview.' }),
@@ -1161,12 +1192,9 @@
           if (!row.supportedForApply || row.match !== null || row.duplicateReasons.length > 0) return;
           draft.includeRecord = true;
           draft.createWorkItem = true;
-          draft.approvedItemType = type.value;
         }) } }),
         type,
-        node('button', { className: 'button secondary', type: 'button', text: 'Set selected creation type', on: { click: () => applyBulkToImportDrafts((row, draft) => {
-          if (draft.includeRecord && row.match === null && draft.createWorkItem) draft.approvedItemType = type.value;
-        }) } })
+        setCreationType
       ]),
       node('div', { className: 'actions' }, [
         initiative,
@@ -1212,13 +1240,31 @@
     ]);
   }
 
+  async function goToFirstIncompleteRecord() {
+    const readiness = importReviewCounts(state.importFeed.validationPreview);
+    const incomplete = readiness.firstIncomplete;
+    if (!incomplete) return;
+    state.importFeed.rowFilter = 'all';
+    await renderImportFeed();
+    const row = elements.view.querySelector(`[data-import-record="${incomplete.recordIndex}"]`);
+    if (!row) return;
+    const control = incomplete.focusTarget && incomplete.focusTarget !== 'row'
+      ? row.querySelector(`[data-import-focus="${incomplete.focusTarget}"]`)
+      : null;
+    const focusTarget = control && !control.disabled ? control : row;
+    row.scrollIntoView({ block: 'center' });
+    focusTarget.focus({ preventScroll: true });
+  }
+
   function importReviewPanel() {
     const preview = state.importFeed.validationPreview;
     const counts = importReviewCounts(preview);
+    const readinessByRecord = new Map(counts.rows.map(readiness => [readiness.recordIndex, readiness]));
+    const canPreview = importFeedModule.canRunFinalPreview(counts, state.importFeed.includeSource);
     const rowFilter = node('select', { attrs: { 'aria-label': 'Filter import review rows' } }, [
       option('all', 'All records', state.importFeed.rowFilter === 'all'),
       option('eligible', 'Eligible without duplicate warnings', state.importFeed.rowFilter === 'eligible'),
-      option('needs-review', 'Needs review', state.importFeed.rowFilter === 'needs-review'),
+      option('needs-action', 'Needs action', state.importFeed.rowFilter === 'needs-action'),
       option('blocked', 'Blocked', state.importFeed.rowFilter === 'blocked'),
       option('selected', 'Selected', state.importFeed.rowFilter === 'selected'),
       option('excluded', 'Excluded', state.importFeed.rowFilter === 'excluded')
@@ -1229,10 +1275,10 @@
     });
     const visibleRows = preview.reviewRows.filter(row => {
       const draft = state.importFeed.rowDrafts.get(row.recordIndex);
-      const rowState = reviewRowState(row, draft);
+      const rowState = readinessByRecord.get(row.recordIndex).state;
       if (state.importFeed.rowFilter === 'all') return true;
       if (state.importFeed.rowFilter === 'eligible') return row.supportedForApply && row.duplicateReasons.length === 0;
-      if (state.importFeed.rowFilter === 'needs-review') return rowState === 'needs review';
+      if (state.importFeed.rowFilter === 'needs-action') return rowState === 'needs-action';
       if (state.importFeed.rowFilter === 'blocked') return rowState === 'blocked';
       if (state.importFeed.rowFilter === 'selected') return draft.includeRecord;
       return rowState === 'excluded';
@@ -1241,24 +1287,40 @@
     includeSource.addEventListener('change', () => {
       state.importFeed.includeSource = includeSource.checked;
       invalidateImportFinalPreview();
+      renderImportFeed().catch(error => setStatus(error.message, 'error'));
     });
+    const readinessSummary = node('aside', { className: 'import-readiness-summary', attrs: { 'aria-label': 'Import review readiness' } }, [
+      node('strong', { text: 'Review readiness' }),
+      node('p', {
+        className: 'import-readiness-counts',
+        text: `${counts.valid} valid · ${counts.selected} selected · ${counts.ready} ready · ${counts.needsAction} need action · ${counts.blocked} blocked`,
+        attrs: { 'aria-live': 'polite' }
+      }),
+      counts.firstIncomplete
+        ? node('button', { className: 'button secondary', type: 'button', text: 'Go to first incomplete record', on: { click: goToFirstIncompleteRecord } })
+        : node('span', { className: 'success', text: 'All selected records are ready.' })
+    ]);
+    const previewHelp = !state.importFeed.includeSource
+      ? 'Select Source creation to make Final Preview available.'
+      : (counts.firstIncomplete
+          ? 'Complete or exclude every selected record that needs action or is blocked before Final Preview.'
+          : 'Final Preview is available. It remains write-free.');
     return node('section', { className: 'panel import-review-panel' }, [
       node('p', { className: 'eyebrow', text: 'Stages 2–3 · Validate and review' }),
       node('h2', { text: 'Review every record and local relationship' }),
       node('p', { className: 'notice', text: 'Validation and preview have not changed Priorena data.' }),
       node('p', { text: `Input: ${state.importFeed.filename || 'Paste'} · ${preview.format} · ${preview.source.contentBytes} bytes · ${preview.reviewRows.length} records · contract target-v4.` }),
       node('p', { className: 'meta', text: `Workspace: ${selectedWorkspace()?.name || preview.workspaceId} · persisted revision ${preview.expectedRevision}` }),
-      node('div', { className: 'metric-grid import-metrics' }, [
-        metric('Valid', counts.valid), metric('Duplicate review', counts.duplicate), metric('Blocked', counts.blocked), metric('Selected', counts.selected), metric('Unselected', counts.unselected)
-      ]),
+      readinessSummary,
       node('label', { className: 'source-selection' }, [includeSource, ' Create one local Source containing the normalized feed text']),
       importBulkReview(),
       node('div', { className: 'filters' }, [node('label', {}, [node('span', { text: 'Record filter' }), rowFilter])]),
       visibleRows.length
-        ? node('ul', { className: 'list import-review-list' }, visibleRows.map(importReviewRow))
+        ? node('ul', { className: 'list import-review-list' }, visibleRows.map(row => importReviewRow(row, readinessByRecord.get(row.recordIndex))))
         : empty('No import records match this review filter.'),
+      node('p', { className: 'meta', text: previewHelp, attrs: { id: 'import-final-preview-help' } }),
       node('div', { className: 'actions' }, [
-        node('button', { className: 'button primary', type: 'button', text: 'Run final write-free preview', on: { click: previewReviewedImport } }),
+        node('button', { className: 'button primary', type: 'button', text: 'Run final write-free preview', disabled: !canPreview, attrs: { 'aria-describedby': 'import-final-preview-help', 'data-import-final-preview': 'true' }, on: { click: previewReviewedImport } }),
         node('button', { className: 'button secondary', type: 'button', text: 'Start over', on: { click: () => {
           clearImportFeedData();
           renderImportFeed().catch(error => setStatus(error.message, 'error'));
@@ -1274,6 +1336,11 @@
 
   function validateFinalImportSelection(decisions) {
     if (!state.importFeed.includeSource) throw new Error('Select Source creation before previewing any import action.');
+    const readiness = importReviewCounts(state.importFeed.validationPreview);
+    if (!importFeedModule.canRunFinalPreview(readiness, state.importFeed.includeSource)) {
+      const first = readiness.firstIncomplete;
+      throw new Error(first?.messages[0] || 'Complete every selected record decision before Final Preview.');
+    }
     const selectedKeys = new Set();
     const selectedWorkItemIds = new Set();
     state.importFeed.validationPreview.reviewRows.forEach((row, index) => {
@@ -1312,11 +1379,13 @@
         throw new Error('Priorena data changed after validation. Validate and review the feed again.');
       }
       state.importFeed.finalPreview = result.preview;
+      state.importFeed.acknowledgedPreviewHash = null;
       await renderImportFeed();
       setStatus('Final preview is ready. No Priorena data has changed.', 'success');
     } catch (error) {
       if (!workspaceOperationCurrent(token)) return;
       state.importFeed.finalPreview = null;
+      state.importFeed.acknowledgedPreviewHash = null;
       await renderImportFeed();
       setStatus(importFeedModule.importValidationMessage(error), 'error');
     }
@@ -1334,10 +1403,44 @@
     const preview = state.importFeed.finalPreview;
     if (!preview) return null;
     const summary = importFeedModule.summarizeFinalPreview(preview);
+    const applyLabel = importFeedModule.formatLiveApplyLabel(summary);
+    const acknowledged = state.importFeed.acknowledgedPreviewHash === preview.previewHash;
+    const acknowledgement = node('input', {
+      id: 'import-live-apply-acknowledgement',
+      type: 'checkbox',
+      checked: acknowledged,
+      disabled: state.importFeed.applying
+    });
+    const applyHelp = node('p', {
+      id: 'import-live-apply-help',
+      className: 'meta',
+      text: acknowledged
+        ? 'Acknowledged. Apply is available while every existing preview safeguard remains satisfied.'
+        : 'Check the acknowledgement to enable live Apply.'
+    });
+    const applyButton = node('button', {
+      className: 'button danger',
+      type: 'button',
+      text: state.importFeed.applying ? 'Applying reviewed import…' : applyLabel,
+      disabled: state.importFeed.applying || !acknowledged,
+      attrs: { 'aria-describedby': 'import-live-apply-help' },
+      on: { click: applyReviewedImport }
+    });
+    acknowledgement.addEventListener('change', () => {
+      state.importFeed.acknowledgedPreviewHash = acknowledgement.checked ? preview.previewHash : null;
+      applyButton.disabled = state.importFeed.applying || !acknowledgement.checked;
+      applyHelp.textContent = acknowledgement.checked
+        ? 'Acknowledged. Apply is available while every existing preview safeguard remains satisfied.'
+        : 'Check the acknowledgement to enable live Apply.';
+    });
     return node('section', { className: 'panel import-final-panel' }, [
-      node('p', { className: 'eyebrow', text: 'Stage 4 · Confirm and apply' }),
-      node('h2', { text: 'Final server preview' }),
-      node('p', { className: 'notice', text: 'This exact preview is still write-free. Apply will rebuild it against the same revision and fail closed if anything differs.' }),
+      node('p', { className: 'eyebrow', text: 'Stage 4 · Write-free Final Preview' }),
+      node('h2', { text: 'Final Preview' }),
+      node('aside', { className: 'import-safe-stop' }, [
+        node('strong', { text: 'Dry run complete. Priorena has not been changed.' }),
+        node('p', { text: 'Stop here to leave your live Priorena data unchanged.' })
+      ]),
+      node('p', { className: 'notice', text: 'This exact preview is write-free. Any Apply attempt will rebuild it against the same revision and fail closed if anything differs.' }),
       node('div', { className: 'metric-grid import-metrics' }, [
         metric('Sources', summary.sources), metric('New Work Items', summary.newWorkItems),
         metric('Relationship changes', summary.relationshipChanges), metric('Evidence reassociations', summary.evidenceReassociations),
@@ -1363,7 +1466,16 @@
           node('p', { className: 'meta', text: importProposalEffect(proposal) })
         ])))
       ]),
-      node('button', { className: 'button primary', type: 'button', text: state.importFeed.applying ? 'Applying reviewed import…' : 'Apply reviewed import', disabled: state.importFeed.applying, on: { click: applyReviewedImport } })
+      node('section', { className: 'import-live-apply', attrs: { 'aria-labelledby': 'import-live-apply-title' } }, [
+        node('h3', { id: 'import-live-apply-title', text: 'Apply to live Priorena' }),
+        node('p', { className: 'risk', text: 'This will change your live Priorena data. This is no longer a preview.' }),
+        node('label', { className: 'import-apply-acknowledgement', attrs: { for: 'import-live-apply-acknowledgement' } }, [
+          acknowledgement,
+          node('span', { text: 'I reviewed these changes and understand they will be saved to live Priorena.' })
+        ]),
+        applyHelp,
+        applyButton
+      ])
     ]);
   }
 
@@ -1371,15 +1483,20 @@
     const token = workspaceOperationToken();
     const preview = state.importFeed.finalPreview;
     if (!preview || state.importFeed.applying) return;
+    if (state.importFeed.acknowledgedPreviewHash !== preview.previewHash) {
+      setStatus('Acknowledge the live Priorena write before applying.', 'error');
+      return;
+    }
     const summary = importFeedModule.summarizeFinalPreview(preview);
-    const approved = await confirmAction('Apply reviewed import', [
+    const applyLabel = importFeedModule.formatLiveApplyLabel(summary);
+    const approved = await confirmAction('Apply to live Priorena', [
       node('p', { text: `${summary.sources} Source · ${summary.newWorkItems} new Work Items · ${summary.relationshipChanges} existing or new relationship changes` }),
       node('p', { text: `${summary.pendingFindings} pending Findings · ${summary.deferredCurrentStateChanges} deferred current-state changes · ${summary.excludedRows} excluded rows · ${summary.blockedRows} blocked rows` }),
       node('p', { text: `${summary.evidenceReassociations} existing Evidence association${summary.evidenceReassociations === 1 ? '' : 's'} will change.` }),
       ...preview.proposals.filter(proposal => proposal.type === 'work-item-assign').flatMap(proposal =>
         proposal.payload.evidenceChanges.map(change => node('p', { className: 'meta', text: `${change.evidenceId}: ${change.beforeInitiativeId || 'Unassigned'} → ${change.afterInitiativeId || 'Unassigned'}` }))),
       node('p', { className: 'notice', text: 'This is one atomic local write. Findings remain pending. Nothing is written to Jira and nothing is communicated.' })
-    ], 'Apply reviewed import');
+    ], applyLabel);
     if (!approved || !workspaceOperationCurrent(token)) return;
     state.importFeed.applying = true;
     try {
@@ -1413,6 +1530,7 @@
     } catch (error) {
       if (!workspaceOperationCurrent(token)) return;
       state.importFeed.finalPreview = null;
+      state.importFeed.acknowledgedPreviewHash = null;
       state.importFeed.applying = false;
       await renderImportFeed();
       setStatus(error.code === 'REVISION_CONFLICT' || error.code === 'PREVIEW_CONFLICT'
