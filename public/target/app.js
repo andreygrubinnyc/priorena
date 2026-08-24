@@ -3,9 +3,10 @@
 (function targetApplication() {
   const contextModule = window.PriorenaTargetContext;
   const workflowModule = window.PriorenaTargetWorkflow;
+  const triageModule = window.PriorenaTargetTriage;
   const importFeedModule = window.PriorenaTargetImportFeed;
   const briefingModule = window.PriorenaTargetBriefing;
-  if (!contextModule || !workflowModule || !importFeedModule || !briefingModule) throw new Error('Target state modules are unavailable');
+  if (!contextModule || !workflowModule || !triageModule || !importFeedModule || !briefingModule) throw new Error('Target state modules are unavailable');
 
   const byId = id => document.getElementById(id);
   const elements = Object.freeze({
@@ -32,7 +33,7 @@
   const pageDefinitions = Object.freeze({
     portfolio: ['Portfolio', 'Organization-scoped delivery attention across Workspaces.'],
     today: ['Today', 'Attention-first current state for the selected Workspace.'],
-    'work-items': ['Work Items', 'Review independent Initiative, Workstream, and Jira Epic associations.'],
+    'work-items': ['Work Items', 'Review what Priorena knows, where it came from, and what explicit action to take next.'],
     'follow-up': ['Follow-Up', 'PM attention attached to Work Items in this Workspace.'],
     milestones: ['Milestones', 'Workspace and Initiative delivery checkpoints.'],
     'add-source': ['Add Source', 'Add local material for separate Finding review.'],
@@ -56,12 +57,25 @@
     jiraEpicFilter: 'all',
     itemTypeFilter: 'all',
     selectedWorkItemIds: new Set(),
+    triage: triageModule.createTriageState(),
     importFeed: importFeedModule.createImportFeedState(),
     generation: 0
   };
 
   function clearImportFeedData() {
     state.importFeed = importFeedModule.createImportFeedState();
+  }
+
+  function clearTriageData() {
+    state.triage = triageModule.createTriageState();
+  }
+
+  function invalidateTriageData() {
+    state.triage.collection = null;
+    state.triage.detail = null;
+    state.triage.sourceDetail = null;
+    state.triage.revision = null;
+    state.triage.returnFocusWorkItemId = null;
   }
 
   function node(tag, options = {}, children = []) {
@@ -138,6 +152,7 @@
   const contextApi = contextModule.createTargetApiClient({ request: url => fetch(url) });
   const contextController = contextModule.createTargetContextController(contextApi);
   const workflowApi = workflowModule.createTargetWorkflowApiClient({ request: (url, options) => fetch(url, options) });
+  const triageApi = triageModule.createTargetTriageApiClient({ request: (url, options) => fetch(url, options) });
   const briefingApi = briefingModule.createTargetBriefingApiClient({ request: (url, options) => fetch(url, options) });
 
   function clearBriefingData() {
@@ -206,6 +221,7 @@
   function clearOperationalUi(message = 'Select a valid context to continue.') {
     const reset = workflowModule.defaultWorkItemUiState();
     state.workflow = null;
+    invalidateTriageData();
     state.initiativeFilter = reset.filters.initiativeId;
     state.workstreamFilter = reset.filters.workstreamId;
     state.jiraEpicFilter = reset.filters.jiraEpicMappingId;
@@ -285,20 +301,116 @@
     return node('ul', { className: 'list' }, records.map(record => node('li', { className: 'list-item' }, renderer(record))));
   }
 
-  async function loadWorkflow() {
+  async function loadWorkflow(includeWorkItems = true) {
     const organizationId = state.context?.activeOrganizationId;
     const workspaceId = state.context?.activeWorkspaceId;
     if (!organizationId || !workspaceId) throw new Error('A Workspace is required');
     const generation = state.generation;
-    const payload = await workflowApi.loadWorkspace(organizationId, workspaceId);
+    const payload = await workflowApi.loadWorkspace(organizationId, workspaceId, { includeWorkItems });
     if (generation !== state.generation) return null;
     workflowModule.validateWorkspacePayload(payload, organizationId, workspaceId);
     state.workflow = payload;
     return payload;
   }
 
-  async function ensureWorkflow() {
-    return state.workflow || loadWorkflow();
+  async function ensureWorkflow(includeWorkItems = true) {
+    if (state.workflow && (!includeWorkItems || state.workflow.workItemsLoaded !== false)) return state.workflow;
+    return loadWorkflow(includeWorkItems);
+  }
+
+  async function loadTriageCollection() {
+    const token = workspaceOperationToken();
+    if (!token.organizationId || !token.workspaceId) throw new Error('A Workspace is required');
+    const requestId = ++state.triage.requestId;
+    state.triage.loading = true;
+    try {
+      const result = await triageApi.list(token.organizationId, token.workspaceId, state.triage.query);
+      if (!workspaceOperationCurrent(token) || requestId !== state.triage.requestId) return null;
+      state.triage.collection = result.body;
+      state.triage.revision = result.revision;
+      state.triage.loading = false;
+      return result.body;
+    } catch (error) {
+      if (workspaceOperationCurrent(token) && requestId === state.triage.requestId) state.triage.loading = false;
+      throw error;
+    }
+  }
+
+  async function refreshTriageCollection(message = 'Triage results refreshed.') {
+    showLoading('Loading bounded Work Item results…');
+    state.selectedWorkItemIds.clear();
+    state.triage.detail = null;
+    state.triage.sourceDetail = null;
+    await loadTriageCollection();
+    renderWorkItems();
+    setStatus(message, 'success');
+  }
+
+  async function changeTriageQuery(changes, message) {
+    state.triage.query = triageModule.updateTriageQuery(state.triage.query, changes);
+    state.initiativeFilter = state.triage.query.initiativeId;
+    updateBreadcrumb();
+    try {
+      await refreshTriageCollection(message);
+    } catch (error) {
+      setStatus(error.message, 'error');
+      renderWorkItems();
+    }
+  }
+
+  async function openTriageDetail(workItemId) {
+    const token = workspaceOperationToken();
+    const requestId = ++state.triage.detailRequestId;
+    state.triage.returnFocusWorkItemId = triageModule.triageStableId(workItemId);
+    setStatus('Loading Work Item detail…');
+    try {
+      const result = await triageApi.detail(token.organizationId, token.workspaceId, workItemId);
+      if (!workspaceOperationCurrent(token) || requestId !== state.triage.detailRequestId) return;
+      state.triage.detail = result.body;
+      state.triage.sourceDetail = null;
+      state.triage.revision = result.revision;
+      renderWorkItems();
+      const panel = document.getElementById('triage-detail-panel');
+      panel?.focus();
+      setStatus(`Opened ${result.body.workItem.externalKey || result.body.workItem.summary}.`, 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token) || requestId !== state.triage.detailRequestId) return;
+      setStatus(error.message, 'error');
+    }
+  }
+
+  function closeTriageDetail() {
+    const returnId = state.triage.returnFocusWorkItemId;
+    state.triage.detail = null;
+    state.triage.sourceDetail = null;
+    state.triage.returnFocusWorkItemId = null;
+    renderWorkItems();
+    if (returnId) document.querySelector(`[data-open-work-item="${returnId}"]`)?.focus();
+    setStatus('Work Item detail closed. Triage context preserved.', 'success');
+  }
+
+  async function viewTriageSourceMatch(workItemId, match) {
+    const token = workspaceOperationToken();
+    const requestId = ++state.triage.detailRequestId;
+    setStatus('Loading the explicit Source match…');
+    try {
+      const result = await triageApi.sourceMatch(
+        token.organizationId,
+        token.workspaceId,
+        workItemId,
+        match.source.id,
+        match.recordIndex
+      );
+      if (!workspaceOperationCurrent(token) || requestId !== state.triage.detailRequestId) return;
+      state.triage.sourceDetail = result.body;
+      state.triage.revision = result.revision;
+      renderWorkItems();
+      document.getElementById('triage-source-detail')?.focus();
+      setStatus('Source match opened. Viewing it did not create Evidence or change current state.', 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token) || requestId !== state.triage.detailRequestId) return;
+      setStatus(error.message, 'error');
+    }
   }
 
   async function renderPortfolio() {
@@ -387,93 +499,59 @@
     );
   }
 
-  function visibleWorkItems() {
-    const items = state.workflow?.workItems || [];
-    return items.filter(item => {
-      const initiativeMatches = state.initiativeFilter === 'all' ||
-        (state.initiativeFilter === 'unassigned' ? item.initiativeId === null : item.initiativeId === state.initiativeFilter);
-      const workstreamMatches = state.workstreamFilter === 'all' ||
-        (state.workstreamFilter === 'none' ? item.workstreamId === null : item.workstreamId === state.workstreamFilter);
-      const jiraEpicMatches = state.jiraEpicFilter === 'all' ||
-        (state.jiraEpicFilter === 'none'
-          ? item.jiraEpicMappingId === null
-          : item.jiraEpicMappingId === state.jiraEpicFilter);
-      const typeMatches = state.itemTypeFilter === 'all' || item.itemType === state.itemTypeFilter;
-      return initiativeMatches && workstreamMatches && jiraEpicMatches && typeMatches;
-    });
-  }
-
-  function initiativeFilterControl(renderFilteredView = renderWorkItems) {
+  function triageInitiativeFilterControl() {
+    const current = state.triage.query.initiativeId;
     const select = node('select', {
       id: 'initiative-filter',
+      attrs: { 'aria-label': 'Filter by Initiative' },
       on: { change: event => {
-        state.initiativeFilter = event.target.value;
-        if (state.initiativeFilter === 'unassigned' || (state.workstreamFilter !== 'all' && state.workstreamFilter !== 'none' &&
-          state.workflow?.workstreams?.find(workstream => workstream.id === state.workstreamFilter)?.initiativeId !== state.initiativeFilter && state.initiativeFilter !== 'all')) {
-          state.workstreamFilter = 'all';
-        }
-        if (state.initiativeFilter === 'unassigned' || (state.jiraEpicFilter !== 'all' && state.jiraEpicFilter !== 'none' &&
-          state.workflow?.jiraEpicMappings?.find(mapping => mapping.id === state.jiraEpicFilter)?.initiativeId !== state.initiativeFilter && state.initiativeFilter !== 'all')) {
-          state.jiraEpicFilter = 'all';
-        }
-        state.selectedWorkItemIds.clear();
-        updateBreadcrumb();
-        renderFilteredView();
+        const initiativeId = event.target.value;
+        const changes = { initiativeId };
+        const selectedWorkstream = state.workflow?.workstreams?.find(item => item.id === state.triage.query.workstreamId);
+        const selectedMapping = state.workflow?.jiraEpicMappings?.find(item => item.id === state.triage.query.jiraEpicMappingId);
+        if (initiativeId === 'unassigned' || (initiativeId !== 'all' && selectedWorkstream?.initiativeId !== initiativeId)) changes.workstreamId = 'all';
+        if (initiativeId === 'unassigned' || (initiativeId !== 'all' && selectedMapping?.initiativeId !== initiativeId)) changes.jiraEpicMappingId = 'all';
+        changeTriageQuery(changes, 'Initiative filter applied.');
       } }
     }, [
-      option('all', 'All initiatives', state.initiativeFilter === 'all'),
-      option('unassigned', 'Unassigned', state.initiativeFilter === 'unassigned'),
+      option('all', 'All initiatives', current === 'all'),
+      option('unassigned', 'Unassigned', current === 'unassigned'),
       ...workflowModule.initiativeChoices(state.workflow?.initiatives || [], 'work-item-filter')
-        .map(initiative => option(initiative.id, initiative.name, state.initiativeFilter === initiative.id))
+        .map(initiative => option(initiative.id, initiative.name, current === initiative.id))
     ]);
     return node('label', {}, [node('span', { text: 'Initiative' }), select]);
   }
 
-  function workstreamFilterControl() {
-    const workstreams = (state.workflow?.workstreams || []).filter(workstream => state.initiativeFilter === 'all' || workstream.initiativeId === state.initiativeFilter);
+  function triageWorkstreamFilterControl() {
+    const current = state.triage.query.workstreamId;
+    const initiativeId = state.triage.query.initiativeId;
+    const workstreams = (state.workflow?.workstreams || []).filter(item => initiativeId === 'all' || item.initiativeId === initiativeId);
     const select = node('select', {
       id: 'workstream-filter',
-      on: { change: event => {
-        state.workstreamFilter = event.target.value;
-        state.selectedWorkItemIds.clear();
-        renderWorkItems();
-      } }
+      attrs: { 'aria-label': 'Filter by Workstream' },
+      on: { change: event => changeTriageQuery({ workstreamId: event.target.value }, 'Workstream filter applied.') }
     }, [
-      option('all', 'All Workstreams', state.workstreamFilter === 'all'),
-      option('none', 'No Workstream', state.workstreamFilter === 'none'),
-      ...workstreams.map(workstream => option(workstream.id, workstreamOptionLabel(workstream), state.workstreamFilter === workstream.id))
+      option('all', 'All Workstreams', current === 'all'),
+      option('none', 'No Workstream', current === 'none'),
+      ...workstreams.map(item => option(item.id, workstreamOptionLabel(item), current === item.id))
     ]);
     return node('label', {}, [node('span', { text: 'Workstream' }), select]);
   }
 
-  function jiraEpicFilterControl() {
-    const mappings = (state.workflow?.jiraEpicMappings || [])
-      .filter(mapping => state.initiativeFilter === 'all' || mapping.initiativeId === state.initiativeFilter);
+  function triageJiraEpicFilterControl() {
+    const current = state.triage.query.jiraEpicMappingId;
+    const initiativeId = state.triage.query.initiativeId;
+    const mappings = (state.workflow?.jiraEpicMappings || []).filter(item => initiativeId === 'all' || item.initiativeId === initiativeId);
     const select = node('select', {
       id: 'jira-epic-filter',
-      on: { change: event => {
-        state.jiraEpicFilter = event.target.value;
-        state.selectedWorkItemIds.clear();
-        renderWorkItems();
-      } }
+      attrs: { 'aria-label': 'Filter by Jira Epic mapping' },
+      on: { change: event => changeTriageQuery({ jiraEpicMappingId: event.target.value }, 'Jira Epic filter applied.') }
     }, [
-      option('all', 'All Jira Epics', state.jiraEpicFilter === 'all'),
-      option('none', 'No Jira Epic', state.jiraEpicFilter === 'none'),
-      ...mappings.map(mapping => option(mapping.id, jiraEpicOptionLabel(mapping), state.jiraEpicFilter === mapping.id))
+      option('all', 'All Jira Epics', current === 'all'),
+      option('none', 'No Jira Epic', current === 'none'),
+      ...mappings.map(item => option(item.id, jiraEpicOptionLabel(item), current === item.id))
     ]);
     return node('label', {}, [node('span', { text: 'Jira Epic' }), select]);
-  }
-
-  function itemTypeFilterControl() {
-    const select = node('select', {
-      id: 'item-type-filter',
-      on: { change: event => {
-        state.itemTypeFilter = event.target.value;
-        state.selectedWorkItemIds.clear();
-        renderWorkItems();
-      } }
-    }, ['all', 'Story', 'Task', 'Bug', 'Other', 'Unknown'].map(value => option(value, value === 'all' ? 'All Work Item types' : value, state.itemTypeFilter === value)));
-    return node('label', {}, [node('span', { text: 'Type' }), select]);
   }
 
   async function previewInitiativeAssignment(initiativeId, workstreamId = 'keep', jiraEpicMappingId = 'keep') {
@@ -523,7 +601,10 @@
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
       state.selectedWorkItemIds.clear();
-      await loadWorkflow();
+      state.triage.detail = null;
+      state.triage.sourceDetail = null;
+      await loadWorkflow(false);
+      await loadTriageCollection();
       if (!workspaceOperationCurrent(token)) return;
       renderWorkItems();
       setStatus('Initiative assignment applied and refreshed.', 'success');
@@ -536,44 +617,144 @@
   }
 
   function workItemFiltersActive() {
-    return state.initiativeFilter !== 'all' || state.workstreamFilter !== 'all' ||
-      state.jiraEpicFilter !== 'all' || state.itemTypeFilter !== 'all';
+    const query = state.triage.query;
+    return query.search !== '' || query.itemType !== 'all' || query.canonicalStatus !== 'all' ||
+      query.initiativeId !== 'all' || query.workstreamId !== 'all' || query.jiraEpicMappingId !== 'all' ||
+      query.sourceId !== 'all' || query.signal !== 'all';
   }
 
-  function clearWorkItemFilters() {
-    const reset = workflowModule.defaultWorkItemUiState();
-    state.initiativeFilter = reset.filters.initiativeId;
-    state.workstreamFilter = reset.filters.workstreamId;
-    state.jiraEpicFilter = reset.filters.jiraEpicMappingId;
-    state.itemTypeFilter = reset.filters.itemType;
-    state.selectedWorkItemIds.clear();
+  async function clearWorkItemFilters() {
+    state.triage.query = triageModule.clearTriageFilters(state.triage.query);
+    state.initiativeFilter = 'all';
     updateBreadcrumb();
-    renderWorkItems();
-    setStatus('Work Item filters cleared.', 'success');
+    try {
+      await refreshTriageCollection('Work Item filters cleared.');
+    } catch (error) {
+      setStatus(error.message, 'error');
+      renderWorkItems();
+    }
   }
 
-  function renderWorkItems() {
+  function triageSummaryPanel(collection) {
+    const summary = collection.summary;
+    return node('section', { className: 'panel triage-summary', attrs: { 'aria-labelledby': 'triage-summary-title' } }, [
+      node('div', { className: 'row-head' }, [
+        node('h2', { id: 'triage-summary-title', text: 'Triage summary' }),
+        node('span', { className: 'meta', text: 'Workspace-wide · derived from canonical state and exact Source matches' })
+      ]),
+      node('div', { className: 'triage-metrics' }, [
+        metric('Total Work Items', summary.totalWorkItems),
+        metric('Type unresolved', summary.typeUnresolved),
+        metric('Status suggestion needs evidence', summary.statusSuggestionNeedsEvidence),
+        metric('Initiative unassigned', summary.initiativeUnassigned),
+        metric('Source trace available', summary.sourceTraceAvailable),
+        metric('No Source trace', summary.noSourceTrace)
+      ])
+    ]);
+  }
+
+  function triageToolbar(collection) {
+    const query = state.triage.query;
+    const searchInput = node('input', {
+      value: query.search,
+      placeholder: 'Search Jira key or summary',
+      attrs: { maxlength: '200', 'aria-label': 'Search Work Items by Jira key or summary' }
+    });
+    const searchForm = node('form', { className: 'triage-search' }, [
+      node('label', { className: 'field' }, [node('span', { text: 'Search' }), searchInput]),
+      node('button', { className: 'button secondary', type: 'submit', text: 'Search' })
+    ]);
+    searchForm.addEventListener('submit', event => {
+      event.preventDefault();
+      changeTriageQuery({ search: searchInput.value.trim() }, 'Search applied.');
+    });
+    const sort = node('select', {
+      attrs: { 'aria-label': 'Sort Work Items' },
+      on: { change: event => changeTriageQuery({ sort: event.target.value }, 'Sort applied.') }
+    }, [
+      ['triage-signals', 'Triage signals'],
+      ['jira-key', 'Jira key'],
+      ['summary', 'Summary'],
+      ['item-type', 'Canonical type'],
+      ['canonical-status', 'Canonical status'],
+      ['initiative', 'Initiative'],
+      ['created-at', 'Import / creation time']
+    ].map(([value, label]) => option(value, label, query.sort === value)));
+    const direction = node('select', {
+      attrs: { 'aria-label': 'Sort direction' },
+      on: { change: event => changeTriageQuery({ direction: event.target.value }, 'Sort direction applied.') }
+    }, [option('asc', 'Ascending', query.direction === 'asc'), option('desc', 'Descending', query.direction === 'desc')]);
+    const pageSize = node('select', {
+      attrs: { 'aria-label': 'Work Items per page' },
+      on: { change: event => changeTriageQuery({ pageSize: Number(event.target.value) }, 'Page size applied.') }
+    }, [25, 50].map(value => option(value, `${value} per page`, query.pageSize === value)));
+    return node('section', { className: 'panel triage-toolbar', attrs: { 'aria-label': 'Work Item search and sort' } }, [
+      searchForm,
+      node('div', { className: 'triage-toolbar-controls' }, [
+        node('p', { className: 'triage-result-count', text: `${collection.filteredTotal} matching Work Item${collection.filteredTotal === 1 ? '' : 's'}` }),
+        node('label', { className: 'field' }, [node('span', { text: 'Sort' }), sort]),
+        node('label', { className: 'field' }, [node('span', { text: 'Direction' }), direction]),
+        node('label', { className: 'field' }, [node('span', { text: 'Page size' }), pageSize])
+      ])
+    ]);
+  }
+
+  function triageFiltersPanel(collection) {
+    const query = state.triage.query;
+    const type = node('select', {
+      attrs: { 'aria-label': 'Filter by canonical Work Item type' },
+      on: { change: event => changeTriageQuery({ itemType: event.target.value }, 'Type filter applied.') }
+    }, ['all', ...triageModule.TRIAGE_ITEM_TYPES].map(value => option(value, value === 'all' ? 'All Work Item types' : value, query.itemType === value)));
+    const status = node('select', {
+      attrs: { 'aria-label': 'Filter by canonical Work Item status' },
+      on: { change: event => changeTriageQuery({ canonicalStatus: event.target.value }, 'Status filter applied.') }
+    }, [option('all', 'All canonical statuses', query.canonicalStatus === 'all'),
+      ...collection.filterOptions.canonicalStatuses.map(value => option(value, value, query.canonicalStatus === value))]);
+    const source = node('select', {
+      attrs: { 'aria-label': 'Filter by exact Source' },
+      on: { change: event => changeTriageQuery({ sourceId: event.target.value }, 'Exact Source filter applied.') }
+    }, [option('all', 'All Sources', query.sourceId === 'all'),
+      ...collection.filterOptions.sources.map(item => option(item.id, item.title, query.sourceId === item.id))]);
+    const signal = node('select', {
+      attrs: { 'aria-label': 'Filter by triage signal' },
+      on: { change: event => changeTriageQuery({ signal: event.target.value }, 'Triage signal filter applied.') }
+    }, [
+      ['all', 'All triage signals'],
+      ['type-unresolved', 'Type unresolved'],
+      ['status-suggestion-needs-evidence', 'Status suggestion needs evidence'],
+      ['initiative-unassigned', 'Initiative unassigned'],
+      ['source-trace-available', 'Source trace available'],
+      ['no-source-trace', 'No Source trace']
+    ].map(([value, label]) => option(value, label, query.signal === value)));
+    return node('fieldset', { className: 'control-group filters-group' }, [
+      node('legend', { text: 'Filters' }),
+      node('div', { className: 'control-grid' }, [
+        node('label', {}, [node('span', { text: 'Type' }), type]),
+        node('label', {}, [node('span', { text: 'Canonical status' }), status]),
+        triageInitiativeFilterControl(),
+        triageWorkstreamFilterControl(),
+        triageJiraEpicFilterControl(),
+        node('label', {}, [node('span', { text: 'Exact Source' }), source]),
+        node('label', {}, [node('span', { text: 'Triage signal' }), signal])
+      ]),
+      node('button', { className: 'button secondary', type: 'button', text: 'Clear filters', disabled: !workItemFiltersActive(), on: { click: clearWorkItemFilters } })
+    ]);
+  }
+
+  function triageStructureAssignment() {
     const assignment = node('select', { id: 'initiative-assignment' }, [
       option('unassigned', 'Unassigned'),
-      ...workflowModule.initiativeChoices(state.workflow?.initiatives || [], 'bulk-assignment')
-        .map(initiative => option(initiative.id, initiative.name))
+      ...workflowModule.initiativeChoices(state.workflow?.initiatives || [], 'bulk-assignment').map(initiative => option(initiative.id, initiative.name))
     ]);
     const workstreamAssignment = node('select', { id: 'workstream-assignment' });
     const jiraEpicAssignment = node('select', { id: 'jira-epic-assignment' });
     const selectedCount = node('strong', { className: 'selected-count', attrs: { id: 'selected-work-item-count' } });
-    const helper = node('p', {
-      className: 'meta bulk-helper',
-      text: 'Select one or more Work Items to change their associations.',
-      attrs: { id: 'bulk-assignment-help' }
-    });
+    const helper = node('p', { className: 'meta bulk-helper', text: 'Select one or more Work Items to change their associations.', attrs: { id: 'bulk-assignment-help' } });
     const previewButton = node('button', {
-      className: 'button primary',
-      type: 'button',
-      text: 'Preview changes',
-      attrs: { 'aria-describedby': 'bulk-assignment-help' },
+      className: 'button primary', type: 'button', text: 'Preview changes', attrs: { 'aria-describedby': 'bulk-assignment-help' },
       on: { click: () => previewInitiativeAssignment(assignment.value, workstreamAssignment.value, jiraEpicAssignment.value) }
     });
-    const refreshBulkAvailability = () => {
+    const refresh = () => {
       const controls = workflowModule.workItemControlState([...state.selectedWorkItemIds], assignment.value);
       selectedCount.textContent = controls.selectedCountLabel;
       assignment.disabled = controls.initiativeDisabled;
@@ -582,45 +763,24 @@
       previewButton.disabled = controls.previewDisabled;
       helper.hidden = !controls.helperVisible;
     };
-    const refreshRelationshipAssignments = () => {
+    const refreshRelationships = () => {
       const initiativeId = assignment.value;
       workstreamAssignment.replaceChildren(
         option(initiativeId === 'unassigned' ? 'none' : 'keep', initiativeId === 'unassigned' ? 'No Workstream' : 'Keep compatible Workstream'),
         ...(initiativeId === 'unassigned' ? [] : [option('none', 'No Workstream')]),
-        ...(state.workflow?.workstreams || []).filter(workstream => workstream.initiativeId === initiativeId).map(workstream => option(workstream.id, workstreamOptionLabel(workstream)))
+        ...(state.workflow?.workstreams || []).filter(item => item.initiativeId === initiativeId).map(item => option(item.id, workstreamOptionLabel(item)))
       );
       jiraEpicAssignment.replaceChildren(
         option(initiativeId === 'unassigned' ? 'none' : 'keep', initiativeId === 'unassigned' ? 'No Jira Epic' : 'Keep compatible Jira Epic'),
         ...(initiativeId === 'unassigned' ? [] : [option('none', 'No Jira Epic')]),
-        ...(state.workflow?.jiraEpicMappings || [])
-          .filter(mapping => mapping.initiativeId === initiativeId)
-          .map(mapping => option(mapping.id, jiraEpicOptionLabel(mapping)))
+        ...(state.workflow?.jiraEpicMappings || []).filter(item => item.initiativeId === initiativeId).map(item => option(item.id, jiraEpicOptionLabel(item)))
       );
-      refreshBulkAvailability();
+      refresh();
     };
-    assignment.addEventListener('change', refreshRelationshipAssignments);
-    refreshRelationshipAssignments();
-    const items = visibleWorkItems();
-    const totalWorkItems = state.workflow?.workItems?.length || 0;
-    const emptyState = workflowModule.workItemEmptyState(totalWorkItems, items.length);
-    const filterGroup = node('fieldset', { className: 'control-group filters-group' }, [
-      node('legend', { text: 'Filters' }),
-      node('div', { className: 'control-grid' }, [
-        initiativeFilterControl(),
-        workstreamFilterControl(),
-        jiraEpicFilterControl(),
-        itemTypeFilterControl()
-      ]),
-      node('button', {
-        className: 'button secondary',
-        type: 'button',
-        text: 'Clear filters',
-        disabled: !workItemFiltersActive(),
-        on: { click: clearWorkItemFilters }
-      })
-    ]);
-    const bulkGroup = node('fieldset', { className: 'control-group bulk-assignment-group', attrs: { 'aria-describedby': 'bulk-assignment-help' } }, [
-      node('legend', { text: 'Bulk assignment' }),
+    assignment.addEventListener('change', refreshRelationships);
+    refreshRelationships();
+    const element = node('fieldset', { id: 'triage-structure-assignment', className: 'control-group bulk-assignment-group', attrs: { 'aria-describedby': 'bulk-assignment-help', tabindex: '-1' } }, [
+      node('legend', { text: 'Assign structure' }),
       selectedCount,
       helper,
       node('div', { className: 'control-grid' }, [
@@ -630,43 +790,269 @@
       ]),
       previewButton
     ]);
-    let resultContent;
-    if (emptyState === 'no-data') {
-      resultContent = node('section', { className: 'empty empty-state', attrs: { 'aria-labelledby': 'no-work-items-title' } }, [
+    return { element, refresh };
+  }
+
+  function triagePagination(collection) {
+    const pagination = collection.pagination;
+    return node('nav', { className: 'triage-pagination', attrs: { 'aria-label': 'Work Item pages' } }, [
+      node('button', { className: 'button secondary', type: 'button', text: 'Previous page', disabled: !pagination.hasPreviousPage, attrs: { 'aria-label': 'Previous Work Item page' }, on: { click: () => changeTriageQuery({ page: pagination.page - 1 }, 'Previous page loaded.') } }),
+      node('span', { text: `Page ${pagination.page} of ${pagination.totalPages}` }),
+      node('button', { className: 'button secondary', type: 'button', text: 'Next page', disabled: !pagination.hasNextPage, attrs: { 'aria-label': 'Next Work Item page' }, on: { click: () => changeTriageQuery({ page: pagination.page + 1 }, 'Next page loaded.') } })
+    ]);
+  }
+
+  function triageRows(collection, refreshBulkAvailability) {
+    if (collection.summary.totalWorkItems === 0) {
+      return node('section', { className: 'empty empty-state', attrs: { 'aria-labelledby': 'no-work-items-title' } }, [
         node('h2', { id: 'no-work-items-title', text: 'No Work Items have been added to this Workspace yet.' }),
         node('p', { text: 'Add and review source material to begin building the delivery view.' }),
-        node('div', { className: 'empty-actions' }, [
-          node('button', { className: 'button primary', type: 'button', text: 'Add Source', on: { click: () => activateView('add-source') } })
-        ])
+        node('div', { className: 'empty-actions' }, [node('button', { className: 'button primary', type: 'button', text: 'Add Source', on: { click: () => activateView('add-source') } })])
       ]);
-    } else if (emptyState === 'filtered-no-results') {
-      resultContent = node('section', { className: 'empty empty-state', attrs: { 'aria-labelledby': 'filtered-work-items-title' } }, [
-        node('h2', { id: 'filtered-work-items-title', text: 'No Work Items match the current filters.' }),
-        node('p', { text: 'Clear or change the filters to see more work.' }),
-        node('div', { className: 'empty-actions' }, [
-          node('button', { className: 'button secondary', type: 'button', text: 'Clear filters', on: { click: clearWorkItemFilters } })
-        ])
+    }
+    if (collection.filteredTotal === 0) {
+      return node('section', { className: 'empty empty-state', attrs: { 'aria-labelledby': 'filtered-work-items-title' } }, [
+        node('h2', { id: 'filtered-work-items-title', text: 'No Work Items match the current search and filters.' }),
+        node('p', { text: 'The Triage Summary still describes the entire Workspace.' }),
+        node('div', { className: 'empty-actions' }, [node('button', { className: 'button secondary', type: 'button', text: 'Clear filters', on: { click: clearWorkItemFilters } })])
       ]);
-    } else {
-      resultContent = recordList(items, item => {
+    }
+    return node('section', { className: 'panel triage-results', attrs: { 'aria-labelledby': 'triage-results-title' } }, [
+      node('div', { className: 'row-head' }, [node('h2', { id: 'triage-results-title', text: 'Review queue' }), node('span', { className: 'meta', text: `${collection.items.length} shown of ${collection.filteredTotal} matching` })]),
+      recordList(collection.items, item => {
         const checkbox = node('input', {
-          type: 'checkbox',
-          checked: state.selectedWorkItemIds.has(item.id),
-          attrs: { 'aria-label': `Select Work Item ${item.summary}` },
+          type: 'checkbox', checked: state.selectedWorkItemIds.has(item.id),
+          attrs: { 'aria-label': `Select Work Item ${item.externalKey || item.summary} for structure assignment` },
           on: { change: event => {
             if (event.target.checked) state.selectedWorkItemIds.add(item.id);
             else state.selectedWorkItemIds.delete(item.id);
             refreshBulkAvailability();
           } }
         });
+        const signalLabels = triageModule.activeSignalLabels(item.triageSignals);
+        const open = node('button', {
+          className: 'button secondary', type: 'button', text: 'Open detail',
+          attrs: { 'data-open-work-item': item.id, 'aria-label': `Open detail for ${item.externalKey || item.summary}` },
+          on: { click: () => openTriageDetail(item.id) }
+        });
         return [
-          node('div', { className: 'row-head' }, [node('span', {}, [checkbox, ' ', node('strong', { text: item.summary })]), node('span', {}, [badge(item.initiative?.name || 'Unassigned'), ' ', badge(item.workstream?.name || 'No Workstream'), ' ', badge(item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} · ${item.jiraEpic.mappingStatus}` : 'No Jira Epic')])]),
-          node('p', { className: 'meta', text: `${item.itemType} · ${item.canonicalStatus} · ${item.assignee || 'No assignee captured'} · Workstream: ${item.workstream?.name || 'No Workstream'} · Jira Epic: ${item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} — ${item.jiraEpic.jiraEpicName} (${item.jiraEpic.mappingStatus})` : 'No Jira Epic'} · Work Item Jira key: ${item.workItemJiraKey || 'None'}` }),
-          node('p', { className: 'meta', text: `How this status was confirmed: ${item.currentStateProvenance}` })
+          node('div', { className: 'row-head' }, [
+            node('span', { className: 'triage-row-title' }, [checkbox, node('span', {}, [node('strong', { text: item.externalKey || 'No external key' }), node('span', { text: ` — ${item.summary}` })])]),
+            open
+          ]),
+          node('p', { className: 'meta', text: `${item.itemType} · Canonical status: ${item.canonicalStatus} · Initiative: ${item.initiative?.name || 'Unassigned'} · Workstream: ${item.workstream?.name || 'No Workstream'} · Jira Epic: ${item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} — ${item.jiraEpic.jiraEpicName}` : 'No Jira Epic'}` }),
+          node('div', { className: 'triage-signal-list', attrs: { 'aria-label': `Triage signals for ${item.externalKey || item.summary}` } }, signalLabels.map(label => badge(label, label === 'Source trace available' ? 'muted-badge' : 'risk-badge'))),
+          node('p', { className: 'meta', text: `${item.sourceMatchCount} exact Source match${item.sourceMatchCount === 1 ? '' : 'es'} · ${item.triageSignalCount} derived signal${item.triageSignalCount === 1 ? '' : 's'}` })
         ];
-      }, 'No Work Items are available.');
+      }, 'No Work Items are available.'),
+      triagePagination(collection)
+    ]);
+  }
+
+  function metadataList(entries) {
+    return node('dl', { className: 'metadata-list' }, entries.flatMap(([label, value]) => [
+      node('dt', { text: label }),
+      node('dd', { text: value === null || value === '' ? 'Not captured' : value })
+    ]));
+  }
+
+  function renderTriageSourceDetail(detail) {
+    const row = detail.match.row;
+    return node('section', { id: 'triage-source-detail', className: 'triage-source-detail', attrs: { tabindex: '-1', 'aria-labelledby': 'triage-source-detail-title' } }, [
+      node('div', { className: 'row-head' }, [
+        node('h4', { id: 'triage-source-detail-title', text: `Source match: ${detail.source.title}` }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Hide Source match', attrs: { 'aria-label': 'Hide explicit Source match detail' }, on: { click: () => {
+          state.triage.sourceDetail = null;
+          renderWorkItems();
+        } } })
+      ]),
+      node('p', { className: 'warning', text: detail.match.trustLabel }),
+      metadataList([
+        ['Source ID', detail.source.id],
+        ['Source date', detail.source.date],
+        ['Imported / captured', detail.source.createdAt],
+        ['How this Source was added', detail.source.provenance],
+        ['Exact external key', row.externalKey],
+        ['Type suggestion', row.itemTypeSuggestion || row.externalItemTypeSuggestion],
+        ['Summary suggestion', row.summarySuggestion],
+        ['Description suggestion', row.descriptionSuggestion],
+        ['Jira Epic suggestion', row.jiraEpicKeySuggestion],
+        ['Initiative wording', row.initiativeNameSuggestion],
+        ['Status suggestion', row.canonicalStatusSuggestion],
+        ['Category', row.category]
+      ]),
+      row.evidenceExcerptSuggestion ? node('blockquote', { text: row.evidenceExcerptSuggestion }) : null,
+      node('p', { className: 'meta', text: 'Viewing this normalized row did not create a Finding, Evidence, Proposed Change, or canonical-state update.' })
+    ]);
+  }
+
+  async function saveTriageItemType(itemType) {
+    const detail = state.triage.detail;
+    if (!detail) return;
+    const token = workspaceOperationToken();
+    setStatus('Saving the explicit canonical type…');
+    try {
+      const result = await triageApi.updateItemType(token.organizationId, token.workspaceId, detail.workItem.id, {
+        expectedRevision: state.triage.revision,
+        actor: 'local-target-ui',
+        itemType
+      });
+      if (!workspaceOperationCurrent(token)) return;
+      if (state.workflow) state.workflow.revision = result.revision;
+      await loadTriageCollection();
+      if (!workspaceOperationCurrent(token)) return;
+      const remainsVisible = state.triage.collection.items.some(item => item.id === detail.workItem.id);
+      if (!remainsVisible) {
+        state.triage.detail = null;
+        state.triage.sourceDetail = null;
+        renderWorkItems();
+        setStatus('Type updated. This Work Item no longer matches the active filter or current page.', 'success');
+        return;
+      }
+      const refreshed = await triageApi.detail(token.organizationId, token.workspaceId, detail.workItem.id);
+      if (!workspaceOperationCurrent(token)) return;
+      state.triage.detail = refreshed.body;
+      state.triage.sourceDetail = null;
+      state.triage.revision = refreshed.revision;
+      renderWorkItems();
+      document.getElementById('triage-detail-panel')?.focus();
+      setStatus('Canonical Work Item type updated. Status, structure, Sources, and evidence records were preserved.', 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      setStatus(['REVISION_CONFLICT', 'PREVIEW_CONFLICT'].includes(error.code)
+        ? 'The Work Item changed. Refresh the detail before saving the type again.'
+        : error.message, 'error');
     }
-    elements.view.replaceChildren(filterGroup, bulkGroup, resultContent);
+  }
+
+  function reviewTriageStructure(workItemId) {
+    state.selectedWorkItemIds = new Set([workItemId]);
+    renderWorkItems();
+    document.getElementById('triage-structure-assignment')?.focus();
+    setStatus('Work Item selected. Review the existing write-free structure preview before applying anything.', 'success');
+  }
+
+  function triageDetailPanel(detail) {
+    const item = detail.workItem;
+    const type = node('select', { attrs: { 'aria-label': `Canonical Work Item type for ${item.externalKey || item.summary}` } },
+      triageModule.TRIAGE_ITEM_TYPES.map(value => option(value, value, value === item.itemType)));
+    const save = node('button', { className: 'button primary', type: 'button', text: 'Save canonical type', disabled: true, attrs: { 'aria-label': `Save canonical type for ${item.externalKey || item.summary}` } });
+    const typeState = node('p', { className: 'meta', text: 'No type change selected.' });
+    type.addEventListener('change', () => {
+      save.disabled = type.value === item.itemType;
+      typeState.textContent = save.disabled ? 'No type change selected.' : `Selected ${type.value}. This is not saved yet.`;
+    });
+    save.addEventListener('click', () => saveTriageItemType(type.value));
+    const sourceItems = detail.sourceMatches.length
+      ? node('ul', { className: 'list' }, detail.sourceMatches.map(match => node('li', { className: 'list-item' }, [
+          node('strong', { text: match.source.title }),
+          node('p', { className: 'meta', text: `${match.source.date} · exact key ${match.matchedExternalKey} · Source ID ${match.source.id}` }),
+          match.statusSuggestion === null
+            ? node('p', { className: 'meta', text: 'No status suggestion in this exact row.' })
+            : node('p', { className: 'warning', text: `${match.trustLabel}: ${match.statusSuggestion}` }),
+          node('button', { className: 'button secondary', type: 'button', text: 'View Source match', attrs: { 'aria-label': `View exact Source match from ${match.source.title}` }, on: { click: () => viewTriageSourceMatch(item.id, match) } })
+        ])))
+      : node('p', { className: 'meta', text: 'No exact-key Source trace is available. Priorena did not use title or fuzzy matching.' });
+    const auditItems = detail.auditEvents.length
+      ? node('ul', { className: 'list' }, detail.auditEvents.map(event => node('li', { className: 'list-item' }, [
+          node('strong', { text: event.action }),
+          node('p', { className: 'meta', text: `${event.timestamp} · ${event.actor} · ${event.entityType} ${event.entityId}` }),
+          node('p', { className: 'meta', text: `Before hash: ${event.beforeHash || 'None'} · After hash: ${event.afterHash || 'None'}` })
+        ])))
+      : node('p', { className: 'meta', text: 'No item-scoped Audit Events are available.' });
+    const panel = node('aside', {
+      id: 'triage-detail-panel',
+      className: 'panel triage-detail',
+      attrs: { role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'triage-detail-title', tabindex: '-1' }
+    }, [
+      node('div', { className: 'row-head' }, [
+        node('h2', { id: 'triage-detail-title', text: item.externalKey || 'Work Item detail' }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Close detail', attrs: { 'aria-label': `Close detail for ${item.externalKey || item.summary}` }, on: { click: closeTriageDetail } })
+      ]),
+      node('h3', { text: item.summary }),
+      metadataList([
+        ['Canonical type', item.itemType],
+        ['Canonical status', item.canonicalStatus],
+        ['Initiative', item.initiative?.name || 'Unassigned'],
+        ['Workstream', item.workstream?.name || 'No Workstream'],
+        ['Jira Epic', item.jiraEpic ? `${item.jiraEpic.jiraEpicKey} — ${item.jiraEpic.jiraEpicName} (${item.jiraEpic.mappingStatus})` : 'No Jira Epic'],
+        ['Assignee', item.assignee],
+        ['Sprint', item.sprint],
+        ['Created', item.createdAt],
+        ['Updated', item.updatedAt]
+      ]),
+      item.description ? node('section', {}, [node('h3', { text: 'Description' }), node('p', { className: 'long-text', text: item.description })]) : null,
+      node('section', { className: 'triage-trust-note' }, [
+        node('h3', { text: 'Canonical status and confidence' }),
+        node('p', { text: `Canonical current status: ${item.canonicalStatus}. Confidence metadata: ${item.currentStateConfidence}.` }),
+        node('p', { className: 'meta', text: item.canonicalStatus === 'Unknown'
+          ? 'Current status remains unknown. Confidence metadata does not make an unknown status known.'
+          : `Current-state provenance: ${item.currentStateProvenance}` })
+      ]),
+      node('section', {}, [
+        node('h3', { text: 'Derived triage signals' }),
+        node('ul', {}, triageModule.activeSignalLabels(detail.triageSignals).map(label => node('li', { text: label })))
+      ]),
+      node('section', { className: 'triage-type-review' }, [
+        node('h3', { text: 'Review canonical type' }),
+        node('p', { className: 'meta', text: 'Priorena does not infer a type. Choosing a value makes no change until Save canonical type is pressed.' }),
+        node('label', { className: 'field' }, [node('span', { text: 'Canonical Work Item type' }), type]),
+        typeState,
+        save
+      ]),
+      node('section', {}, [
+        node('h3', { text: 'Structure assignment' }),
+        node('p', { className: 'meta', text: 'Use the existing write-free preview and explicit Apply workflow. Workstream and Jira Epic remain optional.' }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Review structure', attrs: { 'aria-label': `Review structure assignment for ${item.externalKey || item.summary}` }, on: { click: () => reviewTriageStructure(item.id) } })
+      ]),
+      node('section', {}, [node('h3', { text: `Exact Source trace (${detail.sourceMatches.length})` }), sourceItems]),
+      state.triage.sourceDetail ? renderTriageSourceDetail(state.triage.sourceDetail) : null,
+      node('section', { className: 'triage-trust-note' }, [
+        node('h3', { text: 'Evidence boundary' }),
+        node('p', { text: 'Canonical status remains authoritative. Source suggestions are untrusted and require accepted Evidence before a current-state change.' }),
+        node('p', { className: 'meta', text: 'The Evidence review workflow for these status suggestions is not available in this triage release.' })
+      ]),
+      node('section', {}, [node('h3', { text: 'Work Item Audit Events' }), auditItems])
+    ]);
+    panel.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeTriageDetail();
+      }
+    });
+    return panel;
+  }
+
+  function renderWorkItems() {
+    const collection = state.triage.collection;
+    if (!collection) {
+      elements.view.replaceChildren(empty('Bounded triage results are not loaded yet.'));
+      return;
+    }
+    const structure = triageStructureAssignment();
+    const results = triageRows(collection, structure.refresh);
+    const workspace = node('div', { className: `triage-workspace${state.triage.detail ? ' detail-open' : ''}` }, [
+      node('div', { className: 'triage-list-column' }, [results]),
+      state.triage.detail ? triageDetailPanel(state.triage.detail) : null
+    ]);
+    elements.view.replaceChildren(triageSummaryPanel(collection), triageToolbar(collection), triageFiltersPanel(collection), structure.element, workspace);
+    structure.refresh();
+  }
+
+  function initiativeFilterControl(renderFilteredView) {
+    const select = node('select', {
+      attrs: { 'aria-label': 'Filter by Initiative' },
+      on: { change: event => {
+        state.initiativeFilter = event.target.value;
+        updateBreadcrumb();
+        renderFilteredView();
+      } }
+    }, [
+      option('all', 'All initiatives', state.initiativeFilter === 'all'),
+      option('unassigned', 'Unassigned', state.initiativeFilter === 'unassigned'),
+      ...workflowModule.initiativeChoices(state.workflow?.initiatives || [], 'work-item-filter').map(item => option(item.id, item.name, state.initiativeFilter === item.id))
+    ]);
+    return node('label', {}, [node('span', { text: 'Initiative' }), select]);
   }
 
   function renderFollowUp() {
@@ -730,6 +1116,7 @@
         }));
         if (!workspaceOperationCurrent(token)) return;
         state.workflow = null;
+        invalidateTriageData();
         await loadWorkflow();
         if (!workspaceOperationCurrent(token) || !form.isConnected) return;
         form.reset();
@@ -1523,6 +1910,7 @@
       clearImportFeedData();
       state.importFeed.outcome = outcome;
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       await renderImportFeed();
@@ -1621,6 +2009,7 @@
       }));
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       renderReview();
@@ -2207,6 +2596,7 @@
       if (!workspaceOperationCurrent(token)) return;
       onApplied(result.body);
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       fillOrganizations();
@@ -2249,6 +2639,7 @@
       }));
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       renderSettings();
@@ -2297,6 +2688,7 @@
       }));
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       renderSettings();
@@ -2381,6 +2773,7 @@
       }));
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       renderSettings();
@@ -2441,6 +2834,7 @@
       }));
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       renderSettings();
@@ -2472,6 +2866,7 @@
       }, 'PATCH'));
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
+      invalidateTriageData();
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
       renderSettings();
@@ -2634,16 +3029,24 @@
       else if (state.activeView === 'search') renderSearch();
       else if (state.activeView === 'briefings') await renderBriefings();
       else {
-        await ensureWorkflow();
-        if (generation !== state.generation) return;
-        if (state.activeView === 'work-items') renderWorkItems();
-        if (state.activeView === 'follow-up') renderFollowUp();
-        if (state.activeView === 'milestones') renderMilestones();
-        if (state.activeView === 'add-source') elements.view.replaceChildren(sourceForm());
-        if (state.activeView === 'import-feed') await renderImportFeed();
-        if (state.activeView === 'source-library') renderSourceLibrary();
-        if (state.activeView === 'review') renderReview();
-        if (state.activeView === 'settings') renderSettings();
+        if (state.activeView === 'work-items') {
+          await ensureWorkflow(false);
+          if (generation !== state.generation) return;
+          if (!state.triage.collection) await loadTriageCollection();
+          if (generation !== state.generation) return;
+          state.initiativeFilter = state.triage.query.initiativeId;
+          renderWorkItems();
+        } else {
+          await ensureWorkflow();
+          if (generation !== state.generation) return;
+          if (state.activeView === 'follow-up') renderFollowUp();
+          if (state.activeView === 'milestones') renderMilestones();
+          if (state.activeView === 'add-source') elements.view.replaceChildren(sourceForm());
+          if (state.activeView === 'import-feed') await renderImportFeed();
+          if (state.activeView === 'source-library') renderSourceLibrary();
+          if (state.activeView === 'review') renderReview();
+          if (state.activeView === 'settings') renderSettings();
+        }
       }
       if (generation === state.generation) setStatus(`${pageDefinitions[state.activeView][0]} loaded.`, 'success');
     } catch (error) {
@@ -2659,6 +3062,7 @@
     cancelOpenConfirmation();
     state.context = null;
     state.workflow = null;
+    clearTriageData();
     clearImportFeedData();
     clearBriefingData();
     elements.workspace.disabled = true;
@@ -2706,6 +3110,7 @@
     const generation = ++state.generation;
     cancelOpenConfirmation();
     state.workflow = null;
+    clearTriageData();
     clearImportFeedData();
     clearBriefingData();
     state.selectedWorkItemIds.clear();

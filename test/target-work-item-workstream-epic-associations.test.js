@@ -307,6 +307,7 @@ test('Jira Epic metadata updates preserve references and refresh current project
 
 test('target UI exposes independent stable-ID Jira Epic controls without native dialogs or Jira calls', () => {
   const appSource = fs.readFileSync(require.resolve('../public/target/app.js'), 'utf8');
+  const triageSource = fs.readFileSync(require.resolve('../public/target-triage-state.js'), 'utf8');
   const stateSource = fs.readFileSync(require.resolve('../public/target-workflow-state.js'), 'utf8');
   const workSource = fs.readFileSync(require.resolve('../target-server/work-services.js'), 'utf8');
   assert.match(appSource, /jira-epic-filter/);
@@ -322,7 +323,7 @@ test('target UI exposes independent stable-ID Jira Epic controls without native 
   assert.match(appSource, /This creates or updates a Priorena mapping only\. It does not create or modify anything in Jira\./);
   assert.match(appSource, /mappingStatus: controls\.status\.value/);
   assert.match(appSource, /Nothing was written to Jira/);
-  assert.match(appSource, /filter\(mapping => mapping\.initiativeId === initiativeId\)/);
+  assert.match(appSource, /filter\(item => item\.initiativeId === initiativeId\)/);
   assert.match(appSource, /jiraEpicAssignment\.disabled = controls\.jiraEpicDisabled/);
   assert.match(appSource, /result\.kind === 'workItem'/);
   assert.match(appSource, /Work Item Jira key: \$\{result\.workItemJiraKey/);
@@ -330,7 +331,7 @@ test('target UI exposes independent stable-ID Jira Epic controls without native 
   assert.match(stateSource, /jiraEpicMappingId/);
   assert.doesNotMatch(appSource, /\b(?:alert|confirm|prompt)\s*\(/);
   assert.doesNotMatch(workSource, /https?:\/\/|fetch\s*\(|axios|jira-client/i);
-  assert.match(appSource, /\['all', 'Story', 'Task', 'Bug', 'Other', 'Unknown'\]/);
+  assert.match(triageSource, /\['Story', 'Task', 'Bug', 'Other', 'Unknown'\]/);
   assert.doesNotMatch(appSource, /option\('Workstream'/);
 });
 

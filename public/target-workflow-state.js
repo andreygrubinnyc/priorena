@@ -92,19 +92,19 @@ function createTargetWorkflowApiClient(options = {}) {
   }));
 
   return Object.freeze({
-    async loadWorkspace(organizationId, workspaceId) {
+    async loadWorkspace(organizationId, workspaceId, options = {}) {
       const root = base(organizationId, workspaceId);
       const routes = {
         initiatives: `${root}/initiatives`,
         workstreams: `${root}/workstreams`,
         jiraEpicMappings: `${root}/jira-epic-mappings`,
-        workItems: `${root}/work-items`,
         milestones: `${root}/milestones`,
         sources: `${root}/sources`,
         findings: `${root}/findings?page=1&pageSize=100`,
         evidence: `${root}/evidence`,
         proposedChanges: `${root}/proposed-changes`
       };
+      if (options.includeWorkItems !== false) routes.workItems = `${root}/work-items`;
       const entries = await Promise.all(Object.entries(routes).map(async ([key, url]) => [key, await read(url)]));
       const revisions = new Set(entries.map(([, result]) => result.revision).filter(Boolean));
       if (revisions.size > 1) {
@@ -116,7 +116,8 @@ function createTargetWorkflowApiClient(options = {}) {
         const collection = key === 'findings' ? result.body.findings : result.body[key];
         return [key, collection || []];
       }));
-      return { ...values, revision: [...revisions][0] || null };
+      if (options.includeWorkItems === false) values.workItems = [];
+      return { ...values, workItemsLoaded: options.includeWorkItems !== false, revision: [...revisions][0] || null };
     },
     previewBulkWorkItems(organizationId, workspaceId, value) {
       return write(`${base(organizationId, workspaceId)}/work-items/bulk/preview`, value).then(result => result.body);

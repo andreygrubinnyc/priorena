@@ -27,6 +27,11 @@ const { readSourceFile, requireExplicitRoot } = require('./source-files');
 const { createCaptureServices } = require('./capture-services');
 const { createBriefingServices } = require('./briefing-services');
 const { createWorkServices } = require('./work-services');
+const {
+  buildSourceMatchDetail,
+  buildTriageCollection,
+  buildTriageDetail
+} = require('./triage-projections');
 
 const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024;
 const MAX_AI_CONTEXT_BYTES = 512 * 1024;
@@ -72,6 +77,12 @@ function createTargetServices(options = {}) {
     portfolio: organizationId => read(document => buildPortfolio(document, organizationId)),
     today: (organizationId, workspaceId) => read(document => buildToday(document, organizationId, workspaceId)),
     search: (organizationId, workspaceId, query) => read(document => searchWorkspace(document, organizationId, workspaceId, query)),
+    triageWorkItems: (organizationId, workspaceId, query) =>
+      read(document => buildTriageCollection(document, organizationId, workspaceId, query)),
+    triageWorkItemDetail: (organizationId, workspaceId, workItemId) =>
+      read(document => buildTriageDetail(document, organizationId, workspaceId, workItemId)),
+    triageSourceMatchDetail: (organizationId, workspaceId, workItemId, sourceId, recordNumber) =>
+      read(document => buildSourceMatchDetail(document, organizationId, workspaceId, workItemId, sourceId, recordNumber)),
     listChildren: (collection, organizationId, workspaceId) => read(document => listWorkspaceCollection(document, collection, organizationId, workspaceId)),
     getChild: (collection, organizationId, workspaceId, childId) => read(document => getWorkspaceChild(document, collection, organizationId, workspaceId, childId)),
     listSourceFindings: (organizationId, workspaceId, sourceId) => read(document => listFindingsForSource(document, organizationId, workspaceId, sourceId)),
