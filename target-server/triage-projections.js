@@ -379,7 +379,8 @@ function buildTriageCollection(document, organizationId, workspaceId, rawQuery =
   const filtered = sortRows(filteredRows(rows, sourceMatchesByItem, query), query);
   const filteredTotal = filtered.length;
   const totalPages = Math.max(1, Math.ceil(filteredTotal / query.pageSize));
-  const offset = (query.page - 1) * query.pageSize;
+  const page = Math.min(query.page, totalPages);
+  const offset = (page - 1) * query.pageSize;
   return {
     organizationId,
     workspaceId: workspace.id,
@@ -387,11 +388,11 @@ function buildTriageCollection(document, organizationId, workspaceId, rawQuery =
     filteredTotal,
     items: filtered.slice(offset, offset + query.pageSize),
     pagination: {
-      page: query.page,
+      page,
       pageSize: query.pageSize,
       totalPages,
-      hasPreviousPage: query.page > 1,
-      hasNextPage: query.page < totalPages
+      hasPreviousPage: page > 1,
+      hasNextPage: page < totalPages
     },
     applied: {
       search: query.search,

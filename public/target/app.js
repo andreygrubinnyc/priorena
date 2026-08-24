@@ -327,6 +327,11 @@
       const result = await triageApi.list(token.organizationId, token.workspaceId, state.triage.query);
       if (!workspaceOperationCurrent(token) || requestId !== state.triage.requestId) return null;
       state.triage.collection = result.body;
+      state.triage.query = triageModule.updateTriageQuery(
+        state.triage.query,
+        { page: result.body.pagination.page },
+        { resetPage: false }
+      );
       state.triage.revision = result.revision;
       state.triage.loading = false;
       return result.body;

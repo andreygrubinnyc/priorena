@@ -85,6 +85,13 @@ test('bounded triage collection derives workspace summary and deterministic sear
   assert.equal(pageTwo.items.length, 25);
   assert.equal(pageTwo.pagination.page, 2);
   assert.notDeepEqual(pageTwo.items.map(item => item.id), initial.items.map(item => item.id));
+  const pageThree = (await requestApp(app, { url: triageUrl(ALPHA, { page: 3 }) })).json();
+  const outOfRange = (await requestApp(app, { url: triageUrl(ALPHA, { page: 999 }) })).json();
+  assert.equal(outOfRange.pagination.page, 3);
+  assert.equal(outOfRange.pagination.totalPages, 3);
+  assert.equal(outOfRange.pagination.hasPreviousPage, true);
+  assert.equal(outOfRange.pagination.hasNextPage, false);
+  assert.deepEqual(outOfRange.items, pageThree.items, 'out-of-range paging uses the effective last-page offset');
   const maximum = await requestApp(app, { url: triageUrl(ALPHA, { pageSize: 100 }) });
   assert.equal(maximum.status, 200);
   assert.equal(maximum.json().items.length, 75);
@@ -114,6 +121,12 @@ test('bounded triage collection derives workspace summary and deterministic sear
   const typeFiltered = (await requestApp(app, { url: triageUrl(ALPHA, { itemType: 'Unknown', pageSize: 50 }) })).json();
   assert.equal(typeFiltered.filteredTotal, 16);
   assert.ok(typeFiltered.items.every(item => item.itemType === 'Unknown'));
+  const filteredPageDisappeared = (await requestApp(app, {
+    url: triageUrl(ALPHA, { page: 3, itemType: 'Unknown', pageSize: 50 })
+  })).json();
+  assert.equal(filteredPageDisappeared.pagination.page, 1);
+  assert.equal(filteredPageDisappeared.pagination.totalPages, 1);
+  assert.deepEqual(filteredPageDisappeared.items, typeFiltered.items, 'filtering clamps a stale page to the remaining last page');
   const statusFiltered = (await requestApp(app, { url: triageUrl(ALPHA, { canonicalStatus: 'Unknown', pageSize: 50 }) })).json();
   assert.ok(statusFiltered.items.every(item => item.canonicalStatus === 'Unknown'));
   const initiativeFiltered = (await requestApp(app, { url: triageUrl(ALPHA, { initiativeId: 'unassigned', pageSize: 50 }) })).json();
@@ -364,6 +377,7 @@ test('Work Items UI uses bounded triage reads, safe text rendering, accessible d
   const css = await fs.readFile(path.join(root, 'public/target/styles.css'), 'utf8');
 
   assert.match(client, /loadTriageCollection/);
+  assert.match(client, /state\.triage\.query = triageModule\.updateTriageQuery\([\s\S]*result\.body\.pagination\.page[\s\S]*resetPage: false/);
   assert.match(client, /ensureWorkflow\(false\)/);
   assert.match(workflowSource, /options\.includeWorkItems !== false/);
   assert.match(stateSource, /\/work-items\/triage\?/);
