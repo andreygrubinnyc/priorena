@@ -11,6 +11,26 @@ Codex is a security and release gatekeeper for this repository. Read `SECURITY.m
 - Demo Mode must remain temporary, in memory, and isolated from normal persistence and external providers.
 - Do not authorize hosting, LAN access, tunnels, reverse proxies, multi-user behavior, or automatic external data transmission.
 
+## Codex development lifecycle
+
+- `docs/development/CODEX_WORKFLOW.md` defines the repository development lifecycle.
+- Before any mutation, identify the current lifecycle phase and exact authority boundary.
+- Record direct task and pull-request evidence that a coordinator can retrieve; do not ask the user to relay full reports between tasks.
+- End implementation work with a short public-safe summary and this stable handoff block:
+
+  ```text
+  PHASE_RESULT: <result>
+  STATUS: <status>
+  BRANCH: <branch-or-none>
+  HEAD: <commit-or-none>
+  PR: <pull-request-or-none>
+  CHECKS: <checks-and-results>
+  NEXT_AUTHORITY: <required-authority-or-none>
+  ```
+
+- Merge and live release require separate explicit authority.
+- STOP on scope or authority mismatch instead of improvising.
+
 ## Before every commit
 
 1. Inspect `git status --short`, `git diff`, and `git diff --cached`.
