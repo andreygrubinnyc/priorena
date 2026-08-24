@@ -14,6 +14,7 @@ async function run() {
     'public/target/styles.css',
     'public/target-context-state.js',
     'public/target-workflow-state.js',
+    'public/target-triage-state.js',
     'public/target-briefing-state.js'
   ];
   for (const file of requiredFiles) assert.equal(fs.existsSync(file), true, `Missing required application file: ${file}`);

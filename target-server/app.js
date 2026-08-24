@@ -28,6 +28,7 @@ const PUBLIC_ROOT = path.join(__dirname, '..', 'public');
 const TARGET_MODULE_ASSETS = Object.freeze([
   ['target-context-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-context-state.js'), 'utf8')],
   ['target-workflow-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-workflow-state.js'), 'utf8')],
+  ['target-triage-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-triage-state.js'), 'utf8')],
   ['target-import-feed-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-import-feed-state.js'), 'utf8')],
   ['target-briefing-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-briefing-state.js'), 'utf8')]
 ].map(([name, source]) => Object.freeze({ route: `/target-modules/${name}`, source })));
@@ -114,6 +115,15 @@ function createTargetApiApp(options = {}) {
   mutationRoute('patch', `${workspaceBase}/initiatives/:initiativeId/jira-epic-mappings/:mappingId`, req => services.updateJiraMapping(req.params.organizationId, req.params.workspaceId, req.params.initiativeId, req.params.mappingId, req.body));
 
   mutationRoute('post', `${workspaceBase}/work-items`, req => services.createWorkItem(req.params.organizationId, req.params.workspaceId, req.body));
+  jsonRoute(`${workspaceBase}/work-items/triage`, req => services.triageWorkItems(req.params.organizationId, req.params.workspaceId, req.query));
+  jsonRoute(`${workspaceBase}/work-items/:workItemId/triage`, req => services.triageWorkItemDetail(req.params.organizationId, req.params.workspaceId, req.params.workItemId));
+  jsonRoute(`${workspaceBase}/work-items/:workItemId/source-matches/:sourceId/:recordNumber`, req => services.triageSourceMatchDetail(
+    req.params.organizationId,
+    req.params.workspaceId,
+    req.params.workItemId,
+    req.params.sourceId,
+    req.params.recordNumber
+  ));
   mutationRoute('post', `${workspaceBase}/work-items/bulk/preview`, req => services.previewBulkWorkItems(req.params.organizationId, req.params.workspaceId, req.body));
   mutationRoute('post', `${workspaceBase}/work-items/bulk/apply`, req => services.applyBulkWorkItems(req.params.organizationId, req.params.workspaceId, req.body));
   mutationRoute('patch', `${workspaceBase}/work-items/:workItemId`, req => services.updateWorkItem(req.params.organizationId, req.params.workspaceId, req.params.workItemId, req.body));

@@ -181,11 +181,11 @@ test('Settings exposes complete Initiative setup through the accepted revision-a
 
 test('Work Item filters, bulk assignment, selection state, and empty states are separate and deterministic', async () => {
   const client = await source('public/target/app.js');
-  const work = functionSlice(client, 'renderWorkItems', 'renderFollowUp');
+  const work = functionSlice(client, 'triageFiltersPanel', 'initiativeFilterControl');
   assert.match(work, /node\('fieldset', \{ className: 'control-group filters-group'/);
   assert.match(work, /node\('legend', \{ text: 'Filters' \}\)/);
-  assert.match(work, /node\('fieldset', \{ className: 'control-group bulk-assignment-group'/);
-  assert.match(work, /node\('legend', \{ text: 'Bulk assignment' \}\)/);
+  assert.match(work, /className: 'control-group bulk-assignment-group'/);
+  assert.match(work, /node\('legend', \{ text: 'Assign structure' \}\)/);
   assert.match(work, /workflowModule\.workItemControlState/);
   assert.match(work, /selectedCount\.textContent = controls\.selectedCountLabel/);
   assert.match(work, /assignment\.disabled = controls\.initiativeDisabled/);
@@ -196,11 +196,13 @@ test('Work Item filters, bulk assignment, selection state, and empty states are 
   assert.match(work, /state\.selectedWorkItemIds\.(?:add|delete)/);
   assert.match(work, /No Work Items have been added to this Workspace yet/);
   assert.match(work, /Add and review source material to begin building the delivery view/);
-  assert.match(work, /No Work Items match the current filters/);
-  assert.match(work, /Clear or change the filters to see more work/);
+  assert.match(work, /No Work Items match the current search and filters/);
+  assert.match(work, /Triage Summary still describes the entire Workspace/);
   assert.match(work, /activateView\('add-source'\)/);
   assert.match(work, /clearWorkItemFilters/);
-  assert.match(work, /workItemEmptyState\(totalWorkItems, items\.length\)/);
+  assert.match(work, /collection\.summary\.totalWorkItems === 0/);
+  assert.match(work, /collection\.filteredTotal === 0/);
+  assert.match(work, /triagePagination\(collection\)/);
   assert.doesNotMatch(work, /Import Feed/);
 });
 
@@ -246,7 +248,7 @@ test('historical release note preserves its original scope and points to the lat
 test('target DOM integration rejects late context renders and keeps page context truthful', async () => {
   const client = await source('public/target/app.js');
   const portfolio = functionSlice(client, 'renderPortfolio', 'renderToday');
-  const today = functionSlice(client, 'renderToday', 'visibleWorkItems');
+  const today = functionSlice(client, 'renderToday', 'triageInitiativeFilterControl');
   const organizationSelector = functionSlice(client, 'selectOrganization', 'selectWorkspace');
   const workspaceSelector = functionSlice(client, 'selectWorkspace', 'confirmAction');
   assert.match(portfolio, /const generation = state\.generation;[\s\S]*await requestJson[\s\S]*generation !== state\.generation[\s\S]*elements\.view\.replaceChildren/);
@@ -261,10 +263,9 @@ test('target DOM integration rejects late context renders and keeps page context
 
 test('Follow-Up filtering retains its surface and communication channel is independent of output format', async () => {
   const client = await source('public/target/app.js');
-  const filter = functionSlice(client, 'initiativeFilterControl', 'previewInitiativeAssignment');
+  const filter = functionSlice(client, 'initiativeFilterControl', 'renderFollowUp');
   const followUp = functionSlice(client, 'renderFollowUp', 'renderMilestones');
   const finalized = functionSlice(client, 'renderFinalizedEditor', 'renderCommunicatedEditor');
-  assert.match(filter, /renderFilteredView = renderWorkItems/);
   assert.match(filter, /renderFilteredView\(\)/);
   assert.match(followUp, /initiativeFilterControl\(renderFollowUp\)/);
   assert.match(finalized, /External communication channel/);
