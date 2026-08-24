@@ -18,6 +18,7 @@
     "release:restore": "node scripts/release/restore.js",
     "release:cutover-live": "node scripts/release/cutover.js",
     "release:process": "node scripts/release/process-control.js",
+    "release:startup": "node scripts/release/startup-resilience.js",
     "release:backup-rehearsal": "node scripts/release/rehearse.js --scenario backup",
     "release:restore-rehearsal": "node scripts/release/rehearse.js --scenario restore",
     "release:cutover-rehearsal": "node scripts/release/rehearse.js --scenario cutover",
