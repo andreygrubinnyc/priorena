@@ -329,8 +329,14 @@ test('process guards require an exited PID, unused file, and unused expected por
 });
 
 test('process identity inspection requires command, working directory, PID, and port evidence', () => {
+  const expectedEntrypoint = '/fictional/releases/current/target-server/start.js';
+  const longCommand = `${'fictional-argument '.repeat(512)}${expectedEntrypoint} --port 3100`;
+  let processArguments;
   const runner = (name, args) => {
-    if (name === 'ps') return { status: 0, stdout: 'node target-server/start.js\nnode\n' };
+    if (name === 'ps') {
+      processArguments = args;
+      return { status: 0, stdout: longCommand };
+    }
     if (args.includes('cwd')) return { status: 0, stdout: 'p321\nfcwd\nn/tmp/fictional-release\n' };
     return { status: 0, stdout: 'p321\nf10\nn127.0.0.1:3100\n' };
   };
@@ -338,19 +344,41 @@ test('process identity inspection requires command, working directory, PID, and 
     pid: 321,
     expectedCwd: '/tmp/fictional-release',
     expectedPort: 3100,
-    expectedCommandFragment: 'target-server/start.js',
+    expectedCommandFragment: expectedEntrypoint,
     platform: 'darwin',
     runner
   });
   assert.equal(evidence.pid, 321);
+  assert.deepEqual(processArguments, ['-ww', '-p', '321', '-o', 'command=']);
   assert.throws(() => inspectValidatedProcess({
     pid: 321,
     expectedCwd: '/tmp/other-release',
     expectedPort: 3100,
-    expectedCommandFragment: 'target-server/start.js',
+    expectedCommandFragment: expectedEntrypoint,
     platform: 'darwin',
     runner
   }), /working directory/);
+
+  for (const processResult of [
+    { status: 0, stdout: 'node /fictional/releases/other-server.js' },
+    { status: 0, stdout: '' },
+    { status: 1, stdout: '', stderr: '/fictional/private-runner-output' }
+  ]) {
+    assert.throws(() => inspectValidatedProcess({
+      pid: 321,
+      expectedCwd: '/tmp/fictional-release',
+      expectedPort: 3100,
+      expectedCommandFragment: expectedEntrypoint,
+      platform: 'darwin',
+      runner: (name, args) => name === 'ps'
+        ? processResult
+        : runner(name, args)
+    }), error => {
+      assert.equal(error.code, 'PROCESS_COMMAND_MISMATCH');
+      assert.doesNotMatch(error.message, /fictional\/private-runner-output/);
+      return true;
+    });
+  }
 
   const linuxRunner = (name, args) => {
     assert.notEqual(name, 'ps');
