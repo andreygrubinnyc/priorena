@@ -103,7 +103,7 @@ function inspectValidatedProcess({
   const commandMatched = platform === 'linux'
     ? readLinuxProcessCommand(validatedPid, processCommandIo).some(argument => argument.includes(expectedCommandFragment))
     : (() => {
-      const processResult = runner('ps', ['-ww', '-p', String(validatedPid), '-o', 'args=', '-o', 'comm=']);
+      const processResult = runner('ps', ['-ww', '-p', String(validatedPid), '-o', 'command=']);
       return processResult.status === 0 && String(processResult.stdout).includes(expectedCommandFragment);
     })();
   if (!commandMatched) throw codedError('PROCESS_COMMAND_MISMATCH', 'PID command does not match the expected Priorena command');
