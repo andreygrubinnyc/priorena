@@ -488,6 +488,7 @@ test('Finding accept/reject and bounded bulk review preserve the Evidence/curren
     expectedRevision: initial.revision,
     actor: ACTOR,
     decision: 'accept',
+    currentness: 'current',
     workItemId: 'work-item-alpha-unassigned',
     initiativeId: null
   });
@@ -523,7 +524,7 @@ test('Finding accept/reject and bounded bulk review preserve the Evidence/curren
     expectedRevision: revision,
     actor: ACTOR,
     selections: [
-      { findingId: findingIds[0], decision: 'accept', initiativeId: null, workItemId: null },
+      { findingId: findingIds[0], decision: 'accept', currentness: 'current', initiativeId: null, workItemId: null },
       { findingId: findingIds[1], decision: 'reject' }
     ]
   });
@@ -754,6 +755,18 @@ test('every Phase 3 route family resolves Organization and Workspace parents bef
       source: {
         title: 'Fictional Source', type: 'generic', sourceKind: 'structured-note', date: '2026-08-11',
         provenance: 'Fictional.', content: 'Fictional.'
+      }
+    }],
+    ['POST', '/sources/source-alpha-untrusted-feed/findings', {
+      ...actorRevision,
+      finding: {
+        startOffset: 0,
+        endOffset: 9,
+        exactExcerpt: 'Fictional',
+        category: 'status',
+        currentness: 'unknown',
+        proposedWorkItemId: null,
+        proposedInitiativeId: null
       }
     }],
     ['POST', '/imports/preview', { input: importValue }],
