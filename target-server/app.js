@@ -30,6 +30,7 @@ const TARGET_MODULE_ASSETS = Object.freeze([
   ['target-workflow-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-workflow-state.js'), 'utf8')],
   ['target-triage-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-triage-state.js'), 'utf8')],
   ['target-import-feed-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-import-feed-state.js'), 'utf8')],
+  ['target-evidence-review-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-evidence-review-state.js'), 'utf8')],
   ['target-briefing-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-briefing-state.js'), 'utf8')]
 ].map(([name, source]) => Object.freeze({ route: `/target-modules/${name}`, source })));
 
@@ -134,6 +135,7 @@ function createTargetApiApp(options = {}) {
   mutationRoute('patch', `${workspaceBase}/milestones/:milestoneId`, req => services.updateMilestone(req.params.organizationId, req.params.workspaceId, req.params.milestoneId, req.body));
 
   mutationRoute('post', `${workspaceBase}/sources`, req => services.captureSource(req.params.organizationId, req.params.workspaceId, req.body));
+  mutationRoute('post', `${workspaceBase}/sources/:sourceId/findings`, req => services.createSourceFinding(req.params.organizationId, req.params.workspaceId, req.params.sourceId, req.body));
   jsonRoute(`${workspaceBase}/imports/capabilities`, req => services.importCapabilities(req.params.organizationId, req.params.workspaceId));
   mutationRoute('post', `${workspaceBase}/imports/preview`, req => services.previewImport(req.params.organizationId, req.params.workspaceId, req.body));
   mutationRoute('post', `${workspaceBase}/imports/apply`, req => services.applyImport(req.params.organizationId, req.params.workspaceId, req.body));

@@ -27,6 +27,17 @@ const {
   utf8ByteLength
 } = require('../public/target-import-feed-state');
 const {
+  FINDING_PAGE_SIZE,
+  buildProposedChange,
+  createTargetEvidenceReviewApiClient,
+  evidenceCompatibleWithWorkItem,
+  exactExcerptSelection,
+  findingAcceptance,
+  newEvidenceReviewState,
+  proposedValue,
+  validateSourceDetail
+} = require('../public/target-evidence-review-state');
+const {
   categorizeVersions,
   createTargetBriefingApiClient,
   targetStableId,
@@ -93,6 +104,8 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.match(client, /state\.context = null;[\s\S]*state\.workflow = null;/);
   assert.match(client, /generation !== state\.generation/);
   assert.match(client, /function clearBriefingData\(\)/);
+  assert.match(client, /function clearEvidenceReviewData\(\)/);
+  assert.equal((client.match(/clearEvidenceReviewData\(\);/g) || []).length >= 2, true);
   assert.equal((client.match(/clearBriefingData\(\);/g) || []).length >= 2, true);
   assert.match(client, /briefingOperationCurrent/);
   assert.match(client, /Manual PM input/);
@@ -115,6 +128,135 @@ test('target client renders untrusted values as text and avoids blocking browser
   assert.match(client, /onApplied\(result\.body\);[\s\S]*state\.workflow = null;[\s\S]*await loadWorkflow\(\);[\s\S]*renderSettings\(\);/);
   assert.match(client, /Existing frozen Briefing snapshots are not rewritten/);
   assert.doesNotMatch(client, /sendBriefing|sendOutput|autoPublish/);
+});
+
+test('Evidence review shared state preserves UTF-16 selections, explicit associations, and compatible typed changes', () => {
+  assert.equal(FINDING_PAGE_SIZE, 25);
+  assert.deepEqual(newEvidenceReviewState().findingPage, {
+    page: 1,
+    pageSize: 25,
+    total: 0,
+    findings: [],
+    revision: null
+  });
+  assert.deepEqual(exactExcerptSelection('A😀B', 1, 3), {
+    startOffset: 1,
+    endOffset: 3,
+    exactExcerpt: '😀'
+  });
+  assert.throws(() => exactExcerptSelection('Fictional', 2, 2), /non-empty exact excerpt/);
+  assert.throws(() => exactExcerptSelection('x'.repeat(50_001), 0, 50_001), /50,000/);
+
+  const revision = 'a'.repeat(64);
+  assert.equal(validateSourceDetail({
+    revision,
+    body: { source: { id: 'source-alpha', organizationId: 'org-alpha', workspaceId: 'workspace-alpha', content: 'Fictional text.' } }
+  }, 'org-alpha', 'workspace-alpha', 'source-alpha', revision).content, 'Fictional text.');
+  assert.throws(() => validateSourceDetail({
+    revision: 'b'.repeat(64),
+    body: { source: { id: 'source-alpha', organizationId: 'org-alpha', workspaceId: 'workspace-alpha', content: 'Fictional text.' } }
+  }, 'org-alpha', 'workspace-alpha', 'source-alpha', revision), /data changed/);
+
+  const workItem = { id: 'work-item-alpha', organizationId: 'org-alpha', workspaceId: 'workspace-alpha', initiativeId: 'initiative-alpha' };
+  const evidence = [{
+    id: 'evidence-alpha',
+    findingId: 'finding-alpha',
+    organizationId: 'org-alpha',
+    workspaceId: 'workspace-alpha',
+    workItemId: 'work-item-alpha',
+    initiativeId: 'initiative-alpha'
+  }];
+  assert.deepEqual(findingAcceptance('current', workItem, 'initiative-alpha'), {
+    currentness: 'current',
+    workItemId: 'work-item-alpha',
+    initiativeId: 'initiative-alpha'
+  });
+  assert.throws(() => findingAcceptance('current', workItem, null), /exactly match/);
+  assert.equal(evidenceCompatibleWithWorkItem(evidence[0], workItem), true);
+  assert.deepEqual(buildProposedChange(
+    'finding-alpha', ['evidence-alpha'], workItem, 'canonicalStatus', 'Blocked', evidence
+  ), {
+    findingId: 'finding-alpha',
+    evidenceIds: ['evidence-alpha'],
+    workItemId: 'work-item-alpha',
+    field: 'canonicalStatus',
+    proposedValue: 'Blocked'
+  });
+  assert.equal(proposedValue('assignee', ''), null);
+  assert.equal(proposedValue('currentStateConfidence', 'confirmed'), 'confirmed');
+  assert.throws(() => proposedValue('lastCapturedCommentAt', 'tomorrow'), /exact ISO/);
+});
+
+test('Evidence review API client uses only exact parent-scoped routes and bounded pending pagination', async () => {
+  const requests = [];
+  const client = createTargetEvidenceReviewApiClient({
+    request: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        headers: { get: name => name === 'x-priorena-target-revision' ? 'a'.repeat(64) : null },
+        json: async () => ({ source: { id: 'source-alpha' }, findings: [] })
+      };
+    }
+  });
+  await client.openSource('org-alpha', 'workspace-alpha', 'source-alpha');
+  await client.listFindings('org-alpha', 'workspace-alpha', 2);
+  await client.createSourceFinding('org-alpha', 'workspace-alpha', 'source-alpha', { finding: {} });
+  await client.reviewFinding('org-alpha', 'workspace-alpha', 'finding-alpha', { decision: 'reject' });
+  await client.previewProposedChange('org-alpha', 'workspace-alpha', { change: {} });
+  await client.createProposedChange('org-alpha', 'workspace-alpha', { change: {} });
+  await client.reviewProposedChange('org-alpha', 'workspace-alpha', 'change-alpha', { decision: 'approve' });
+  await client.applyProposedChange('org-alpha', 'workspace-alpha', 'change-alpha', { previewHash: 'a'.repeat(64) });
+  assert.deepEqual(requests.map(item => item.url), [
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/sources/source-alpha',
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/findings?status=pending&page=2&pageSize=25',
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/sources/source-alpha/findings',
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/findings/finding-alpha/review',
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/proposed-changes/preview',
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/proposed-changes',
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/proposed-changes/change-alpha/review',
+    '/api/v2/organizations/org-alpha/workspaces/workspace-alpha/proposed-changes/change-alpha/apply'
+  ]);
+  assert.throws(() => client.listFindings('org-alpha', 'workspace-alpha', 0), /positive integer/);
+  assert.throws(() => client.openSource('org-alpha', 'workspace-alpha', '../source'), /stable opaque IDs/);
+});
+
+test('Evidence review DOM workflow keeps Source, Finding, Evidence, Proposed Change, and current state distinct', async () => {
+  const markup = await source('public/target/index.html');
+  const client = await source('public/target/app.js');
+  const moduleSource = await source('public/target-evidence-review-state.js');
+  const sourceFlow = functionSlice(client, 'openSourceDetail', 'loadPendingFindingPage');
+  const findingReview = functionSlice(client, 'reviewFinding', 'pendingFindingCard');
+  const proposedPreview = functionSlice(client, 'previewProposedChange', 'createProposedChangeFromPreview');
+  const proposedCreate = functionSlice(client, 'createProposedChangeFromPreview', 'proposedChangeComposer');
+  const proposedReview = functionSlice(client, 'reviewProposedChange', 'applyProposedChange');
+  const proposedApply = functionSlice(client, 'applyProposedChange', 'proposedChangeCard');
+
+  assert.match(markup, /target-evidence-review-state\.js/);
+  assert.match(sourceFlow, /evidenceReviewApi\.openSource/);
+  assert.match(sourceFlow, /validateSourceDetail/);
+  assert.match(sourceFlow, /readonly: 'readonly'/);
+  assert.match(sourceFlow, /content\.selectionStart, content\.selectionEnd/);
+  assert.match(sourceFlow, /startOffset/);
+  assert.match(sourceFlow, /creates a pending Finding only/i);
+  assert.match(sourceFlow, /expectedRevision: state\.evidenceReview\.sourceRevision/);
+  assert.match(sourceFlow, /state\.workflow = null;[\s\S]*await loadWorkflow\(\)/);
+  assert.match(findingReview, /findingAcceptance/);
+  assert.match(findingReview, /Acceptance creates attributable Evidence/);
+  assert.match(findingReview, /decision,[\s\S]*\.\.\.\(reviewed \|\| \{\}\)/);
+  assert.match(proposedPreview, /buildProposedChange/);
+  assert.match(proposedPreview, /previewProposedChange/);
+  assert.match(proposedCreate, /expectedRevision: preview\.expectedRevision/);
+  assert.match(proposedCreate, /previewHash: preview\.previewHash/);
+  assert.match(proposedReview, /Approval does not apply the change/);
+  assert.match(proposedApply, /Evidence content, provenance, acceptance, and currentness remain unchanged/);
+  assert.match(proposedApply, /PREVIEW_CONFLICT/);
+  assert.match(client, /25 per page|pageSize/);
+  assert.match(client, /function acceptedEvidenceCard/);
+  assert.match(client, /Source provenance/);
+  assert.match(client, /Accepted \$\{dateLabel\(evidence\.acceptedAt\)\} by \$\{evidence\.acceptedBy\}/);
+  assert.doesNotMatch(`${client}\n${moduleSource}`, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/);
+  assert.doesNotMatch(`${client}\n${moduleSource}`, /fetch\([^\n]*(?:openai|chatgpt|atlassian|jira)|XMLHttpRequest|WebSocket/i);
 });
 
 test('Import Feed validation errors are actionable and stale review controls are removed after failures', async () => {
@@ -566,6 +708,10 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
   assert.match(css, /\.import-readiness-summary \{[^}]*position: sticky/);
   assert.match(css, /\.import-live-apply/);
   assert.match(css, /\.import-apply-acknowledgement/);
+  assert.match(css, /\.source-library-layout\.detail-open/);
+  assert.match(css, /\.source-detail-panel \{[^}]*max-height: calc\(100vh - 2rem\)/);
+  assert.match(css, /\.review-pagination/);
+  assert.match(css, /\.proposed-preview-panel/);
   assert.match(css, /\.settings-card \.actions input \{[^}]*min-width: 0/);
   assert.doesNotMatch(css, /min-width:\s*[7-9]\d\dpx/);
 });
@@ -586,7 +732,7 @@ test('target UI is the release root and does not mutate target data', async t =>
   const rootResponse = await requestApp(app, { url: '/' });
   assert.equal(rootResponse.status, 302);
   assert.equal(rootResponse.headers.location, '/target/');
-  for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-import-feed-state.js', 'target-briefing-state.js']) {
+  for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-import-feed-state.js', 'target-evidence-review-state.js', 'target-briefing-state.js']) {
     const response = await requestApp(app, { url: `/target-modules/${moduleName}` });
     assert.equal(response.status, 200);
     assert.match(response.headers['content-type'], /^application\/javascript/);

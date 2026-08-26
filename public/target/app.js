@@ -5,8 +5,9 @@
   const workflowModule = window.PriorenaTargetWorkflow;
   const triageModule = window.PriorenaTargetTriage;
   const importFeedModule = window.PriorenaTargetImportFeed;
+  const evidenceReviewModule = window.PriorenaTargetEvidenceReview;
   const briefingModule = window.PriorenaTargetBriefing;
-  if (!contextModule || !workflowModule || !triageModule || !importFeedModule || !briefingModule) throw new Error('Target state modules are unavailable');
+  if (!contextModule || !workflowModule || !triageModule || !importFeedModule || !evidenceReviewModule || !briefingModule) throw new Error('Target state modules are unavailable');
 
   const byId = id => document.getElementById(id);
   const elements = Object.freeze({
@@ -59,6 +60,7 @@
     selectedWorkItemIds: new Set(),
     triage: triageModule.createTriageState(),
     importFeed: importFeedModule.createImportFeedState(),
+    evidenceReview: evidenceReviewModule.newEvidenceReviewState(),
     generation: 0
   };
 
@@ -68,6 +70,10 @@
 
   function clearTriageData() {
     state.triage = triageModule.createTriageState();
+  }
+
+  function clearEvidenceReviewData() {
+    state.evidenceReview = evidenceReviewModule.newEvidenceReviewState();
   }
 
   function invalidateTriageData() {
@@ -153,6 +159,7 @@
   const contextController = contextModule.createTargetContextController(contextApi);
   const workflowApi = workflowModule.createTargetWorkflowApiClient({ request: (url, options) => fetch(url, options) });
   const triageApi = triageModule.createTargetTriageApiClient({ request: (url, options) => fetch(url, options) });
+  const evidenceReviewApi = evidenceReviewModule.createTargetEvidenceReviewApiClient({ request: (url, options) => fetch(url, options) });
   const briefingApi = briefingModule.createTargetBriefingApiClient({ request: (url, options) => fetch(url, options) });
 
   function clearBriefingData() {
@@ -1981,76 +1988,634 @@
     elements.view.replaceChildren(...content);
   }
 
-  function renderSourceLibrary() {
-    elements.view.replaceChildren(
-      node('p', { className: 'notice', text: 'Source lists show safe metadata only. Full Source content is returned only for an explicitly selected Source.' }),
-      recordList(state.workflow?.sources || [], source => [
-        node('div', { className: 'row-head' }, [node('strong', { text: source.title }), badge(source.processingState)]),
-        node('p', { className: 'meta', text: `${source.type} · ${source.date}` }),
-        node('p', { text: `How this Source was added: ${source.provenance}` })
-      ], 'No Sources have been added to this Workspace.')
-    );
+  function sourceMetadata(sourceId) {
+    return (state.workflow?.sources || []).find(source => source.id === sourceId) || null;
   }
 
-  async function reviewFinding(finding, decision) {
+  function selectedReviewWorkItem(workItemId) {
+    return workItemId ? (state.workflow?.workItems || []).find(item => item.id === workItemId) || null : null;
+  }
+
+  function associationControls(initialWorkItemId = null, initialInitiativeId = null) {
+    const workItem = node('select', {}, [
+      option('', 'No Work Item', initialWorkItemId === null),
+      ...(state.workflow?.workItems || []).map(item => option(item.id, `${item.summary} · ${item.id}`, item.id === initialWorkItemId))
+    ]);
+    const initiative = node('select', {}, [
+      option('', 'Unassigned / no Initiative', initialInitiativeId === null),
+      ...(state.workflow?.initiatives || [])
+        .map(item => option(item.id, `${item.name}${item.archived ? ' · archived' : ''} · ${item.id}`, item.id === initialInitiativeId))
+    ]);
+    const sync = () => {
+      const selected = selectedReviewWorkItem(workItem.value);
+      if (selected) {
+        initiative.value = selected.initiativeId || '';
+        initiative.disabled = true;
+      } else {
+        initiative.disabled = false;
+      }
+    };
+    workItem.addEventListener('change', sync);
+    sync();
+    return {
+      workItem,
+      initiative,
+      element: node('div', { className: 'field-group' }, [
+        node('label', { className: 'field' }, [node('span', { text: 'Work Item association' }), workItem]),
+        node('label', { className: 'field' }, [node('span', { text: 'Initiative association' }), initiative])
+      ])
+    };
+  }
+
+  async function openSourceDetail(source) {
     const token = workspaceOperationToken();
-    const revision = state.workflow.revision;
-    const approved = await confirmAction(
-      `${decision === 'accept' ? 'Accept Finding as Evidence' : 'Reject Finding'}`,
-      [
-        node('p', { text: finding.exactExcerpt }),
-        node('p', { className: 'notice', text: decision === 'accept'
-          ? 'Acceptance creates historical Evidence. It does not modify Work Item current state.'
-          : 'Rejection creates no Evidence and does not modify Work Item current state.' })
-      ],
-      decision === 'accept' ? 'Accept Finding' : 'Reject Finding'
-    );
+    setStatus('Opening the explicitly selected Source…');
+    try {
+      const result = await evidenceReviewApi.openSource(token.organizationId, token.workspaceId, source.id);
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.sourceDetail = evidenceReviewModule.validateSourceDetail(
+        result,
+        token.organizationId,
+        token.workspaceId,
+        source.id,
+        state.workflow.revision
+      );
+      state.evidenceReview.sourceRevision = result.revision;
+      state.evidenceReview.excerptSelection = null;
+      state.evidenceReview.lastCreatedFindingId = null;
+      renderSourceLibrary();
+      document.getElementById('source-detail-panel')?.focus();
+      setStatus('Source opened for read-only exact-excerpt selection. No Finding or Evidence was created.', 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.sourceDetail = null;
+      state.evidenceReview.sourceRevision = null;
+      state.evidenceReview.excerptSelection = null;
+      if (error.code === 'REVISION_CONFLICT') {
+        try {
+          state.workflow = null;
+          await loadWorkflow();
+          if (workspaceOperationCurrent(token)) renderSourceLibrary();
+        } catch (refreshError) {
+          if (workspaceOperationCurrent(token)) setStatus(refreshError.message, 'error');
+          return;
+        }
+      }
+      if (workspaceOperationCurrent(token)) setStatus(error.message, 'error');
+    }
+  }
+
+  async function submitSourceExcerpt(controls) {
+    const token = workspaceOperationToken();
+    const source = state.evidenceReview.sourceDetail;
+    const selection = state.evidenceReview.excerptSelection;
+    if (!source || !selection) {
+      setStatus('Select an exact Source excerpt first.', 'error');
+      return;
+    }
+    const workItem = selectedReviewWorkItem(controls.associations.workItem.value);
+    const initiativeId = controls.associations.initiative.value || null;
+    let association;
+    try {
+      association = evidenceReviewModule.explicitFindingAssociation(workItem, initiativeId);
+      if (!controls.category.value.trim()) throw new Error('Finding category is required.');
+    } catch (error) {
+      setStatus(error.message, 'error');
+      return;
+    }
+    const approved = await confirmAction('Create pending Finding from exact excerpt', [
+      node('blockquote', { className: 'long-text', text: selection.exactExcerpt }),
+      node('p', { text: `Category: ${controls.category.value.trim()} · Currentness: ${controls.currentness.value}` }),
+      node('p', { text: `Work Item: ${association.workItemId || 'none'} · Initiative: ${association.initiativeId || 'Unassigned'}` }),
+      node('p', { className: 'notice', text: 'This creates a pending Finding only. It does not accept Evidence or change Work Item current state.' })
+    ], 'Create pending Finding');
     if (!approved || !workspaceOperationCurrent(token)) return;
     try {
-      await requestJson(`/api/v2/organizations/${encoded(token.organizationId)}/workspaces/${encoded(token.workspaceId)}/findings/${encoded(finding.id)}/review`, mutationOptions({
-        expectedRevision: revision,
+      const result = await evidenceReviewApi.createSourceFinding(token.organizationId, token.workspaceId, source.id, {
+        expectedRevision: state.evidenceReview.sourceRevision,
         actor: 'local-target-ui',
-        decision
-      }));
+        finding: {
+          ...selection,
+          category: controls.category.value.trim(),
+          currentness: controls.currentness.value,
+          proposedWorkItemId: association.workItemId,
+          proposedInitiativeId: association.initiativeId
+        }
+      });
       if (!workspaceOperationCurrent(token)) return;
       state.workflow = null;
       invalidateTriageData();
+      state.evidenceReview.sourceDetail = null;
+      state.evidenceReview.sourceRevision = null;
+      state.evidenceReview.excerptSelection = null;
       await loadWorkflow();
       if (!workspaceOperationCurrent(token)) return;
-      renderReview();
-      setStatus(`Finding ${decision === 'accept' ? 'accepted as Evidence' : 'rejected'} and refreshed.`, 'success');
+      state.evidenceReview.lastCreatedFindingId = result.body.finding.id;
+      renderSourceLibrary();
+      setStatus('Pending Finding created and Workspace state refreshed. Evidence and current state remain unchanged.', 'success');
     } catch (error) {
       if (!workspaceOperationCurrent(token)) return;
+      if (['REVISION_CONFLICT', 'PREVIEW_CONFLICT'].includes(error.code)) {
+        state.evidenceReview.sourceDetail = null;
+        state.evidenceReview.sourceRevision = null;
+        state.evidenceReview.excerptSelection = null;
+        state.workflow = null;
+        await loadWorkflow();
+        if (workspaceOperationCurrent(token)) renderSourceLibrary();
+      }
       setStatus(error.message, 'error');
     }
   }
 
-  function renderReview() {
-    const findings = (state.workflow?.findings || []).filter(item => item.reviewStatus === 'pending');
-    const changes = (state.workflow?.proposedChanges || []).filter(item => item.reviewStatus === 'pending');
-    elements.view.replaceChildren(node('div', { className: 'card-grid' }, [
-      node('section', { className: 'card' }, [
-        node('h2', { text: 'Findings' }),
-        node('p', { className: 'meta', text: 'Findings to review are not Evidence until accepted.' }),
-        recordList(findings, finding => [
-          node('blockquote', { text: finding.exactExcerpt }),
-          node('p', { className: 'meta', text: `Source ${finding.sourceId} · Work Item ${finding.proposedWorkItemId || 'not selected'} · ${finding.proposedInitiativeId ? `Initiative ${finding.proposedInitiativeId}` : 'Initiative not selected'}` }),
-          node('div', { className: 'actions' }, [
-            node('button', { className: 'button primary', type: 'button', text: 'Accept as Evidence', on: { click: () => reviewFinding(finding, 'accept') } }),
-            node('button', { className: 'button secondary', type: 'button', text: 'Reject', on: { click: () => reviewFinding(finding, 'reject') } })
-          ])
-        ], 'No Findings to review.')
+  function sourceDetailPanel() {
+    const source = state.evidenceReview.sourceDetail;
+    if (!source) return null;
+    const content = node('textarea', {
+      value: source.content,
+      attrs: { readonly: 'readonly', rows: '18', 'aria-label': `Read-only Source content for ${source.title}` }
+    });
+    const category = node('input', { value: 'status', attrs: { maxlength: '100', required: 'required' } });
+    const currentness = node('select', {}, evidenceReviewModule.FINDING_CURRENTNESS.map(value => option(value, value, value === 'unknown')));
+    const associations = associationControls(null, null);
+    const selection = state.evidenceReview.excerptSelection;
+    const controls = { category, currentness, associations };
+    const panel = node('section', { id: 'source-detail-panel', className: 'panel source-detail-panel', attrs: { tabindex: '-1' } }, [
+      node('div', { className: 'row-head' }, [node('h2', { text: source.title }), badge('Untrusted Source claim', 'muted-badge')]),
+      node('p', { className: 'meta', text: `${source.type} · ${source.date} · ${source.id}` }),
+      node('p', { text: `How this Source was added: ${source.provenance}` }),
+      node('p', { className: 'notice', text: 'Source text is untrusted. Select only the exact excerpt that should become a pending Finding.' }),
+      node('label', { className: 'field source-content-field' }, [node('span', { text: 'Read-only Source content' }), content]),
+      node('div', { className: 'actions' }, [
+        node('button', { className: 'button secondary', type: 'button', text: 'Use selected exact excerpt', disabled: source.content.length === 0, on: { click: () => {
+          try {
+            state.evidenceReview.excerptSelection = evidenceReviewModule.exactExcerptSelection(source.content, content.selectionStart, content.selectionEnd);
+            renderSourceLibrary();
+            setStatus('Exact excerpt selected. Review the pending Finding details before creating it.', 'success');
+          } catch (error) {
+            setStatus(error.message, 'error');
+          }
+        } } }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Close Source', on: { click: () => {
+          state.evidenceReview.sourceDetail = null;
+          state.evidenceReview.sourceRevision = null;
+          state.evidenceReview.excerptSelection = null;
+          renderSourceLibrary();
+        } } })
       ]),
-      node('section', { className: 'card' }, [
-        node('h2', { text: 'Proposed changes' }),
-        node('p', { className: 'meta', text: 'A Proposed Change requires its own review and stale-state check before it can modify local current state.' }),
-        recordList(changes, change => [
-          node('strong', { text: change.field }),
-          node('p', { text: `Work Item ${change.workItemId}` }),
-          node('p', { className: 'meta', text: 'Open the Work Item workflow to preview exact current and proposed values.' })
-        ], 'No Proposed changes are awaiting review.')
+      selection ? node('section', { className: 'excerpt-review' }, [
+        node('h3', { text: 'Pending Finding review' }),
+        node('blockquote', { className: 'long-text', text: selection.exactExcerpt }),
+        node('p', { className: 'meta', text: `UTF-16 offsets ${selection.startOffset}–${selection.endOffset}` }),
+        node('div', { className: 'field-group' }, [
+          node('label', { className: 'field' }, [node('span', { text: 'Category' }), category]),
+          node('label', { className: 'field' }, [node('span', { text: 'Source claim currentness' }), currentness])
+        ]),
+        associations.element,
+        node('p', { className: 'notice', text: 'Creates a pending Finding only. Evidence acceptance and current-state changes are separate reviews.' }),
+        node('button', { className: 'button primary', type: 'button', text: 'Review pending Finding creation', on: { click: () => submitSourceExcerpt(controls) } })
+      ]) : empty(source.content.length === 0 ? 'This Source has no selectable content.' : 'Select text in the read-only Source content, then use the exact excerpt button.')
+    ]);
+    return panel;
+  }
+
+  function renderSourceLibrary() {
+    const outcome = state.evidenceReview.lastCreatedFindingId
+      ? node('section', { className: 'panel evidence-outcome-panel' }, [
+        node('p', { text: `Pending Finding created: ${state.evidenceReview.lastCreatedFindingId}` }),
+        node('button', { className: 'button primary', type: 'button', text: 'Open Review', on: { click: () => activateView('review') } })
       ])
-    ]));
+      : null;
+    elements.view.replaceChildren(...[
+      node('p', { className: 'notice', text: 'Source lists show safe metadata only. Full Source content is returned only after you explicitly open one Source.' }),
+      outcome,
+      node('div', { className: `source-library-layout${state.evidenceReview.sourceDetail ? ' detail-open' : ''}` }, [
+        recordList(state.workflow?.sources || [], source => [
+          node('div', { className: 'row-head' }, [node('strong', { text: source.title }), badge(source.processingState)]),
+          node('p', { className: 'meta', text: `${source.type} · ${source.date} · ${source.id}` }),
+          node('p', { text: `How this Source was added: ${source.provenance}` }),
+          node('button', { className: 'button secondary', type: 'button', text: 'Open Source', on: { click: () => openSourceDetail(source) } })
+        ], 'No Sources have been added to this Workspace.'),
+        sourceDetailPanel()
+      ])
+    ].filter(Boolean));
+  }
+
+  async function loadPendingFindingPage(page = state.evidenceReview.findingPage.page) {
+    const token = workspaceOperationToken();
+    const result = await evidenceReviewApi.listFindings(token.organizationId, token.workspaceId, page);
+    if (!workspaceOperationCurrent(token)) return false;
+    if (result.revision !== state.workflow.revision) {
+      const error = new Error('Priorena data changed while the Finding review queue was loading');
+      error.code = 'REVISION_CONFLICT';
+      throw error;
+    }
+    const body = result.body;
+    if (!Array.isArray(body.findings) || body.findings.some(finding => finding.organizationId !== token.organizationId || finding.workspaceId !== token.workspaceId)) {
+      throw new Error('Finding review response crossed its validated parent context');
+    }
+    state.evidenceReview.findingPage = { ...body, revision: result.revision };
+    return true;
+  }
+
+  async function refreshEvidenceReview(token, message) {
+    state.workflow = null;
+    invalidateTriageData();
+    state.evidenceReview.sourceDetail = null;
+    state.evidenceReview.sourceRevision = null;
+    state.evidenceReview.excerptSelection = null;
+    state.evidenceReview.proposedDraft = null;
+    state.evidenceReview.proposedPreview = null;
+    await loadWorkflow();
+    if (!workspaceOperationCurrent(token)) return;
+    let page = state.evidenceReview.findingPage.page;
+    await loadPendingFindingPage(page);
+    if (page > 1 && state.evidenceReview.findingPage.findings.length === 0) {
+      page -= 1;
+      await loadPendingFindingPage(page);
+    }
+    if (!workspaceOperationCurrent(token)) return;
+    await renderReview();
+    setStatus(message, 'success');
+  }
+
+  async function reviewFinding(finding, decision, controls = null) {
+    const token = workspaceOperationToken();
+    let reviewed = null;
+    if (decision === 'accept') {
+      try {
+        const workItem = selectedReviewWorkItem(controls.associations.workItem.value);
+        reviewed = evidenceReviewModule.findingAcceptance(
+          controls.currentness.value,
+          workItem,
+          controls.associations.initiative.value || null
+        );
+      } catch (error) {
+        setStatus(error.message, 'error');
+        return;
+      }
+    }
+    const source = sourceMetadata(finding.sourceId);
+    const approved = await confirmAction(
+      decision === 'accept' ? 'Accept Finding as Evidence' : 'Reject Finding',
+      [
+        node('p', { text: `${source?.title || 'Selected Source'} · ${source?.date || 'date unavailable'} · ${source?.type || 'type unavailable'}` }),
+        node('blockquote', { className: 'long-text', text: finding.exactExcerpt }),
+        reviewed ? node('p', { text: `Reviewed currentness: ${reviewed.currentness} · Work Item: ${reviewed.workItemId || 'none'} · Initiative: ${reviewed.initiativeId || 'Unassigned'}` }) : null,
+        node('p', { className: 'notice', text: decision === 'accept'
+          ? 'Acceptance creates attributable Evidence. It does not modify Work Item current state or create a Proposed Change.'
+          : 'Rejection creates no Evidence and does not modify Work Item current state.' })
+      ].filter(Boolean),
+      decision === 'accept' ? 'Accept as Evidence' : 'Reject Finding'
+    );
+    if (!approved || !workspaceOperationCurrent(token)) return;
+    try {
+      await evidenceReviewApi.reviewFinding(token.organizationId, token.workspaceId, finding.id, {
+        expectedRevision: state.workflow.revision,
+        actor: 'local-target-ui',
+        decision,
+        ...(reviewed || {})
+      });
+      if (!workspaceOperationCurrent(token)) return;
+      await refreshEvidenceReview(token, `Finding ${decision === 'accept' ? 'accepted as Evidence' : 'rejected'} and Workspace state refreshed.`);
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      if (['REVISION_CONFLICT', 'PREVIEW_CONFLICT'].includes(error.code)) {
+        state.evidenceReview.proposedPreview = null;
+        state.workflow = null;
+        await loadWorkflow();
+        if (workspaceOperationCurrent(token)) await renderReview();
+      }
+      setStatus(error.message, 'error');
+    }
+  }
+
+  function pendingFindingCard(finding) {
+    const source = sourceMetadata(finding.sourceId);
+    const associations = associationControls(finding.proposedWorkItemId, finding.proposedInitiativeId);
+    const currentness = node('select', {}, evidenceReviewModule.FINDING_CURRENTNESS.map(value => option(value, value, value === finding.currentness)));
+    const controls = { associations, currentness };
+    return [
+      node('div', { className: 'row-head' }, [node('strong', { text: source?.title || 'Source unavailable' }), badge('Pending Finding', 'muted-badge')]),
+      node('p', { className: 'meta', text: `${source?.date || 'Date unavailable'} · ${source?.type || 'Type unavailable'} · Source ${finding.sourceId} · Finding ${finding.id}` }),
+      node('p', { text: `Source provenance: ${source?.provenance || 'Unavailable'}` }),
+      node('blockquote', { className: 'long-text', text: finding.exactExcerpt }),
+      node('p', { className: 'meta', text: `Category: ${finding.category} · Source claim currentness: ${finding.currentness} · Proposed Work Item: ${finding.proposedWorkItemId || 'none'} · Proposed Initiative: ${finding.proposedInitiativeId || 'Unassigned'}` }),
+      node('label', { className: 'field' }, [node('span', { text: 'Reviewed currentness' }), currentness]),
+      associations.element,
+      node('p', { className: 'notice', text: 'Acceptance creates Evidence only. A separate Proposed Change review is required before canonical current state can change.' }),
+      node('div', { className: 'actions' }, [
+        node('button', { className: 'button primary', type: 'button', text: 'Review Evidence acceptance', on: { click: () => reviewFinding(finding, 'accept', controls) } }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Reject Finding', on: { click: () => reviewFinding(finding, 'reject') } })
+      ])
+    ];
+  }
+
+  function startProposedChange(evidence) {
+    state.evidenceReview.proposedDraft = {
+      findingId: evidence.findingId,
+      evidenceIds: [evidence.id],
+      workItemId: evidence.workItemId || '',
+      field: 'canonicalStatus',
+      rawValue: ''
+    };
+    state.evidenceReview.proposedPreview = null;
+    renderReview().then(() => document.getElementById('proposed-change-composer')?.focus())
+      .catch(error => setStatus(error.message, 'error'));
+  }
+
+  function invalidateProposedPreview() {
+    state.evidenceReview.proposedPreview = null;
+    elements.view.querySelector('.proposed-preview-panel')?.remove();
+  }
+
+  function proposedFieldLabel(field) {
+    return field.replace(/([A-Z])/g, ' $1').replace(/^./, value => value.toUpperCase());
+  }
+
+  async function previewProposedChange() {
+    const token = workspaceOperationToken();
+    const draft = state.evidenceReview.proposedDraft;
+    try {
+      const workItem = selectedReviewWorkItem(draft.workItemId);
+      const change = evidenceReviewModule.buildProposedChange(
+        draft.findingId,
+        draft.evidenceIds,
+        workItem,
+        draft.field,
+        draft.rawValue,
+        state.workflow.evidence
+      );
+      const result = await evidenceReviewApi.previewProposedChange(token.organizationId, token.workspaceId, { change });
+      if (!workspaceOperationCurrent(token)) return;
+      if (result.body.preview.expectedRevision !== state.workflow.revision) throw new Error('Priorena data changed before Proposed Change preview');
+      state.evidenceReview.proposedPreview = result.body.preview;
+      await renderReview();
+      setStatus('Write-free Proposed Change preview ready. No current state changed.', 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.proposedPreview = null;
+      setStatus(error.message, 'error');
+    }
+  }
+
+  async function createProposedChangeFromPreview() {
+    const token = workspaceOperationToken();
+    const preview = state.evidenceReview.proposedPreview;
+    if (!preview) return;
+    const approved = await confirmAction('Create pending Proposed Change', [
+      node('p', { text: `Work Item ${preview.workItemId} · ${proposedFieldLabel(preview.field)}` }),
+      node('p', { text: `Current: ${evidenceReviewModule.valueLabel(preview.beforeValue)}` }),
+      node('p', { text: `Proposed: ${evidenceReviewModule.valueLabel(preview.proposedValue)}` }),
+      node('p', { className: 'meta', text: `Evidence: ${preview.evidenceIds.join(', ')} · Preview hash: ${preview.previewHash}` }),
+      node('p', { className: 'notice', text: 'This creates a pending Proposed Change only. It does not approve or apply the change.' })
+    ], 'Create pending Proposed Change');
+    if (!approved || !workspaceOperationCurrent(token)) return;
+    try {
+      const draft = state.evidenceReview.proposedDraft;
+      const workItem = selectedReviewWorkItem(draft.workItemId);
+      const change = evidenceReviewModule.buildProposedChange(
+        draft.findingId,
+        draft.evidenceIds,
+        workItem,
+        draft.field,
+        draft.rawValue,
+        state.workflow.evidence
+      );
+      await evidenceReviewApi.createProposedChange(token.organizationId, token.workspaceId, {
+        expectedRevision: preview.expectedRevision,
+        actor: 'local-target-ui',
+        change,
+        previewHash: preview.previewHash
+      });
+      if (!workspaceOperationCurrent(token)) return;
+      await refreshEvidenceReview(token, 'Pending Proposed Change created. Approval and application remain separate.');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.proposedPreview = null;
+      if (['REVISION_CONFLICT', 'PREVIEW_CONFLICT'].includes(error.code)) {
+        state.evidenceReview.proposedDraft = null;
+        state.workflow = null;
+        await loadWorkflow();
+        if (workspaceOperationCurrent(token)) await renderReview();
+      }
+      setStatus(error.message, 'error');
+    }
+  }
+
+  function proposedChangeComposer() {
+    const draft = state.evidenceReview.proposedDraft;
+    if (!draft) return null;
+    const workItemSelect = node('select', {}, [
+      option('', 'Choose a Work Item', !draft.workItemId),
+      ...(state.workflow?.workItems || []).map(item => option(item.id, `${item.summary} · ${item.id}`, item.id === draft.workItemId))
+    ]);
+    workItemSelect.addEventListener('change', () => {
+      draft.workItemId = workItemSelect.value;
+      const selected = selectedReviewWorkItem(draft.workItemId);
+      draft.evidenceIds = draft.evidenceIds.filter(id => {
+        const evidence = state.workflow.evidence.find(item => item.id === id);
+        return selected && evidenceReviewModule.evidenceCompatibleWithWorkItem(evidence, selected);
+      });
+      state.evidenceReview.proposedPreview = null;
+      renderReview().catch(error => setStatus(error.message, 'error'));
+    });
+    const selectedWorkItem = selectedReviewWorkItem(draft.workItemId);
+    const evidenceChoices = selectedWorkItem
+      ? state.workflow.evidence.filter(item => evidenceReviewModule.evidenceCompatibleWithWorkItem(item, selectedWorkItem))
+      : [];
+    const field = node('select', {}, evidenceReviewModule.PROPOSED_CHANGE_FIELDS.map(value => option(value, proposedFieldLabel(value), value === draft.field)));
+    field.addEventListener('change', () => {
+      draft.field = field.value;
+      draft.rawValue = field.value === 'currentStateConfidence' ? 'unknown' : '';
+      state.evidenceReview.proposedPreview = null;
+      renderReview().catch(error => setStatus(error.message, 'error'));
+    });
+    const maximum = draft.field === 'currentStateProvenance' ? 500 : (['assignee', 'sprint'].includes(draft.field) ? 300 : 200);
+    const value = draft.field === 'currentStateConfidence'
+      ? node('select', {}, ['confirmed', 'inferred', 'unknown'].map(item => option(item, item, item === draft.rawValue)))
+      : node('input', { value: draft.rawValue, attrs: { maxlength: String(maximum), placeholder: draft.field === 'lastCapturedCommentAt' ? '2026-08-26T12:00:00.000Z or empty' : 'Proposed value' } });
+    value.addEventListener('input', () => {
+      draft.rawValue = value.value;
+      invalidateProposedPreview();
+    });
+    const preview = state.evidenceReview.proposedPreview;
+    return node('section', { id: 'proposed-change-composer', className: 'panel proposed-change-composer', attrs: { tabindex: '-1' } }, [
+      node('div', { className: 'row-head' }, [node('h2', { text: 'Create Proposed Change' }), badge('Separate current-state review')]),
+      node('p', { className: 'notice', text: 'Accepted Evidence remains historical. Preview, create, approve, and apply are distinct actions.' }),
+      node('label', { className: 'field' }, [node('span', { text: 'Exact Work Item' }), workItemSelect]),
+      node('fieldset', { className: 'choice-group' }, [
+        node('legend', { text: 'Compatible accepted Evidence' }),
+        evidenceChoices.length ? node('div', { className: 'candidate-list' }, evidenceChoices.map(item => {
+          const source = sourceMetadata(item.sourceId);
+          const checkbox = node('input', { type: 'checkbox', checked: draft.evidenceIds.includes(item.id) });
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked && !draft.evidenceIds.includes(item.id)) draft.evidenceIds.push(item.id);
+            if (!checkbox.checked) draft.evidenceIds = draft.evidenceIds.filter(id => id !== item.id);
+            invalidateProposedPreview();
+          });
+          return node('label', { className: 'candidate' }, [checkbox, node('span', {}, [
+            node('strong', { text: `${source?.title || 'Source'} · ${item.id}` }),
+            node('span', { className: 'long-text', text: item.exactExcerpt }),
+            node('small', { text: `Finding ${item.findingId} · ${item.currentness} · accepted ${dateLabel(item.acceptedAt)} by ${item.acceptedBy}` })
+          ])]);
+        })) : empty('Choose a Work Item to see compatible Evidence.')
+      ]),
+      node('div', { className: 'field-group' }, [
+        node('label', { className: 'field' }, [node('span', { text: 'Current-state field' }), field]),
+        node('label', { className: 'field' }, [node('span', { text: 'Typed proposed value' }), value])
+      ]),
+      node('button', { className: 'button secondary', type: 'button', text: 'Preview without writing', disabled: !selectedWorkItem, on: { click: previewProposedChange } }),
+      preview ? node('section', { className: 'proposed-preview-panel' }, [
+        node('h3', { text: 'Write-free preview' }),
+        node('p', { text: `Current: ${evidenceReviewModule.valueLabel(preview.beforeValue)}` }),
+        node('p', { text: `Proposed: ${evidenceReviewModule.valueLabel(preview.proposedValue)}` }),
+        node('p', { className: 'meta', text: `Revision ${preview.expectedRevision} · SHA-256 ${preview.previewHash}` }),
+        node('p', { className: 'meta', text: `Evidence provenance: ${preview.evidenceIds.join(', ')}` }),
+        node('button', { className: 'button primary', type: 'button', text: 'Review pending Proposed Change creation', on: { click: createProposedChangeFromPreview } })
+      ]) : null
+    ]);
+  }
+
+  async function reviewProposedChange(change, decision) {
+    const token = workspaceOperationToken();
+    const approved = await confirmAction(`${decision === 'approve' ? 'Approve' : 'Reject'} Proposed Change`, [
+      node('p', { text: `Work Item ${change.workItemId} · ${proposedFieldLabel(change.field)}` }),
+      node('p', { text: `Current snapshot: ${evidenceReviewModule.valueLabel(change.beforeValue)}` }),
+      node('p', { text: `Proposed: ${evidenceReviewModule.valueLabel(change.proposedValue)}` }),
+      node('p', { className: 'notice', text: decision === 'approve'
+        ? 'Approval does not apply the change. Application remains a separate revision-bound action.'
+        : 'Rejection leaves Work Item current state and Evidence unchanged.' })
+    ], decision === 'approve' ? 'Approve only' : 'Reject Proposed Change');
+    if (!approved || !workspaceOperationCurrent(token)) return;
+    try {
+      await evidenceReviewApi.reviewProposedChange(token.organizationId, token.workspaceId, change.id, {
+        expectedRevision: state.workflow.revision,
+        actor: 'local-target-ui',
+        decision
+      });
+      if (!workspaceOperationCurrent(token)) return;
+      await refreshEvidenceReview(token, `Proposed Change ${decision === 'approve' ? 'approved but not applied' : 'rejected'}.`);
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.proposedPreview = null;
+      setStatus(error.message, 'error');
+    }
+  }
+
+  async function applyProposedChange(change) {
+    const token = workspaceOperationToken();
+    const approved = await confirmAction('Apply approved Proposed Change', [
+      node('p', { text: `Work Item ${change.workItemId} · ${proposedFieldLabel(change.field)}` }),
+      node('p', { text: `Exact current snapshot: ${evidenceReviewModule.valueLabel(change.beforeValue)}` }),
+      node('p', { text: `Exact applied value: ${evidenceReviewModule.valueLabel(change.proposedValue)}` }),
+      node('p', { className: 'meta', text: `Evidence preserved unchanged: ${change.evidenceIds.join(', ')}` }),
+      node('p', { className: 'notice', text: 'Apply changes exactly one canonical Work Item field. Evidence content, provenance, acceptance, and currentness remain unchanged.' })
+    ], 'Apply exact current-state change');
+    if (!approved || !workspaceOperationCurrent(token)) return;
+    try {
+      await evidenceReviewApi.applyProposedChange(token.organizationId, token.workspaceId, change.id, {
+        expectedRevision: state.workflow.revision,
+        actor: 'local-target-ui',
+        previewHash: change.snapshotHash
+      });
+      if (!workspaceOperationCurrent(token)) return;
+      await refreshEvidenceReview(token, 'Approved Proposed Change applied to exactly one Work Item field; Evidence remained unchanged.');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.proposedPreview = null;
+      state.evidenceReview.proposedDraft = null;
+      if (error.code === 'PREVIEW_CONFLICT') state.evidenceReview.staleProposedChangeIds.add(change.id);
+      if (['REVISION_CONFLICT', 'PREVIEW_CONFLICT'].includes(error.code)) {
+        state.workflow = null;
+        await loadWorkflow();
+        if (workspaceOperationCurrent(token)) await renderReview();
+      }
+      setStatus(error.code === 'PREVIEW_CONFLICT'
+        ? 'The Proposed Change is stale. Review current state and create a fresh write-free preview.'
+        : error.message, 'error');
+    }
+  }
+
+  function proposedChangeCard(change) {
+    const workItem = selectedReviewWorkItem(change.workItemId);
+    const stale = state.evidenceReview.staleProposedChangeIds.has(change.id);
+    return [
+      node('div', { className: 'row-head' }, [
+        node('strong', { text: `${proposedFieldLabel(change.field)} · ${workItem?.summary || change.workItemId}` }),
+        badge(stale ? 'stale' : change.reviewStatus, stale || change.reviewStatus === 'rejected' ? 'risk-badge' : '')
+      ]),
+      node('p', { text: `Current snapshot: ${evidenceReviewModule.valueLabel(change.beforeValue)}` }),
+      node('p', { text: `Proposed value: ${evidenceReviewModule.valueLabel(change.proposedValue)}` }),
+      node('p', { className: 'meta', text: `Proposed Change ${change.id} · Finding ${change.findingId} · Evidence ${change.evidenceIds.join(', ')}` }),
+      change.reviewStatus === 'pending' ? node('div', { className: 'actions' }, [
+        node('button', { className: 'button primary', type: 'button', text: 'Approve only', on: { click: () => reviewProposedChange(change, 'approve') } }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Reject', on: { click: () => reviewProposedChange(change, 'reject') } })
+      ]) : null,
+      change.reviewStatus === 'approved' && !stale
+        ? node('button', { className: 'button primary', type: 'button', text: 'Review exact apply', on: { click: () => applyProposedChange(change) } })
+        : null,
+      ['applied', 'rejected'].includes(change.reviewStatus) || stale
+        ? node('p', { className: 'meta', text: stale ? 'This stale record is read-only. Create a fresh preview to propose current state again.' : 'This completed review record is read-only.' })
+        : null
+    ];
+  }
+
+  function acceptedEvidenceCard(evidence) {
+    const source = sourceMetadata(evidence.sourceId);
+    return [
+      node('div', { className: 'row-head' }, [node('strong', { text: source?.title || 'Source unavailable' }), badge('Accepted Evidence')]),
+      node('p', { className: 'meta', text: `${source?.date || evidence.sourceDate} · ${source?.type || 'Type unavailable'} · Source ${evidence.sourceId} · Finding ${evidence.findingId} · Evidence ${evidence.id}` }),
+      node('blockquote', { className: 'long-text', text: evidence.exactExcerpt }),
+      node('p', { text: `Source provenance: ${source?.provenance || 'Unavailable'}` }),
+      node('p', { className: 'meta', text: `Accepted ${dateLabel(evidence.acceptedAt)} by ${evidence.acceptedBy} · Currentness: ${evidence.currentness} · Work Item: ${evidence.workItemId || 'none'} · Initiative: ${evidence.initiativeId || 'Unassigned'}` }),
+      node('button', { className: 'button secondary', type: 'button', text: 'Start Proposed Change', on: { click: () => startProposedChange(evidence) } })
+    ];
+  }
+
+  async function renderReview() {
+    const token = workspaceOperationToken();
+    if (state.evidenceReview.findingPage.revision !== state.workflow?.revision) {
+      const loaded = await loadPendingFindingPage(state.evidenceReview.findingPage.page);
+      if (!loaded || !workspaceOperationCurrent(token) || state.activeView !== 'review') return;
+    }
+    const page = state.evidenceReview.findingPage;
+    const pageCount = Math.max(1, Math.ceil(page.total / page.pageSize));
+    const findingSection = node('section', { className: 'panel finding-review-panel' }, [
+      node('div', { className: 'row-head' }, [node('h2', { text: 'Pending Findings' }), badge(`${page.total} pending`)]),
+      node('p', { className: 'notice', text: 'Findings remain untrusted until you explicitly review currentness and final associations. Acceptance creates Evidence only.' }),
+      recordList(page.findings, pendingFindingCard, 'No pending Findings on this page.'),
+      node('nav', { className: 'review-pagination', attrs: { 'aria-label': 'Pending Finding pages' } }, [
+        node('button', { className: 'button secondary', type: 'button', text: 'Previous', disabled: page.page <= 1, on: { click: async () => {
+          try {
+            const loaded = await loadPendingFindingPage(page.page - 1);
+            if (!loaded) return;
+            await renderReview();
+            setStatus(`Pending Finding page ${state.evidenceReview.findingPage.page} loaded.`, 'success');
+          } catch (error) { setStatus(error.message, 'error'); }
+        } } }),
+        node('span', { text: `Page ${page.page} of ${pageCount} · ${page.pageSize} per page` }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Next', disabled: page.page >= pageCount, on: { click: async () => {
+          try {
+            const loaded = await loadPendingFindingPage(page.page + 1);
+            if (!loaded) return;
+            await renderReview();
+            setStatus(`Pending Finding page ${state.evidenceReview.findingPage.page} loaded.`, 'success');
+          } catch (error) { setStatus(error.message, 'error'); }
+        } } })
+      ])
+    ]);
+    const evidenceSection = node('section', { className: 'panel evidence-review-panel' }, [
+      node('h2', { text: 'Accepted Evidence' }),
+      node('p', { className: 'meta', text: 'Evidence preserves exact Source and Finding provenance. It does not assert or update canonical current state by itself.' }),
+      recordList(state.workflow?.evidence || [], acceptedEvidenceCard, 'No accepted Evidence exists in this Workspace.')
+    ]);
+    const proposedSection = node('section', { className: 'panel proposed-change-review-panel' }, [
+      node('h2', { text: 'Proposed Changes' }),
+      node('p', { className: 'notice', text: 'Preview, pending creation, approval or rejection, and application are separate revision-aware actions.' }),
+      recordList(state.workflow?.proposedChanges || [], proposedChangeCard, 'No Proposed Changes exist in this Workspace.')
+    ]);
+    if (!workspaceOperationCurrent(token) || state.activeView !== 'review') return;
+    elements.view.replaceChildren(...[findingSection, evidenceSection, proposedChangeComposer(), proposedSection].filter(Boolean));
   }
 
   function renderSearch() {
@@ -3049,7 +3614,7 @@
           if (state.activeView === 'add-source') elements.view.replaceChildren(sourceForm());
           if (state.activeView === 'import-feed') await renderImportFeed();
           if (state.activeView === 'source-library') renderSourceLibrary();
-          if (state.activeView === 'review') renderReview();
+          if (state.activeView === 'review') await renderReview();
           if (state.activeView === 'settings') renderSettings();
         }
       }
@@ -3069,6 +3634,7 @@
     state.workflow = null;
     clearTriageData();
     clearImportFeedData();
+    clearEvidenceReviewData();
     clearBriefingData();
     elements.workspace.disabled = true;
     clearOperationalUi('Loading the selected Organization…');
@@ -3117,6 +3683,7 @@
     state.workflow = null;
     clearTriageData();
     clearImportFeedData();
+    clearEvidenceReviewData();
     clearBriefingData();
     state.selectedWorkItemIds.clear();
     clearOperationalUi('Loading the selected Workspace…');

@@ -28,6 +28,7 @@ const {
 
 const MAX_FINDING_PAGE_SIZE = 100;
 const MAX_FINDING_REVIEW_SELECTION = 100;
+const FINDING_CURRENTNESS = Object.freeze(['current', 'historical', 'contradicted', 'unknown']);
 const SOURCE_TYPES = Object.freeze([
   'meeting-note',
   'sprint-planning',
@@ -120,6 +121,45 @@ function findingInput(value, content, resolvers, context) {
     proposedWorkItemId,
     proposedInitiativeId,
     currentness: value.currentness === undefined ? 'unknown' : requireEnum(value.currentness, ['current', 'historical', 'superseded', 'contradicted', 'unknown']),
+    supersededBy: null
+  };
+}
+
+function sourceFindingInput(value, source, resolvers, context) {
+  exactKeys(value, [
+    'startOffset', 'endOffset', 'exactExcerpt', 'category', 'currentness',
+    'proposedWorkItemId', 'proposedInitiativeId'
+  ], [
+    'startOffset', 'endOffset', 'exactExcerpt', 'category', 'currentness',
+    'proposedWorkItemId', 'proposedInitiativeId'
+  ]);
+  if (typeof source.content !== 'string' || source.content.length === 0) throw invalidRequest();
+  const startOffset = value.startOffset;
+  const endOffset = value.endOffset;
+  if (!Number.isInteger(startOffset) || !Number.isInteger(endOffset) || startOffset < 0 || endOffset <= startOffset || endOffset > source.content.length) {
+    throw invalidRequest();
+  }
+  const exactExcerpt = requireText(value.exactExcerpt, { max: 50_000 });
+  if (source.content.slice(startOffset, endOffset) !== exactExcerpt) throw invalidRequest();
+  const category = requireText(value.category, { max: 100 });
+  if (/\p{Cc}/u.test(category)) throw invalidRequest();
+  const proposedWorkItemId = nullableStableId(value.proposedWorkItemId);
+  const proposedInitiativeId = nullableStableId(value.proposedInitiativeId);
+  const workItem = proposedWorkItemId === null
+    ? null
+    : resolvers.resolveWorkspaceChild('workItems', context.organizationId, context.workspaceId, proposedWorkItemId);
+  if (proposedInitiativeId !== null) {
+    resolvers.resolveWorkspaceChild('initiatives', context.organizationId, context.workspaceId, proposedInitiativeId);
+  }
+  if (workItem && workItem.initiativeId !== proposedInitiativeId) throw invalidRequest();
+  return {
+    exactExcerpt,
+    extractionMethod: 'explicit-source-excerpt',
+    extractionVersion: 'evidence-current-state-v1',
+    category,
+    proposedWorkItemId,
+    proposedInitiativeId,
+    currentness: requireEnum(value.currentness, FINDING_CURRENTNESS),
     supersededBy: null
   };
 }
@@ -302,31 +342,36 @@ function pagination(query = {}) {
 }
 
 function reviewFinding(document, runtime, resolvers, context, selection, actor, timestamp) {
-  exactKeys(selection, ['findingId', 'decision', 'initiativeId', 'workItemId'], ['findingId', 'decision']);
+  exactKeys(selection, ['findingId', 'decision', 'currentness', 'initiativeId', 'workItemId'], ['findingId', 'decision']);
   const finding = resolvers.resolveWorkspaceChild('findings', context.organizationId, context.workspaceId, selection.findingId);
   if (finding.reviewStatus !== 'pending') throw previewConflict();
   const decision = requireEnum(selection.decision, ['accept', 'reject']);
   const before = clone(finding);
   if (decision === 'reject') {
+    exactKeys(selection, ['findingId', 'decision'], ['findingId', 'decision']);
     finding.reviewStatus = 'rejected';
     audit(document, runtime, context, 'finding', finding.id, 'finding-rejected', actor, timestamp, before, finding);
     return { finding: clone(finding), evidence: null };
   }
 
-  const workItemId = selection.workItemId === undefined ? finding.proposedWorkItemId : nullableStableId(selection.workItemId);
-  const initiativeId = selection.initiativeId === undefined ? finding.proposedInitiativeId : nullableStableId(selection.initiativeId);
+  exactKeys(selection, ['findingId', 'decision', 'currentness', 'initiativeId', 'workItemId'], [
+    'findingId', 'decision', 'currentness', 'initiativeId', 'workItemId'
+  ]);
+  const workItemId = nullableStableId(selection.workItemId);
+  const initiativeId = nullableStableId(selection.initiativeId);
+  const currentness = requireEnum(selection.currentness, FINDING_CURRENTNESS);
   let workItem = null;
   if (workItemId !== null) workItem = resolvers.resolveWorkspaceChild('workItems', context.organizationId, context.workspaceId, workItemId);
   if (initiativeId !== null) resolvers.resolveWorkspaceChild('initiatives', context.organizationId, context.workspaceId, initiativeId);
-  if (workItem && initiativeId !== null && workItem.initiativeId !== initiativeId) throw invalidRequest();
-  if (workItem && workItem.initiativeId === null && initiativeId !== null) throw invalidRequest();
+  if (workItem && workItem.initiativeId !== initiativeId) throw invalidRequest();
   if (document.evidence.some(item => item.findingId === finding.id && item.currentness !== 'superseded')) throw previewConflict();
   const source = resolvers.resolveWorkspaceChild('sources', context.organizationId, context.workspaceId, finding.sourceId);
   finding.reviewStatus = 'accepted';
+  finding.currentness = currentness;
   const evidence = {
     id: runtime.id('evidence'), ...context, sourceId: source.id, findingId: finding.id, initiativeId, workItemId,
     exactExcerpt: finding.exactExcerpt, sourceDate: source.date, acceptedAt: timestamp, acceptedBy: actor,
-    currentness: finding.currentness, supersededBy: null
+    currentness, supersededBy: null
   };
   document.evidence.push(evidence);
   resolvers.indexes.evidence.set(evidence.id, evidence);
@@ -403,6 +448,26 @@ function createCaptureServices(options = {}) {
       });
     },
 
+    createSourceFinding(organizationId, workspaceId, sourceId, body) {
+      const request = requestBase(body, ['finding'], ['finding']);
+      return writeWorkflow(targetDataFile, request.expectedRevision, document => {
+        const { resolvers, context } = contextFor(document, organizationId, workspaceId);
+        const source = resolvers.resolveWorkspaceChild('sources', organizationId, workspaceId, sourceId);
+        const values = sourceFindingInput(body.finding, source, resolvers, context);
+        const finding = {
+          id: runtime.id('finding'),
+          ...context,
+          sourceId: source.id,
+          ...values,
+          reviewStatus: 'pending'
+        };
+        const timestamp = runtime.timestamp();
+        document.findings.push(finding);
+        audit(document, runtime, context, 'finding', finding.id, 'finding-created-from-source-excerpt', request.actor, timestamp, null, finding);
+        return { finding: clone(finding) };
+      });
+    },
+
     previewImport(organizationId, workspaceId, body) {
       exactKeys(body, ['input', 'includeSource', 'reviewDecisions'], ['input']);
       const hasReview = Object.hasOwn(body, 'includeSource') || Object.hasOwn(body, 'reviewDecisions');
@@ -452,8 +517,9 @@ function createCaptureServices(options = {}) {
     },
 
     reviewFinding(organizationId, workspaceId, findingId, body) {
-      const request = requestBase(body, ['decision', 'initiativeId', 'workItemId'], ['decision']);
+      const request = requestBase(body, ['decision', 'currentness', 'initiativeId', 'workItemId'], ['decision']);
       const selection = { findingId, decision: body.decision };
+      if (Object.hasOwn(body, 'currentness')) selection.currentness = body.currentness;
       if (Object.hasOwn(body, 'initiativeId')) selection.initiativeId = body.initiativeId;
       if (Object.hasOwn(body, 'workItemId')) selection.workItemId = body.workItemId;
       return writeWorkflow(targetDataFile, request.expectedRevision, document => {
@@ -555,5 +621,6 @@ module.exports = {
   evidenceAssociations,
   reassignWorkItemAndEvidence,
   reviewFinding,
+  sourceFindingInput,
   sourceInput
 };
