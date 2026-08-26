@@ -16,7 +16,11 @@ const {
   MAX_PATH_CHARS,
   MAX_PLIST_BYTES,
   PLUTIL,
+  PUBLIC_FAILURE_PHASES,
+  PUBLIC_FAILURE_STATUSES,
   ROLLBACK_FILE_NAME,
+  SERVICE_CONVERGENCE_ATTEMPTS,
+  SERVICE_CONVERGENCE_INTERVAL_MS,
   SUPPORTED_PORT,
   THROTTLE_INTERVAL_SECONDS,
   generateLaunchAgentDefinition,
@@ -24,6 +28,7 @@ const {
   installAgent,
   parseArguments,
   planAgent,
+  recoverRegistrationAgent,
   removeAgent,
   replaceAgent,
   rollbackAgent,
@@ -34,6 +39,7 @@ const {
 } = require('../scripts/release/startup-resilience');
 
 function createRunner(overrides = {}) {
+  const delayMap = values => new Map(Object.entries(values || {}).map(([key, value]) => [Number(key), value]));
   const state = {
     registered: Boolean(overrides.registered),
     calls: [],
@@ -42,7 +48,10 @@ function createRunner(overrides = {}) {
     bootstrapNoRegister: new Set(overrides.bootstrapNoRegister || []),
     bootoutFailures: new Set(overrides.bootoutFailures || []),
     printFailures: new Set(overrides.printFailures || []),
-    plutilFailures: new Set(overrides.plutilFailures || [])
+    plutilFailures: new Set(overrides.plutilFailures || []),
+    bootstrapVisibilityDelays: delayMap(overrides.bootstrapVisibilityDelays),
+    bootoutVisibilityDelays: delayMap(overrides.bootoutVisibilityDelays),
+    pendingVisibility: undefined
   };
   state.runner = (command, args, options = {}) => {
     state.calls.push({ command, args: [...args], options });
@@ -59,7 +68,14 @@ function createRunner(overrides = {}) {
       if (state.printFailures.has(state.counts.print)) {
         return { status: 5, stdout: '/fictional/private/child-output', stderr: '/fictional/private/launchctl-error' };
       }
-      return state.registered
+      let visibleRegistration = state.registered;
+      if (state.pendingVisibility?.remaining > 0) {
+        visibleRegistration = state.pendingVisibility.value;
+        state.pendingVisibility.remaining -= 1;
+      } else {
+        state.pendingVisibility = undefined;
+      }
+      return visibleRegistration
         ? { status: 0, stdout: '/fictional/private/service-state', stderr: '' }
         : { status: 113, stdout: '', stderr: '/fictional/private/not-found' };
     }
@@ -67,14 +83,26 @@ function createRunner(overrides = {}) {
       if (state.bootstrapFailures.has(state.counts.bootstrap)) {
         return { status: 5, stdout: '/fictional/private/bootstrap-output', stderr: '/fictional/private/bootstrap-error' };
       }
-      if (!state.bootstrapNoRegister.has(state.counts.bootstrap)) state.registered = true;
+      if (!state.bootstrapNoRegister.has(state.counts.bootstrap)) {
+        const priorRegistration = state.registered;
+        state.registered = true;
+        state.pendingVisibility = {
+          remaining: state.bootstrapVisibilityDelays.get(state.counts.bootstrap) || 0,
+          value: priorRegistration
+        };
+      }
       return { status: 0, stdout: '/fictional/private/bootstrap-output', stderr: '' };
     }
     if (action === 'bootout') {
       if (state.bootoutFailures.has(state.counts.bootout)) {
         return { status: 5, stdout: '/fictional/private/bootout-output', stderr: '/fictional/private/bootout-error' };
       }
+      const priorRegistration = state.registered;
       state.registered = false;
+      state.pendingVisibility = {
+        remaining: state.bootoutVisibilityDelays.get(state.counts.bootout) || 0,
+        value: priorRegistration
+      };
       return { status: 0, stdout: '/fictional/private/bootout-output', stderr: '' };
     }
     throw new Error('Unexpected injected command');
@@ -111,11 +139,15 @@ async function harness(t, runnerOptions = {}) {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const launchd = createRunner(runnerOptions);
   const output = [];
+  const sleeps = [];
   const dependencies = {
     platform: 'darwin',
     getuid: () => process.getuid(),
     runner: launchd.runner,
-    stdout: { write: value => output.push(value) }
+    stdout: { write: value => output.push(value) },
+    sleep: async milliseconds => { sleeps.push(milliseconds); },
+    convergenceAttempts: runnerOptions.convergenceAttempts || 3,
+    convergenceIntervalMs: runnerOptions.convergenceIntervalMs ?? 0
   };
   const options = {
     repositoryRoot,
@@ -139,6 +171,7 @@ async function harness(t, runnerOptions = {}) {
     destination: path.join(launchAgentsDirectory, AGENT_FILE_NAME),
     rollback: path.join(launchAgentsDirectory, ROLLBACK_FILE_NAME),
     launchd,
+    sleeps,
     output,
     dependencies,
     options
@@ -162,6 +195,24 @@ function cliArguments(action, context, acknowledgement) {
 
 async function install(context, options = context.options) {
   return installAgent({ ...options, acknowledgement: ACKNOWLEDGEMENTS.install }, context.dependencies);
+}
+
+async function createRecoveryRequiredState(context) {
+  await install(context);
+  const prior = await fs.readFile(context.destination);
+  const replacementOptions = {
+    ...context.options,
+    logFile: path.join(context.privateRoot, 'logs', 'failed-candidate.log')
+  };
+  await assert.rejects(
+    replaceAgent(
+      { ...replacementOptions, acknowledgement: ACKNOWLEDGEMENTS.replace },
+      context.dependencies
+    ),
+    error => error.code === 'STARTUP_REPLACEMENT_ROLLBACK_FAILED'
+  );
+  assert.equal(context.launchd.registered, false);
+  return { prior, replacementOptions };
 }
 
 function assertOnlyExactCommands(context) {
@@ -207,6 +258,11 @@ test('definition generation is deterministic, direct, bounded, and XML-safe', ()
   assert.match(text, /Release &amp; Review/);
   assert.match(text, /node&lt;exact&gt;/);
   assert.doesNotMatch(text, /node<exact>|Source <Library>/);
+  assert.equal(SERVICE_CONVERGENCE_ATTEMPTS, 25);
+  assert.equal(SERVICE_CONVERGENCE_INTERVAL_MS, 200);
+  assert.ok(PUBLIC_FAILURE_PHASES.includes('candidate-bootstrap'));
+  assert.ok(PUBLIC_FAILURE_PHASES.includes('restoration-bootstrap'));
+  assert.ok(PUBLIC_FAILURE_STATUSES.includes('convergence-timeout'));
   const expectedArguments = [
     configuration.nodeExecutable,
     configuration.startPath,
@@ -246,6 +302,10 @@ test('strict CLI parsing rejects duplicates, unsupported flags, malformed values
   assert.throws(() => parseArguments(cliArguments('install', context, 'YES')), error => error.code === 'STARTUP_ACKNOWLEDGEMENT_REQUIRED');
   assert.throws(() => parseArguments(cliArguments('plan', context).map(value => value === context.logFile ? `${value}\n` : value)), error => error.code === 'STARTUP_ARGUMENTS_INVALID');
   assert.equal(parseArguments(cliArguments('install', context, ACKNOWLEDGEMENTS.install)).options.acknowledgement, ACKNOWLEDGEMENTS.install);
+  assert.equal(
+    parseArguments(cliArguments('recover-registration', context, ACKNOWLEDGEMENTS['recover-registration'])).action,
+    'recover-registration'
+  );
 });
 
 test('configuration validation accepts exact private paths and rejects every ambiguous trust boundary', async t => {
@@ -441,15 +501,64 @@ test('replacement preserves prior bytes, uses exact bootout/bootstrap targeting,
   assertOnlyExactCommands(context);
 });
 
-test('replacement write, bootstrap, and verification failures restore prior bytes and registration', async t => {
+test('service transitions poll delayed registration state without repeating bootout or bootstrap', async t => {
+  const context = await harness(t, {
+    bootoutVisibilityDelays: { 1: 2 },
+    bootstrapVisibilityDelays: { 2: 2 },
+    convergenceAttempts: 4,
+    convergenceIntervalMs: 7
+  });
+  await install(context);
+  const replacementOptions = { ...context.options, logFile: path.join(context.privateRoot, 'logs', 'delayed-state.log') };
+  const result = await replaceAgent(
+    { ...replacementOptions, acknowledgement: ACKNOWLEDGEMENTS.replace },
+    context.dependencies
+  );
+  assert.equal(result.status, 'replaced-and-registered');
+  assert.deepEqual(context.sleeps, [7, 7, 7, 7]);
+  assert.deepEqual(context.launchd.counts, { bootstrap: 2, bootout: 1, print: 11, plutil: 3 });
+  assert.deepEqual(
+    context.launchd.calls
+      .filter(call => call.command === LAUNCHCTL && call.args[0] !== 'print')
+      .map(call => call.args[0]),
+    ['bootstrap', 'bootout', 'bootstrap']
+  );
+  assertOnlyExactCommands(context);
+});
+
+test('registration convergence timeout is bounded and never duplicates the mutation', async t => {
+  const context = await harness(t, {
+    bootstrapNoRegister: [1],
+    convergenceAttempts: 4,
+    convergenceIntervalMs: 9
+  });
+  await assert.rejects(install(context), error => {
+    assert.equal(error.code, 'STARTUP_INSTALL_FAILED');
+    assert.equal(error.phase, 'install-bootstrap');
+    assert.equal(error.status, 'convergence-timeout');
+    return true;
+  });
+  assert.equal(context.launchd.counts.bootstrap, 1);
+  assert.equal(context.launchd.counts.bootout, 0);
+  assert.equal(context.launchd.counts.print, 7);
+  assert.deepEqual(context.sleeps, [9, 9, 9]);
+  await assert.rejects(planAgent(context.options, {
+    ...context.dependencies,
+    convergenceAttempts: SERVICE_CONVERGENCE_ATTEMPTS + 1
+  }), error => error.code === 'STARTUP_ARGUMENTS_INVALID');
+  assertOnlyExactCommands(context);
+});
+
+test('replacement write, bootout, bootstrap, and verification failures expose safe phases and restore registration', async t => {
   const cases = [
-    ['replacement write', {}, { beforeAtomicWrite: ({ purpose }) => { if (purpose === 'replace') throw new Error('/fictional/private/replace-write'); } }],
-    ['replacement bootout', { bootoutFailures: [1] }, {}],
-    ['replacement bootstrap', { bootstrapFailures: [2] }, {}],
-    ['replacement verification', { bootstrapNoRegister: [2] }, {}],
-    ['post-rename verification', {}, { afterAtomicRename: ({ purpose }) => { if (purpose === 'replace') throw new Error('/fictional/private/post-rename'); } }]
+    ['replacement write', {}, { beforeAtomicWrite: ({ purpose }) => { if (purpose === 'replace') throw new Error('/fictional/private/replace-write'); } }, 'candidate-definition', 'definition-failed'],
+    ['replacement bootout', { bootoutFailures: [1] }, {}, 'candidate-bootout', 'mutation-failed'],
+    ['replacement bootstrap', { bootstrapFailures: [2] }, {}, 'candidate-bootstrap', 'mutation-failed'],
+    ['replacement convergence', { bootstrapNoRegister: [2] }, {}, 'candidate-bootstrap', 'convergence-timeout'],
+    ['replacement verification', { printFailures: [7] }, {}, 'candidate-verification', 'inspection-failed'],
+    ['post-rename verification', {}, { afterAtomicRename: ({ purpose }) => { if (purpose === 'replace') throw new Error('/fictional/private/post-rename'); } }, 'candidate-definition', 'definition-failed']
   ];
-  for (const [name, runnerOptions, hooks] of cases) {
+  for (const [name, runnerOptions, hooks, expectedPhase, expectedStatus] of cases) {
     await t.test(name, async t => {
       const context = await harness(t, runnerOptions);
       await install(context);
@@ -458,7 +567,12 @@ test('replacement write, bootstrap, and verification failures restore prior byte
       await assert.rejects(replaceAgent(
         { ...replacementOptions, acknowledgement: ACKNOWLEDGEMENTS.replace },
         { ...context.dependencies, hooks }
-      ), error => error.code === 'STARTUP_REPLACEMENT_FAILED');
+      ), error => {
+        assert.equal(error.code, 'STARTUP_REPLACEMENT_FAILED');
+        assert.equal(error.phase, expectedPhase);
+        assert.equal(error.status, expectedStatus);
+        return true;
+      });
       assert.deepEqual(await fs.readFile(context.destination), prior);
       assert.deepEqual(await fs.readFile(context.rollback), prior);
       assert.equal(context.launchd.registered, true);
@@ -477,10 +591,197 @@ test('a failed replacement restoration is reported without leaking child output 
     context.dependencies
   ), error => {
     assert.equal(error.code, 'STARTUP_REPLACEMENT_ROLLBACK_FAILED');
+    assert.equal(error.phase, 'restoration-bootstrap');
+    assert.equal(error.status, 'mutation-failed');
+    assert.equal(error.replacementPhase, 'candidate-bootstrap');
+    assert.equal(error.replacementStatus, 'mutation-failed');
+    assert.deepEqual(Object.keys(error).sort(), ['code', 'phase', 'replacementPhase', 'replacementStatus', 'status']);
     assert.doesNotMatch(`${error.code} ${error.message}`, /fictional-private|bootstrap-output|bootstrap-error|\.plist/);
     return true;
   });
   assert.deepEqual(await fs.readFile(context.destination), prior);
+  assert.deepEqual(await fs.readFile(context.rollback), prior);
+  assert.equal(context.launchd.registered, false);
+  assert.equal(context.launchd.counts.bootstrap, 3);
+  assert.equal(context.launchd.counts.bootout, 1);
+  assertOnlyExactCommands(context);
+});
+
+test('registration recovery performs no definition write and exactly one bootstrap after exact trust checks', async t => {
+  const context = await harness(t, { bootstrapFailures: [2, 3] });
+  const { prior } = await createRecoveryRequiredState(context);
+  const retained = await fs.readFile(context.rollback);
+  const before = { ...context.launchd.counts };
+  let definitionWrites = 0;
+  const result = await recoverRegistrationAgent({
+    ...context.options,
+    acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+  }, {
+    ...context.dependencies,
+    hooks: { beforeAtomicWrite: () => { definitionWrites += 1; } }
+  });
+  assert.equal(result.status, 'registration-recovered');
+  assert.equal(result.bootstrapAttempts, 1);
+  assert.equal(result.registered, true);
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    new RegExp(context.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  );
+  assert.equal(definitionWrites, 0);
+  assert.equal(context.launchd.counts.bootstrap, before.bootstrap + 1);
+  assert.equal(context.launchd.counts.bootout, before.bootout);
+  assert.equal(context.launchd.counts.print, before.print + 3);
+  assert.deepEqual(await fs.readFile(context.destination), prior);
+  assert.deepEqual(await fs.readFile(context.rollback), retained);
+
+  const recoveredBootstrapCount = context.launchd.counts.bootstrap;
+  await assert.rejects(recoverRegistrationAgent({
+    ...context.options,
+    acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+  }, context.dependencies), error => error.code === 'STARTUP_REGISTRATION_RECOVERY_INVALID');
+  assert.equal(context.launchd.counts.bootstrap, recoveredBootstrapCount);
+  assertOnlyExactCommands(context);
+});
+
+test('registration recovery rejects every ineligible or ambiguous state before mutation', async t => {
+  await t.test('unsupported acknowledgement', async t => {
+    const context = await harness(t);
+    await assert.rejects(recoverRegistrationAgent({
+      ...context.options,
+      acknowledgement: 'NO'
+    }, context.dependencies), error => error.code === 'STARTUP_ACKNOWLEDGEMENT_REQUIRED');
+    assert.equal(context.launchd.calls.length, 0);
+    assert.deepEqual(await fs.readdir(context.launchAgentsDirectory), []);
+  });
+
+  await t.test('registered exact state', async t => {
+    const context = await harness(t);
+    await install(context);
+    const active = await fs.readFile(context.destination);
+    await fs.writeFile(context.rollback, active, { mode: 0o600 });
+    const mutations = context.launchd.counts.bootstrap + context.launchd.counts.bootout;
+    await assert.rejects(recoverRegistrationAgent({
+      ...context.options,
+      acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+    }, context.dependencies), error => error.code === 'STARTUP_REGISTRATION_RECOVERY_INVALID');
+    assert.equal(context.launchd.counts.bootstrap + context.launchd.counts.bootout, mutations);
+  });
+
+  await t.test('missing retained definition', async t => {
+    const context = await harness(t);
+    await install(context);
+    context.launchd.registered = false;
+    const mutations = context.launchd.counts.bootstrap + context.launchd.counts.bootout;
+    await assert.rejects(recoverRegistrationAgent({
+      ...context.options,
+      acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+    }, context.dependencies), error => error.code === 'STARTUP_ROLLBACK_AMBIGUOUS');
+    assert.equal(context.launchd.counts.bootstrap + context.launchd.counts.bootout, mutations);
+  });
+
+  await t.test('mismatched managed active definition', async t => {
+    const context = await harness(t);
+    await install(context);
+    const baseline = await fs.readFile(context.destination);
+    await fs.writeFile(context.rollback, baseline, { mode: 0o600 });
+    const replacementOptions = { ...context.options, logFile: path.join(context.privateRoot, 'logs', 'different.log') };
+    const replacement = generateLaunchAgentDefinition(
+      await validateConfiguration(replacementOptions, context.dependencies)
+    );
+    await fs.writeFile(context.destination, replacement, { mode: 0o600 });
+    context.launchd.registered = false;
+    const mutations = context.launchd.counts.bootstrap + context.launchd.counts.bootout;
+    await assert.rejects(recoverRegistrationAgent({
+      ...context.options,
+      acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+    }, context.dependencies), error => error.code === 'STARTUP_REGISTRATION_RECOVERY_INVALID');
+    assert.equal(context.launchd.counts.bootstrap + context.launchd.counts.bootout, mutations);
+  });
+
+  await t.test('unknown active definition', async t => {
+    const context = await harness(t);
+    await install(context);
+    const baseline = await fs.readFile(context.destination);
+    await fs.writeFile(context.rollback, baseline, { mode: 0o600 });
+    await fs.writeFile(
+      context.destination,
+      Buffer.from(baseline.toString('utf8').replace(MANAGED_MARKER, '<!-- unrelated -->')),
+      { mode: 0o600 }
+    );
+    context.launchd.registered = false;
+    const mutations = context.launchd.counts.bootstrap + context.launchd.counts.bootout;
+    await assert.rejects(recoverRegistrationAgent({
+      ...context.options,
+      acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+    }, context.dependencies), error => error.code === 'STARTUP_MANAGED_DEFINITION_INVALID');
+    assert.equal(context.launchd.counts.bootstrap + context.launchd.counts.bootout, mutations);
+  });
+
+  await t.test('mismatched retained definition', async t => {
+    const context = await harness(t);
+    await install(context);
+    const replacementOptions = { ...context.options, logFile: path.join(context.privateRoot, 'logs', 'different-retained.log') };
+    const replacement = generateLaunchAgentDefinition(
+      await validateConfiguration(replacementOptions, context.dependencies)
+    );
+    await fs.writeFile(context.rollback, replacement, { mode: 0o600 });
+    context.launchd.registered = false;
+    const mutations = context.launchd.counts.bootstrap + context.launchd.counts.bootout;
+    await assert.rejects(recoverRegistrationAgent({
+      ...context.options,
+      acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+    }, context.dependencies), error => error.code === 'STARTUP_ROLLBACK_AMBIGUOUS');
+    assert.equal(context.launchd.counts.bootstrap + context.launchd.counts.bootout, mutations);
+  });
+});
+
+test('a bounded failed registration recovery stops after one bootstrap with safe phase evidence', async t => {
+  const context = await harness(t, {
+    bootstrapFailures: [2, 3],
+    bootstrapNoRegister: [4],
+    convergenceAttempts: 3,
+    convergenceIntervalMs: 11
+  });
+  await createRecoveryRequiredState(context);
+  const before = { ...context.launchd.counts };
+  await assert.rejects(recoverRegistrationAgent({
+    ...context.options,
+    acknowledgement: ACKNOWLEDGEMENTS['recover-registration']
+  }, context.dependencies), error => {
+    assert.equal(error.code, 'STARTUP_REGISTRATION_RECOVERY_FAILED');
+    assert.equal(error.phase, 'registration-recovery-bootstrap');
+    assert.equal(error.status, 'convergence-timeout');
+    assert.doesNotMatch(JSON.stringify(error), /fictional-private|bootstrap-output|bootstrap-error|\.plist/);
+    return true;
+  });
+  assert.equal(context.launchd.counts.bootstrap, before.bootstrap + 1);
+  assert.equal(context.launchd.counts.bootout, before.bootout);
+  assert.equal(context.launchd.counts.print, before.print + 4);
+  assert.deepEqual(context.sleeps, [11, 11]);
+  assertOnlyExactCommands(context);
+});
+
+test('an injected convergence timer failure remains bounded and public-safe', async t => {
+  const context = await harness(t, {
+    bootstrapNoRegister: [1],
+    convergenceAttempts: 3,
+    convergenceIntervalMs: 5
+  });
+  await assert.rejects(installAgent({
+    ...context.options,
+    acknowledgement: ACKNOWLEDGEMENTS.install
+  }, {
+    ...context.dependencies,
+    sleep: async () => { throw new Error('/fictional/private/timer'); }
+  }), error => {
+    assert.equal(error.code, 'STARTUP_INSTALL_FAILED');
+    assert.equal(error.phase, 'install-bootstrap');
+    assert.equal(error.status, 'convergence-timeout');
+    assert.doesNotMatch(JSON.stringify(error), /fictional|private|timer|\.plist/);
+    return true;
+  });
+  assert.equal(context.launchd.counts.bootstrap, 1);
+  assert.equal(context.launchd.counts.bootout, 0);
   assertOnlyExactCommands(context);
 });
 
@@ -496,6 +797,27 @@ test('rollback restores only the retained exact definition and preserves action 
   assert.equal(context.launchd.registered, true);
   const repeated = await rollbackAgent({ ...context.options, acknowledgement: ACKNOWLEDGEMENTS.rollback }, context.dependencies);
   assert.equal(repeated.status, 'prior-definition-already-active');
+  assertOnlyExactCommands(context);
+});
+
+test('rollback reports registration recovery required when retained bytes are active but unregistered', async t => {
+  const context = await harness(t, { bootstrapFailures: [2, 3] });
+  const { prior } = await createRecoveryRequiredState(context);
+  const before = { ...context.launchd.counts };
+  await assert.rejects(rollbackAgent({
+    ...context.options,
+    acknowledgement: ACKNOWLEDGEMENTS.rollback
+  }, context.dependencies), error => {
+    assert.equal(error.code, 'STARTUP_REGISTRATION_RECOVERY_REQUIRED');
+    assert.equal(error.phase, 'registration-recovery-required');
+    assert.equal(error.status, 'recovery-required');
+    return true;
+  });
+  assert.deepEqual(await fs.readFile(context.destination), prior);
+  assert.deepEqual(await fs.readFile(context.rollback), prior);
+  assert.equal(context.launchd.counts.bootstrap, before.bootstrap);
+  assert.equal(context.launchd.counts.bootout, before.bootout);
+  assert.equal(context.launchd.counts.print, before.print + 1);
   assertOnlyExactCommands(context);
 });
 
@@ -591,6 +913,7 @@ test('unsupported acknowledgements cannot write, replace, register, boot out, ro
     () => installAgent({ ...context.options, acknowledgement: 'NO' }, context.dependencies),
     () => replaceAgent({ ...context.options, acknowledgement: 'NO' }, context.dependencies),
     () => rollbackAgent({ ...context.options, acknowledgement: 'NO' }, context.dependencies),
+    () => recoverRegistrationAgent({ ...context.options, acknowledgement: 'NO' }, context.dependencies),
     () => removeAgent({ userHome: context.userHome, acknowledgement: 'NO' }, context.dependencies)
   ];
   for (const operation of calls) {

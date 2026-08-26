@@ -19,17 +19,27 @@ const {
 const { materializeRollbackApplication, smokeRollbackApplication } = require('./rollback-application');
 const { safeReleaseErrorCategory } = require('./release-diagnostics');
 const { smokeStartedTarget, smokeTarget, stopStartedTarget } = require('./smoke');
+const {
+  ACKNOWLEDGEMENTS,
+  AGENT_LABEL,
+  LAUNCHCTL,
+  PLUTIL,
+  SUPPORTED_PORT,
+  installAgent,
+  replaceAgent,
+  rollbackAgent
+} = require('./startup-resilience');
 
 const ROLLBACK_REVISION = '363a321648aba0e2d10a812644a298b9abe5e7bb';
 const REHEARSAL_TIMESTAMP = new Date('2026-08-11T12:00:00.000Z');
-const SCENARIOS = new Set(['all', 'backup', 'restore', 'cutover', 'rollback']);
+const SCENARIOS = new Set(['all', 'backup', 'restore', 'cutover', 'rollback', 'startup']);
 function safeRehearsalErrorCategory(error) {
   return safeReleaseErrorCategory(error);
 }
 
 function parseScenario(argv) {
   if (argv.length === 0) return 'all';
-  if (argv.length !== 2 || argv[0] !== '--scenario' || !SCENARIOS.has(argv[1])) throw new Error('Rehearsal scenario must be all, backup, restore, cutover, or rollback');
+  if (argv.length !== 2 || argv[0] !== '--scenario' || !SCENARIOS.has(argv[1])) throw new Error('Rehearsal scenario must be all, backup, restore, cutover, rollback, or startup');
   return argv[1];
 }
 
@@ -77,8 +87,193 @@ async function executeCutoverLifecycle(steps, options = {}) {
   }
 }
 
+function createSyntheticStartupRunner(bootstrapFailures, uid, destination) {
+  const state = {
+    registered: false,
+    counts: { bootstrap: 0, bootout: 0, print: 0, plutil: 0 },
+    bootstrapFailures: new Set(bootstrapFailures)
+  };
+  state.runner = (command, args, options = {}) => {
+    assert.equal(options.shell, false);
+    if (command === PLUTIL) {
+      assert.deepEqual(args, ['-lint', '-']);
+      assert.ok(Buffer.isBuffer(options.input));
+      state.counts.plutil += 1;
+      return { status: 0, stdout: '-', stderr: '' };
+    }
+    assert.equal(command, LAUNCHCTL);
+    const operation = args[0];
+    state.counts[operation] += 1;
+    if (operation === 'print') {
+      assert.deepEqual(args, ['print', `gui/${uid}/${AGENT_LABEL}`]);
+      return state.registered
+        ? { status: 0, stdout: 'synthetic-service-state', stderr: '' }
+        : { status: 113, stdout: '', stderr: 'synthetic-service-absent' };
+    }
+    if (operation === 'bootstrap') {
+      assert.deepEqual(args, ['bootstrap', `gui/${uid}`, destination]);
+      if (state.bootstrapFailures.has(state.counts.bootstrap)) {
+        return { status: 5, stdout: 'synthetic-bootstrap-output', stderr: 'synthetic-bootstrap-error' };
+      }
+      state.registered = true;
+      return { status: 0, stdout: 'synthetic-bootstrap-output', stderr: '' };
+    }
+    assert.equal(operation, 'bootout');
+    assert.deepEqual(args, ['bootout', `gui/${uid}/${AGENT_LABEL}`]);
+    state.registered = false;
+    return { status: 0, stdout: 'synthetic-bootout-output', stderr: '' };
+  };
+  return state;
+}
+
+async function createStartupRehearsalCase(root, name, bootstrapFailures) {
+  const caseRoot = path.join(root, name);
+  const repositoryRoot = path.join(caseRoot, 'fictional-release');
+  const privateRoot = path.join(caseRoot, 'fictional-private');
+  const userHome = path.join(caseRoot, 'fictional-user');
+  const sourceFilesRoot = path.join(privateRoot, 'source-files');
+  const dataFile = path.join(privateRoot, 'target-v5.json');
+  const logFile = path.join(privateRoot, 'logs', 'priorena.log');
+  const nodeExecutable = path.join(caseRoot, 'fictional-runtime', 'node');
+  const launchAgentsDirectory = path.join(userHome, 'Library', 'LaunchAgents');
+  await Promise.all([
+    fs.mkdir(path.join(repositoryRoot, 'target-server'), { recursive: true, mode: 0o700 }),
+    fs.mkdir(sourceFilesRoot, { recursive: true, mode: 0o700 }),
+    fs.mkdir(path.dirname(logFile), { recursive: true, mode: 0o700 }),
+    fs.mkdir(path.dirname(nodeExecutable), { recursive: true, mode: 0o700 }),
+    fs.mkdir(launchAgentsDirectory, { recursive: true, mode: 0o700 })
+  ]);
+  await Promise.all([
+    fs.writeFile(path.join(repositoryRoot, 'package.json'), '{"name":"priorena","private":true}\n', { mode: 0o600 }),
+    fs.writeFile(path.join(repositoryRoot, 'target-server', 'start.js'), "'use strict';\n", { mode: 0o600 }),
+    fs.writeFile(dataFile, '{"schemaVersion":5,"fictional":true}\n', { mode: 0o600 }),
+    fs.writeFile(nodeExecutable, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+  ]);
+  const destination = path.join(launchAgentsDirectory, `${AGENT_LABEL}.plist`);
+  const uid = (await fs.stat(userHome)).uid;
+  const launchd = createSyntheticStartupRunner(bootstrapFailures, uid, destination);
+  return {
+    destination,
+    rollback: path.join(launchAgentsDirectory, `${AGENT_LABEL}.plist.previous`),
+    launchd,
+    dependencies: {
+      platform: 'darwin',
+      getuid: () => uid,
+      runner: launchd.runner,
+      sleep: async () => {},
+      convergenceAttempts: 3,
+      convergenceIntervalMs: 0
+    },
+    options: {
+      repositoryRoot,
+      nodeExecutable,
+      dataFile,
+      sourceFilesRoot,
+      logFile,
+      userHome,
+      port: String(SUPPORTED_PORT)
+    }
+  };
+}
+
+async function rehearseStartupControllerLifecycle() {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-startup-rehearsal-')));
+  try {
+    const restored = await createStartupRehearsalCase(root, 'restored', [2]);
+    await installAgent(
+      { ...restored.options, acknowledgement: ACKNOWLEDGEMENTS.install },
+      restored.dependencies
+    );
+    const restoredBaseline = await fs.readFile(restored.destination);
+    let activationFailure;
+    try {
+      await replaceAgent({
+        ...restored.options,
+        logFile: path.join(path.dirname(restored.options.logFile), 'candidate.log'),
+        acknowledgement: ACKNOWLEDGEMENTS.replace
+      }, restored.dependencies);
+    } catch (error) {
+      activationFailure = error;
+    }
+    assert.equal(activationFailure?.code, 'STARTUP_REPLACEMENT_FAILED');
+    assert.equal(activationFailure?.phase, 'candidate-bootstrap');
+    assert.equal(activationFailure?.status, 'mutation-failed');
+    assert.equal(restored.launchd.registered, true);
+    assert.deepEqual(await fs.readFile(restored.destination), restoredBaseline);
+    assert.deepEqual(await fs.readFile(restored.rollback), restoredBaseline);
+    assert.equal(restored.launchd.counts.bootstrap, 3);
+    assert.equal(restored.launchd.counts.bootout, 1);
+
+    const stopped = await createStartupRehearsalCase(root, 'stopped', [2, 3]);
+    await installAgent(
+      { ...stopped.options, acknowledgement: ACKNOWLEDGEMENTS.install },
+      stopped.dependencies
+    );
+    const stoppedBaseline = await fs.readFile(stopped.destination);
+    let restorationFailure;
+    try {
+      await replaceAgent({
+        ...stopped.options,
+        logFile: path.join(path.dirname(stopped.options.logFile), 'candidate.log'),
+        acknowledgement: ACKNOWLEDGEMENTS.replace
+      }, stopped.dependencies);
+    } catch (error) {
+      restorationFailure = error;
+    }
+    assert.equal(restorationFailure?.code, 'STARTUP_REPLACEMENT_ROLLBACK_FAILED');
+    assert.equal(restorationFailure?.phase, 'restoration-bootstrap');
+    assert.equal(restorationFailure?.replacementPhase, 'candidate-bootstrap');
+    assert.equal(stopped.launchd.registered, false);
+    assert.deepEqual(await fs.readFile(stopped.destination), stoppedBaseline);
+    assert.deepEqual(await fs.readFile(stopped.rollback), stoppedBaseline);
+    const mutationCountsBeforeStop = {
+      bootstrap: stopped.launchd.counts.bootstrap,
+      bootout: stopped.launchd.counts.bootout
+    };
+    let recoveryRequired;
+    try {
+      await rollbackAgent(
+        { ...stopped.options, acknowledgement: ACKNOWLEDGEMENTS.rollback },
+        stopped.dependencies
+      );
+    } catch (error) {
+      recoveryRequired = error;
+    }
+    assert.equal(recoveryRequired?.code, 'STARTUP_REGISTRATION_RECOVERY_REQUIRED');
+    assert.equal(recoveryRequired?.phase, 'registration-recovery-required');
+    assert.deepEqual({
+      bootstrap: stopped.launchd.counts.bootstrap,
+      bootout: stopped.launchd.counts.bootout
+    }, mutationCountsBeforeStop);
+
+    return Object.freeze({
+      status: 'passed',
+      syntheticOnly: true,
+      baselineRestoration: Object.freeze({
+        status: 'restored-and-registered',
+        candidateActivationAttempts: 1,
+        restorationRegistrationAttempts: 1,
+        secondCandidateActivationAttempts: 0
+      }),
+      stoppedRecovery: Object.freeze({
+        status: 'registration-recovery-required',
+        candidateActivationAttempts: 1,
+        restorationRegistrationAttempts: 1,
+        automaticRegistrationRecoveryAttempts: 0,
+        secondCandidateActivationAttempts: 0
+      })
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
 async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__dirname, '..', '..')) {
   if (!SCENARIOS.has(scenario)) throw new Error('Unknown release rehearsal scenario');
+  if (scenario === 'startup') {
+    return { scenario, status: 'passed', startupController: await rehearseStartupControllerLifecycle() };
+  }
+  const startupController = scenario === 'all' ? await rehearseStartupControllerLifecycle() : undefined;
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-release-rehearsal-'));
   const livePath = path.join(root, 'fictional-live.json');
   const stagedSeedPath = path.join(root, 'fictional-staged-v5.json');
@@ -222,7 +417,8 @@ async function runRehearsal(scenario = 'all', repositoryRoot = path.resolve(__di
       restoredPreviousSchemaBytes: true,
       rollbackRevisionStartedAndSmoked: lifecycle.rollbackSmoke.revision,
       rollbackProcessValidated: lifecycle.rollbackSmoke.processValidated,
-      backupRetainedByTooling: true
+      backupRetainedByTooling: true,
+      ...(startupController ? { startupController } : {})
     };
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -248,6 +444,7 @@ module.exports = {
   SCENARIOS,
   executeCutoverLifecycle,
   parseScenario,
+  rehearseStartupControllerLifecycle,
   run,
   runRehearsal,
   safeRehearsalErrorCategory

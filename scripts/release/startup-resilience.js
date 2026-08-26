@@ -20,11 +20,52 @@ const PLUTIL = '/usr/bin/plutil';
 const LAUNCHCTL = '/bin/launchctl';
 const MANAGED_MARKER = '<!-- Priorena startup resilience controller; use only the bounded controller. -->';
 const ABSENT_SERVICE_STATUSES = new Set([3, 113]);
+const SERVICE_CONVERGENCE_ATTEMPTS = 25;
+const SERVICE_CONVERGENCE_INTERVAL_MS = 200;
+
+const PUBLIC_FAILURE_PHASES = Object.freeze([
+  'install-bootstrap',
+  'install-verification',
+  'install-restoration-bootout',
+  'candidate-bootout',
+  'candidate-definition',
+  'candidate-bootstrap',
+  'candidate-verification',
+  'restoration-bootout',
+  'restoration-definition',
+  'restoration-bootstrap',
+  'restoration-verification',
+  'rollback-bootout',
+  'rollback-definition',
+  'rollback-bootstrap',
+  'rollback-verification',
+  'active-restoration-bootout',
+  'active-restoration-definition',
+  'active-restoration-bootstrap',
+  'active-restoration-verification',
+  'removal-bootout',
+  'removal-restoration-bootstrap',
+  'removal-restoration-verification',
+  'registration-recovery-required',
+  'registration-recovery-bootstrap',
+  'registration-recovery-verification'
+]);
+const PUBLIC_FAILURE_STATUSES = Object.freeze([
+  'mutation-failed',
+  'inspection-failed',
+  'convergence-timeout',
+  'definition-failed',
+  'verification-failed',
+  'recovery-required'
+]);
+const PUBLIC_FAILURE_PHASE_SET = new Set(PUBLIC_FAILURE_PHASES);
+const PUBLIC_FAILURE_STATUS_SET = new Set(PUBLIC_FAILURE_STATUSES);
 
 const ACKNOWLEDGEMENTS = Object.freeze({
   install: 'INSTALL_PRIORENA_USER_AGENT',
   replace: 'REPLACE_PRIORENA_USER_AGENT',
   rollback: 'ROLLBACK_PRIORENA_USER_AGENT',
+  'recover-registration': 'RECOVER_PRIORENA_USER_AGENT_REGISTRATION',
   remove: 'REMOVE_PRIORENA_USER_AGENT'
 });
 
@@ -68,6 +109,9 @@ const SAFE_MESSAGES = Object.freeze({
   STARTUP_REPLACEMENT_ROLLBACK_FAILED: 'The agent replacement failed and prior-state restoration could not be verified',
   STARTUP_ROLLBACK_FAILED: 'The retained agent rollback failed and the active state was restored',
   STARTUP_ROLLBACK_RESTORE_FAILED: 'The retained agent rollback failed and active-state restoration could not be verified',
+  STARTUP_REGISTRATION_RECOVERY_REQUIRED: 'The exact managed definition requires separately acknowledged registration recovery',
+  STARTUP_REGISTRATION_RECOVERY_INVALID: 'The exact registration-recovery preconditions are not satisfied',
+  STARTUP_REGISTRATION_RECOVERY_FAILED: 'The exact one-attempt registration recovery failed',
   STARTUP_REMOVAL_FAILED: 'The exact managed agent removal failed and the prior state was restored',
   STARTUP_REMOVAL_ROLLBACK_FAILED: 'The exact managed agent removal failed and prior-state restoration could not be verified',
   STARTUP_VERIFICATION_FAILED: 'The exact managed agent state could not be verified'
@@ -83,6 +127,23 @@ function startupError(code, details = undefined) {
 function preserveSafeError(error, fallbackCode) {
   if (error && SAFE_MESSAGES[error.code]) return error;
   return startupError(fallbackCode);
+}
+
+function safeFailureDetails(error, fallbackPhase, fallbackStatus) {
+  const phase = PUBLIC_FAILURE_PHASE_SET.has(error?.phase) ? error.phase : fallbackPhase;
+  const status = PUBLIC_FAILURE_STATUS_SET.has(error?.status) ? error.status : fallbackStatus;
+  if (!PUBLIC_FAILURE_PHASE_SET.has(phase) || !PUBLIC_FAILURE_STATUS_SET.has(status)) {
+    throw startupError('STARTUP_ARGUMENTS_INVALID');
+  }
+  return Object.freeze({ phase, status });
+}
+
+function annotateFailure(error, fallbackCode, phase, status) {
+  const safe = preserveSafeError(error, fallbackCode);
+  const fallbackStatus = safe.code === 'STARTUP_SERVICE_INSPECTION_FAILED'
+    ? 'inspection-failed'
+    : status;
+  return startupError(safe.code, safeFailureDetails(safe, phase, fallbackStatus));
 }
 
 function validateBoundedText(value) {
@@ -118,7 +179,18 @@ function commandRunner(command, args, options = {}) {
   });
 }
 
+function boundedConvergenceValue(value, fallback, maximum, allowZero = false) {
+  const selected = value === undefined ? fallback : value;
+  const minimum = allowZero ? 0 : 1;
+  if (!Number.isSafeInteger(selected) || selected < minimum || selected > maximum) {
+    throw startupError('STARTUP_ARGUMENTS_INVALID');
+  }
+  return selected;
+}
+
 function dependencies(overrides = {}) {
+  const sleep = overrides.sleep || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
+  if (typeof sleep !== 'function') throw startupError('STARTUP_ARGUMENTS_INVALID');
   return {
     fs: overrides.fs || fs,
     constants: overrides.constants || fsConstants,
@@ -127,7 +199,19 @@ function dependencies(overrides = {}) {
     getuid: overrides.getuid || (() => process.getuid?.()),
     randomUUID: overrides.randomUUID || crypto.randomUUID,
     hooks: overrides.hooks || Object.freeze({}),
-    stdout: overrides.stdout || process.stdout
+    stdout: overrides.stdout || process.stdout,
+    sleep,
+    convergenceAttempts: boundedConvergenceValue(
+      overrides.convergenceAttempts,
+      SERVICE_CONVERGENCE_ATTEMPTS,
+      SERVICE_CONVERGENCE_ATTEMPTS
+    ),
+    convergenceIntervalMs: boundedConvergenceValue(
+      overrides.convergenceIntervalMs,
+      SERVICE_CONVERGENCE_INTERVAL_MS,
+      SERVICE_CONVERGENCE_INTERVAL_MS,
+      true
+    )
   };
 }
 
@@ -418,13 +502,45 @@ async function serviceRegistered(context, runtime) {
   throw startupError('STARTUP_SERVICE_INSPECTION_FAILED');
 }
 
-async function mutateService(context, runtime, operation) {
+async function waitForServiceRegistration(context, runtime, expectedRegistration, phase) {
+  let lastStatus = 'convergence-timeout';
+  for (let attempt = 1; attempt <= runtime.convergenceAttempts; attempt += 1) {
+    try {
+      if (await serviceRegistered(context, runtime) === expectedRegistration) return attempt;
+      lastStatus = 'convergence-timeout';
+    } catch (_) {
+      lastStatus = 'inspection-failed';
+    }
+    if (attempt < runtime.convergenceAttempts) {
+      try {
+        await runtime.sleep(runtime.convergenceIntervalMs);
+      } catch (_) {
+        throw startupError(
+          'STARTUP_SERVICE_MUTATION_FAILED',
+          safeFailureDetails(undefined, phase, 'convergence-timeout')
+        );
+      }
+    }
+  }
+  throw startupError(
+    'STARTUP_SERVICE_MUTATION_FAILED',
+    safeFailureDetails(undefined, phase, lastStatus)
+  );
+}
+
+async function mutateService(context, runtime, operation, phase) {
   const args = operation === 'bootstrap'
     ? ['bootstrap', context.domain, context.destination]
     : ['bootout', `${context.domain}/${AGENT_LABEL}`];
   await callHook(runtime, 'beforeServiceMutation', Object.freeze({ operation, args: Object.freeze([...args]) }));
   const result = command(runtime, LAUNCHCTL, args);
-  if (result.error || result.status !== 0) throw startupError('STARTUP_SERVICE_MUTATION_FAILED');
+  if (result.error || result.status !== 0) {
+    throw startupError(
+      'STARTUP_SERVICE_MUTATION_FAILED',
+      safeFailureDetails(undefined, phase, 'mutation-failed')
+    );
+  }
+  await waitForServiceRegistration(context, runtime, operation === 'bootstrap', phase);
 }
 
 async function syncDirectory(directory, runtime) {
@@ -524,7 +640,7 @@ async function definitionExists(filePath, runtime) {
   }
 }
 
-async function verifyState(context, expectedBytes, expectedRegistration, runtime) {
+async function verifyState(context, expectedBytes, expectedRegistration, runtime, phase) {
   try {
     const actual = await readDefinition(context.destination, context.uid, runtime);
     if (!actual.equals(expectedBytes)) throw startupError('STARTUP_VERIFICATION_FAILED');
@@ -533,6 +649,7 @@ async function verifyState(context, expectedBytes, expectedRegistration, runtime
     }
     return true;
   } catch (error) {
+    if (phase) throw annotateFailure(error, 'STARTUP_VERIFICATION_FAILED', phase, 'verification-failed');
     throw preserveSafeError(error, 'STARTUP_VERIFICATION_FAILED');
   }
 }
@@ -594,7 +711,9 @@ async function inspectAgent(options, overrides = {}) {
 }
 
 async function rollbackFirstInstall(context, runtime) {
-  if (await serviceRegistered(context, runtime)) await mutateService(context, runtime, 'bootout');
+  if (await serviceRegistered(context, runtime)) {
+    await mutateService(context, runtime, 'bootout', 'install-restoration-bootout');
+  }
   await runtime.fs.unlink(context.destination).catch(error => {
     if (error?.code !== 'ENOENT') throw error;
   });
@@ -614,8 +733,8 @@ async function installAgent(options, overrides = {}) {
   try {
     await atomicWriteNew(context.destination, bytes, runtime, 'install');
     written = true;
-    await mutateService(context, runtime, 'bootstrap');
-    await verifyState(context, bytes, true, runtime);
+    await mutateService(context, runtime, 'bootstrap', 'install-bootstrap');
+    await verifyState(context, bytes, true, runtime, 'install-verification');
     return safeSummary('install', context, bytes, {
       status: 'installed-and-registered',
       installed: true,
@@ -632,16 +751,30 @@ async function installAgent(options, overrides = {}) {
         throw startupError('STARTUP_INSTALL_ROLLBACK_FAILED');
       }
     }
-    throw safe.code === 'STARTUP_ACKNOWLEDGEMENT_REQUIRED' ? safe : startupError('STARTUP_INSTALL_FAILED');
+    throw safe.code === 'STARTUP_ACKNOWLEDGEMENT_REQUIRED'
+      ? safe
+      : startupError(
+        'STARTUP_INSTALL_FAILED',
+        safeFailureDetails(safe, 'install-verification', 'verification-failed')
+      );
   }
 }
 
-async function restorePriorState(context, priorBytes, shouldRegister, runtime, purpose) {
-  const registered = await serviceRegistered(context, runtime);
-  if (registered) await mutateService(context, runtime, 'bootout');
-  await atomicReplace(context.destination, priorBytes, runtime, purpose);
-  if (shouldRegister) await mutateService(context, runtime, 'bootstrap');
-  await verifyState(context, priorBytes, shouldRegister, runtime);
+async function restorePriorState(context, priorBytes, shouldRegister, runtime, purpose, phases) {
+  let registered;
+  try {
+    registered = await serviceRegistered(context, runtime);
+  } catch (error) {
+    throw annotateFailure(error, 'STARTUP_SERVICE_INSPECTION_FAILED', phases.bootout, 'inspection-failed');
+  }
+  if (registered) await mutateService(context, runtime, 'bootout', phases.bootout);
+  try {
+    await atomicReplace(context.destination, priorBytes, runtime, purpose);
+  } catch (error) {
+    throw annotateFailure(error, 'STARTUP_ATOMIC_WRITE_FAILED', phases.definition, 'definition-failed');
+  }
+  if (shouldRegister) await mutateService(context, runtime, 'bootstrap', phases.bootstrap);
+  await verifyState(context, priorBytes, shouldRegister, runtime, phases.verification);
 }
 
 async function replaceAgent(options, overrides = {}) {
@@ -666,23 +799,46 @@ async function replaceAgent(options, overrides = {}) {
   }
   const wasRegistered = await serviceRegistered(context, runtime);
   try {
-    if (wasRegistered) await mutateService(context, runtime, 'bootout');
-    await atomicReplace(context.destination, bytes, runtime, 'replace');
-    await mutateService(context, runtime, 'bootstrap');
-    await verifyState(context, bytes, true, runtime);
+    if (wasRegistered) await mutateService(context, runtime, 'bootout', 'candidate-bootout');
+    try {
+      await atomicReplace(context.destination, bytes, runtime, 'replace');
+    } catch (error) {
+      throw annotateFailure(error, 'STARTUP_ATOMIC_WRITE_FAILED', 'candidate-definition', 'definition-failed');
+    }
+    await mutateService(context, runtime, 'bootstrap', 'candidate-bootstrap');
+    await verifyState(context, bytes, true, runtime, 'candidate-verification');
     return safeSummary('replace', context, bytes, {
       status: 'replaced-and-registered',
       installed: true,
       registered: true,
       rollbackAvailable: true
     });
-  } catch (_) {
+  } catch (replacementError) {
+    const replacementFailure = safeFailureDetails(
+      replacementError,
+      'candidate-verification',
+      'verification-failed'
+    );
     try {
-      await restorePriorState(context, priorBytes, wasRegistered, runtime, 'restore-prior');
-    } catch (_) {
-      throw startupError('STARTUP_REPLACEMENT_ROLLBACK_FAILED');
+      await restorePriorState(context, priorBytes, wasRegistered, runtime, 'restore-prior', {
+        bootout: 'restoration-bootout',
+        definition: 'restoration-definition',
+        bootstrap: 'restoration-bootstrap',
+        verification: 'restoration-verification'
+      });
+    } catch (restorationError) {
+      const restorationFailure = safeFailureDetails(
+        restorationError,
+        'restoration-verification',
+        'verification-failed'
+      );
+      throw startupError('STARTUP_REPLACEMENT_ROLLBACK_FAILED', {
+        ...restorationFailure,
+        replacementPhase: replacementFailure.phase,
+        replacementStatus: replacementFailure.status
+      });
     }
-    throw startupError('STARTUP_REPLACEMENT_FAILED');
+    throw startupError('STARTUP_REPLACEMENT_FAILED', replacementFailure);
   }
 }
 
@@ -700,6 +856,12 @@ async function rollbackAgent(options, overrides = {}) {
   if (!priorBytes.equals(expectedPriorBytes)) throw startupError('STARTUP_ROLLBACK_AMBIGUOUS');
   const wasRegistered = await serviceRegistered(context, runtime);
   if (activeBytes.equals(priorBytes)) {
+    if (!wasRegistered) {
+      throw startupError('STARTUP_REGISTRATION_RECOVERY_REQUIRED', {
+        phase: 'registration-recovery-required',
+        status: 'recovery-required'
+      });
+    }
     return safeSummary('rollback', context, priorBytes, {
       status: 'prior-definition-already-active',
       installed: true,
@@ -708,24 +870,85 @@ async function rollbackAgent(options, overrides = {}) {
     });
   }
   try {
-    if (wasRegistered) await mutateService(context, runtime, 'bootout');
-    await atomicReplace(context.destination, priorBytes, runtime, 'rollback');
-    if (wasRegistered) await mutateService(context, runtime, 'bootstrap');
-    await verifyState(context, priorBytes, wasRegistered, runtime);
+    if (wasRegistered) await mutateService(context, runtime, 'bootout', 'rollback-bootout');
+    try {
+      await atomicReplace(context.destination, priorBytes, runtime, 'rollback');
+    } catch (error) {
+      throw annotateFailure(error, 'STARTUP_ATOMIC_WRITE_FAILED', 'rollback-definition', 'definition-failed');
+    }
+    if (wasRegistered) await mutateService(context, runtime, 'bootstrap', 'rollback-bootstrap');
+    await verifyState(context, priorBytes, wasRegistered, runtime, 'rollback-verification');
     return safeSummary('rollback', context, priorBytes, {
       status: wasRegistered ? 'prior-definition-restored-and-registered' : 'prior-definition-restored',
       installed: true,
       registered: wasRegistered,
       rollbackAvailable: true
     });
-  } catch (_) {
+  } catch (rollbackError) {
     try {
-      await restorePriorState(context, activeBytes, wasRegistered, runtime, 'restore-active');
-    } catch (_) {
-      throw startupError('STARTUP_ROLLBACK_RESTORE_FAILED');
+      await restorePriorState(context, activeBytes, wasRegistered, runtime, 'restore-active', {
+        bootout: 'active-restoration-bootout',
+        definition: 'active-restoration-definition',
+        bootstrap: 'active-restoration-bootstrap',
+        verification: 'active-restoration-verification'
+      });
+    } catch (restorationError) {
+      throw startupError(
+        'STARTUP_ROLLBACK_RESTORE_FAILED',
+        safeFailureDetails(restorationError, 'active-restoration-verification', 'verification-failed')
+      );
     }
-    throw startupError('STARTUP_ROLLBACK_FAILED');
+    throw startupError(
+      'STARTUP_ROLLBACK_FAILED',
+      safeFailureDetails(rollbackError, 'rollback-verification', 'verification-failed')
+    );
   }
+}
+
+async function recoverRegistrationAgent(options, overrides = {}) {
+  requireAcknowledgement('recover-registration', options.acknowledgement);
+  const { runtime, context, bytes } = await prepare(options, overrides);
+  const [activeBytes, priorBytes] = await Promise.all([
+    readDefinition(context.destination, context.uid, runtime),
+    readDefinition(context.rollback, context.uid, runtime, false)
+  ]);
+  await validateManagedDefinition(activeBytes, runtime);
+  if (!activeBytes.equals(bytes)) throw startupError('STARTUP_REGISTRATION_RECOVERY_INVALID');
+  if (!priorBytes) throw startupError('STARTUP_ROLLBACK_AMBIGUOUS');
+  await validateManagedDefinition(priorBytes, runtime);
+  if (!priorBytes.equals(bytes) || !priorBytes.equals(activeBytes)) {
+    throw startupError('STARTUP_ROLLBACK_AMBIGUOUS');
+  }
+  if (await serviceRegistered(context, runtime)) {
+    throw startupError('STARTUP_REGISTRATION_RECOVERY_INVALID');
+  }
+  try {
+    await mutateService(
+      context,
+      runtime,
+      'bootstrap',
+      'registration-recovery-bootstrap'
+    );
+    await verifyState(
+      context,
+      bytes,
+      true,
+      runtime,
+      'registration-recovery-verification'
+    );
+  } catch (error) {
+    throw startupError(
+      'STARTUP_REGISTRATION_RECOVERY_FAILED',
+      safeFailureDetails(error, 'registration-recovery-verification', 'verification-failed')
+    );
+  }
+  return safeSummary('recover-registration', context, bytes, {
+    status: 'registration-recovered',
+    installed: true,
+    registered: true,
+    rollbackAvailable: true,
+    bootstrapAttempts: 1
+  });
 }
 
 async function removeAgent(options, overrides = {}) {
@@ -749,7 +972,7 @@ async function removeAgent(options, overrides = {}) {
   const quarantine = path.join(context.directory, `.${AGENT_LABEL}.remove-${runtime.randomUUID()}`);
   let moved = false;
   try {
-    if (registered) await mutateService(context, runtime, 'bootout');
+    if (registered) await mutateService(context, runtime, 'bootout', 'removal-bootout');
     await runtime.fs.rename(context.destination, quarantine);
     moved = true;
     await syncDirectory(context.directory, runtime);
@@ -770,9 +993,9 @@ async function removeAgent(options, overrides = {}) {
     try {
       if (moved) await runtime.fs.rename(quarantine, context.destination);
       if (registered && !await serviceRegistered(context, runtime)) {
-        await mutateService(context, runtime, 'bootstrap');
+        await mutateService(context, runtime, 'bootstrap', 'removal-restoration-bootstrap');
       }
-      await verifyState(context, activeBytes, registered, runtime);
+      await verifyState(context, activeBytes, registered, runtime, 'removal-restoration-verification');
     } catch (_) {
       throw startupError('STARTUP_REMOVAL_ROLLBACK_FAILED');
     }
@@ -798,7 +1021,7 @@ function parseFlagPairs(argv, allowed, required) {
 function parseArguments(argv) {
   if (!Array.isArray(argv) || argv.length < 1) throw startupError('STARTUP_ACTION_INVALID');
   const action = argv[0];
-  if (!['plan', 'inspect', 'install', 'replace', 'rollback', 'remove'].includes(action)) {
+  if (!['plan', 'inspect', 'install', 'replace', 'rollback', 'recover-registration', 'remove'].includes(action)) {
     throw startupError('STARTUP_ACTION_INVALID');
   }
   const flags = action === 'remove' ? ['--user-home', '--acknowledgement'] : [...COMMON_FLAGS, ...(ACKNOWLEDGEMENTS[action] ? ['--acknowledgement'] : [])];
@@ -828,6 +1051,7 @@ async function run(argv = process.argv.slice(2), overrides = {}) {
     install: installAgent,
     replace: replaceAgent,
     rollback: rollbackAgent,
+    'recover-registration': recoverRegistrationAgent,
     remove: removeAgent
   };
   const result = await operations[parsed.action](parsed.options, overrides);
@@ -852,7 +1076,11 @@ module.exports = {
   MAX_PATH_CHARS,
   MAX_PLIST_BYTES,
   PLUTIL,
+  PUBLIC_FAILURE_PHASES,
+  PUBLIC_FAILURE_STATUSES,
   ROLLBACK_FILE_NAME,
+  SERVICE_CONVERGENCE_ATTEMPTS,
+  SERVICE_CONVERGENCE_INTERVAL_MS,
   SUPPORTED_PORT,
   THROTTLE_INTERVAL_SECONDS,
   generateLaunchAgentDefinition,
@@ -860,6 +1088,7 @@ module.exports = {
   installAgent,
   parseArguments,
   planAgent,
+  recoverRegistrationAgent,
   removeAgent,
   replaceAgent,
   rollbackAgent,
