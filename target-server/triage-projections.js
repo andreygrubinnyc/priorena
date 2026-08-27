@@ -1,13 +1,23 @@
 'use strict';
 
 const { ITEM_TYPES } = require('../target-model/schema');
-const { invalidQuery, notFound } = require('./errors');
+const { invalidQuery, notFound, outputTooLarge } = require('./errors');
 const { IMPORT_FORMATS, normalizeImportInput, normalizeImportRecord } = require('./import-parser');
 const { createTargetResolvers, STABLE_ID_PATTERN } = require('./resolvers');
 
 const DEFAULT_TRIAGE_PAGE_SIZE = 25;
 const MAX_TRIAGE_PAGE_SIZE = 100;
 const MAX_TRIAGE_SEARCH_CHARACTERS = 200;
+const MAX_DEPENDENCY_CONTEXT_ITEMS = 100;
+const MAX_DEPENDENCY_CONTEXT_OUTPUT_BYTES = 1024 * 1024;
+const DEPENDENCY_CONTEXT_TRUST_LABEL = 'Explicit dependency links — review context, not a risk score, blocker inference, satisfaction assessment, or prioritization';
+const DEPENDENCY_REVIEW_CUES = Object.freeze([
+  'archived',
+  'blocked-status',
+  'at-risk-status',
+  'unknown-status',
+  'state-needs-confirmation'
+]);
 const TRIAGE_SORT_FIELDS = Object.freeze([
   'jira-key',
   'summary',
@@ -112,6 +122,95 @@ function compareText(left, right) {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
+}
+
+function normalizedStatus(value) {
+  return String(value || '').trim().toLocaleLowerCase('en-US');
+}
+
+function dependencyReviewCues(workItem) {
+  const cues = [];
+  const status = normalizedStatus(workItem.canonicalStatus);
+  if (workItem.archived) cues.push('archived');
+  if (status === 'blocked') cues.push('blocked-status');
+  else if (['at risk', 'at-risk'].includes(status)) cues.push('at-risk-status');
+  else if (status === 'unknown') cues.push('unknown-status');
+  if (status !== 'unknown' && ['inferred', 'unknown'].includes(workItem.currentStateConfidence)) {
+    cues.push('state-needs-confirmation');
+  }
+  return cues;
+}
+
+function compareDependencyItems(left, right) {
+  const compare = (a, b) => {
+    const normalized = compareText(a, b);
+    if (normalized !== 0) return normalized;
+    const first = String(a ?? '');
+    const second = String(b ?? '');
+    if (first < second) return -1;
+    if (first > second) return 1;
+    return 0;
+  };
+  return compare(left.jiraKey || left.id, right.jiraKey || right.id) ||
+    compare(left.summary, right.summary) ||
+    compare(left.id, right.id);
+}
+
+function publicDependencyItem(workItem, resolvers, includeReviewCues) {
+  const initiative = workItem.initiativeId === null ? null : resolvers.indexes.initiatives.get(workItem.initiativeId);
+  const result = {
+    id: workItem.id,
+    jiraKey: workItem.jiraKey,
+    summary: workItem.summary,
+    initiative: initiative ? { id: initiative.id, name: initiative.name } : null,
+    canonicalStatus: workItem.canonicalStatus,
+    currentStateConfidence: workItem.currentStateConfidence,
+    archived: workItem.archived
+  };
+  if (includeReviewCues) result.reviewCues = dependencyReviewCues(workItem);
+  return result;
+}
+
+function boundedDependencyGroup(workItems, resolvers, includeReviewCues) {
+  const ordered = [...workItems].sort(compareDependencyItems);
+  const items = ordered.slice(0, MAX_DEPENDENCY_CONTEXT_ITEMS)
+    .map(item => publicDependencyItem(item, resolvers, includeReviewCues));
+  return {
+    items,
+    total: ordered.length,
+    returned: items.length,
+    limit: MAX_DEPENDENCY_CONTEXT_ITEMS,
+    truncated: ordered.length > items.length
+  };
+}
+
+function buildDependencyContext(document, resolvers, organizationId, workspaceId, workItem) {
+  const listedWorkItems = workItem.dependencies.map(dependencyId =>
+    resolvers.resolveWorkspaceChild('workItems', organizationId, workspaceId, dependencyId));
+  const referencingWorkItems = document.workItems.filter(candidate =>
+    candidate.organizationId === organizationId &&
+    candidate.workspaceId === workspaceId &&
+    candidate.id !== workItem.id &&
+    candidate.dependencies.includes(workItem.id));
+  const listedDependencies = boundedDependencyGroup(listedWorkItems, resolvers, true);
+  const referencing = boundedDependencyGroup(referencingWorkItems, resolvers, false);
+  const cueCounts = Object.fromEntries(DEPENDENCY_REVIEW_CUES.map(cue => [
+    cue,
+    listedWorkItems.filter(item => dependencyReviewCues(item).includes(cue)).length
+  ]));
+  const context = {
+    organizationId,
+    workspaceId,
+    workItemId: workItem.id,
+    trustLabel: DEPENDENCY_CONTEXT_TRUST_LABEL,
+    listedDependencies,
+    referencingWorkItems: referencing,
+    cueCounts
+  };
+  if (Buffer.byteLength(JSON.stringify(context), 'utf8') > MAX_DEPENDENCY_CONTEXT_OUTPUT_BYTES) {
+    throw outputTooLarge();
+  }
+  return context;
 }
 
 function buildExactSourceIndex(document, organizationId, workspaceId) {
@@ -469,6 +568,7 @@ function buildTriageDetail(document, organizationId, workspaceId, workItemId) {
     organizationId,
     workspaceId: workspace.id,
     workItem: detailedWorkItem(workItem, resolvers),
+    dependencyContext: buildDependencyContext(document, resolvers, organizationId, workspace.id, workItem),
     triageSignals: triageSignals(workItem, matches),
     sourceMatches: matches.map(sourceMatchMetadata),
     auditEvents: itemAuditEvents(document, organizationId, workspace.id, workItem.id)
@@ -512,12 +612,17 @@ function buildSourceMatchDetail(document, organizationId, workspaceId, workItemI
 }
 
 module.exports = {
+  DEPENDENCY_CONTEXT_TRUST_LABEL,
+  DEPENDENCY_REVIEW_CUES,
   DEFAULT_TRIAGE_PAGE_SIZE,
+  MAX_DEPENDENCY_CONTEXT_ITEMS,
+  MAX_DEPENDENCY_CONTEXT_OUTPUT_BYTES,
   MAX_TRIAGE_PAGE_SIZE,
   MAX_TRIAGE_SEARCH_CHARACTERS,
   TRIAGE_SIGNAL_FILTERS,
   TRIAGE_SORT_FIELDS,
   buildExactSourceIndex,
+  buildDependencyContext,
   buildSourceMatchDetail,
   buildTriageCollection,
   buildTriageDetail,
