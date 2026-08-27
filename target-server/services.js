@@ -27,6 +27,7 @@ const { readSourceFile, requireExplicitRoot } = require('./source-files');
 const { createCaptureServices } = require('./capture-services');
 const { createBriefingServices } = require('./briefing-services');
 const { createWorkServices } = require('./work-services');
+const { buildSourceChangeReview } = require('./source-change-projections');
 const {
   buildSourceMatchDetail,
   buildTriageCollection,
@@ -83,6 +84,8 @@ function createTargetServices(options = {}) {
       read(document => buildTriageDetail(document, organizationId, workspaceId, workItemId)),
     triageSourceMatchDetail: (organizationId, workspaceId, workItemId, sourceId, recordNumber) =>
       read(document => buildSourceMatchDetail(document, organizationId, workspaceId, workItemId, sourceId, recordNumber)),
+    compareSources: (organizationId, workspaceId, query) =>
+      read(document => buildSourceChangeReview(document, organizationId, workspaceId, query)),
     listChildren: (collection, organizationId, workspaceId) => read(document => listWorkspaceCollection(document, collection, organizationId, workspaceId)),
     getChild: (collection, organizationId, workspaceId, childId) => read(document => getWorkspaceChild(document, collection, organizationId, workspaceId, childId)),
     listSourceFindings: (organizationId, workspaceId, sourceId) => read(document => listFindingsForSource(document, organizationId, workspaceId, sourceId)),

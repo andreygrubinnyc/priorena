@@ -12,6 +12,27 @@ const PROPOSED_CHANGE_FIELDS = Object.freeze([
   'currentStateProvenance',
   'lastCapturedCommentAt'
 ]);
+const SOURCE_CHANGE_STATES = Object.freeze(['added', 'removed', 'changed', 'unchanged']);
+const SOURCE_CHANGE_FIELDS = Object.freeze([
+  'itemType',
+  'externalItemType',
+  'summary',
+  'description',
+  'jiraProjectKey',
+  'jiraEpicKey',
+  'noEpic',
+  'requestedInitiativeId',
+  'initiativeName',
+  'canonicalStatus',
+  'evidenceExcerpt',
+  'category'
+]);
+const SOURCE_CHANGE_REASONS = Object.freeze({
+  'source-not-normalized-feed': 'This Source is not a supported normalized feed.',
+  'source-invalid': 'This Source cannot be parsed as its recorded normalized-feed format.',
+  'missing-external-key': 'Every compared row must have one exact external key.',
+  'duplicate-external-key': 'Each exact external key must appear only once in a compared Source.'
+});
 
 function evidenceReviewStableId(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 160 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
@@ -59,6 +80,13 @@ function createTargetEvidenceReviewApiClient(options = {}) {
     openSource(organizationId, workspaceId, sourceId) {
       return read(`${base(organizationId, workspaceId)}/sources/${encodedId(sourceId)}`);
     },
+    compareSources(organizationId, workspaceId, baselineSourceId, currentSourceId) {
+      const query = new URLSearchParams({
+        baselineSourceId: evidenceReviewStableId(baselineSourceId),
+        currentSourceId: evidenceReviewStableId(currentSourceId)
+      });
+      return read(`${base(organizationId, workspaceId)}/sources/change-review?${query.toString()}`);
+    },
     listFindings(organizationId, workspaceId, page = 1) {
       if (!Number.isInteger(page) || page < 1) throw new TypeError('Finding page must be a positive integer');
       return read(`${base(organizationId, workspaceId)}/findings?status=pending&page=${page}&pageSize=${FINDING_PAGE_SIZE}`);
@@ -88,6 +116,9 @@ function newEvidenceReviewState() {
   return {
     sourceDetail: null,
     sourceRevision: null,
+    sourceComparison: null,
+    sourceComparisonRevision: null,
+    sourceComparisonSelection: { baselineSourceId: null, currentSourceId: null },
     excerptSelection: null,
     lastCreatedFindingId: null,
     findingPage: { page: 1, pageSize: FINDING_PAGE_SIZE, total: 0, findings: [], revision: null },
@@ -95,6 +126,91 @@ function newEvidenceReviewState() {
     proposedPreview: null,
     staleProposedChangeIds: new Set()
   };
+}
+
+function validatePublicChangeValue(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.truncated !== 'boolean') return false;
+  if (!['string', 'boolean'].includes(typeof value.value) && value.value !== null) return false;
+  if (typeof value.value === 'string') {
+    return Number.isInteger(value.originalCharacterCount) && value.originalCharacterCount >= value.value.length &&
+      value.value.length <= 300 && value.truncated === (value.originalCharacterCount > value.value.length);
+  }
+  return value.originalCharacterCount === null && value.truncated === false;
+}
+
+function validateSourceChangeSummary(summary) {
+  return summary === null || (summary && typeof summary === 'object' &&
+    ['itemType', 'summary', 'canonicalStatus'].every(field => validatePublicChangeValue(summary[field])));
+}
+
+function validateSourceComparison(result, organizationId, workspaceId, baselineSourceId, currentSourceId, expectedRevision) {
+  const body = result?.body;
+  if (typeof result?.revision !== 'string' || !/^[a-f0-9]{64}$/.test(result.revision) || result.revision !== expectedRevision) {
+    const error = new Error('Priorena data changed while the Sources were being compared');
+    error.code = 'REVISION_CONFLICT';
+    throw error;
+  }
+  const sourceMatches = (source, id) => source && source.id === id && source.organizationId === organizationId &&
+    source.workspaceId === workspaceId && typeof source.sourceKind === 'string' && typeof source.title === 'string';
+  if (!body || body.organizationId !== organizationId || body.workspaceId !== workspaceId ||
+    !sourceMatches(body.baselineSource, baselineSourceId) || !sourceMatches(body.currentSource, currentSourceId)) {
+    throw new Error('Source comparison response crossed its validated parent context');
+  }
+  if (body.comparisonBasis?.identity !== 'exact-external-key' || body.comparisonBasis?.baselinePersisted !== false ||
+    body.comparisonBasis?.trustLabel !== 'Source comparison — not accepted Evidence or current state' ||
+    typeof body.readiness?.ready !== 'boolean' || !Array.isArray(body.readiness.reasons) || !Array.isArray(body.changes)) {
+    throw new Error('Source comparison response has an invalid trust boundary');
+  }
+  if (!body.counts || !SOURCE_CHANGE_STATES.every(status => Number.isInteger(body.counts[status]) && body.counts[status] >= 0)) {
+    throw new Error('Source comparison response has invalid counts');
+  }
+  const reasonIsValid = reason => reason && ['baseline', 'current'].includes(reason.sourceRole) &&
+    Object.hasOwn(SOURCE_CHANGE_REASONS, reason.reason) && Number.isInteger(reason.affectedRecords) && reason.affectedRecords >= 0;
+  const reasonRoles = new Set(body.readiness.reasons.map(reason => reason?.sourceRole));
+  if (body.readiness.reasons.some(reason => !reasonIsValid(reason)) || reasonRoles.size !== body.readiness.reasons.length ||
+    body.readiness.ready !== (body.readiness.reasons.length === 0)) {
+    throw new Error('Source comparison readiness is invalid');
+  }
+  if (!body.readiness.ready) {
+    if (body.changes.length !== 0 || SOURCE_CHANGE_STATES.some(status => body.counts[status] !== 0)) {
+      throw new Error('Blocked Source comparison disclosed partial change results');
+    }
+    return body;
+  }
+  const keys = new Set();
+  let previousKey = null;
+  for (const change of body.changes) {
+    if (!change || typeof change.externalKey !== 'string' || !change.externalKey || keys.has(change.externalKey) ||
+      (previousKey !== null && previousKey >= change.externalKey) ||
+      !SOURCE_CHANGE_STATES.includes(change.status) || !Array.isArray(change.fieldChanges) ||
+      !validateSourceChangeSummary(change.baseline) || !validateSourceChangeSummary(change.current)) {
+      throw new Error('Source comparison returned an invalid change row');
+    }
+    keys.add(change.externalKey);
+    previousKey = change.externalKey;
+    if ((change.status === 'added') !== (change.baseline === null) || (change.status === 'removed') !== (change.current === null)) {
+      throw new Error('Source comparison returned an inconsistent change row');
+    }
+    const fields = new Set();
+    for (const fieldChange of change.fieldChanges) {
+      if (!fieldChange || !SOURCE_CHANGE_FIELDS.includes(fieldChange.field) || fields.has(fieldChange.field) ||
+        !validatePublicChangeValue(fieldChange.baseline) || !validatePublicChangeValue(fieldChange.current)) {
+        throw new Error('Source comparison returned an invalid field change');
+      }
+      fields.add(fieldChange.field);
+    }
+    if ((change.status === 'changed') !== (change.fieldChanges.length > 0)) {
+      throw new Error('Source comparison returned inconsistent changed fields');
+    }
+  }
+  const counted = Object.fromEntries(SOURCE_CHANGE_STATES.map(status => [
+    status,
+    body.changes.filter(change => change.status === status).length
+  ]));
+  if (SOURCE_CHANGE_STATES.some(status => counted[status] !== body.counts[status])) {
+    throw new Error('Source comparison counts do not match its rows');
+  }
+  return body;
 }
 
 function clearEvidenceReviewState(state) {
@@ -196,6 +312,9 @@ const targetEvidenceReviewApi = {
   FINDING_PAGE_SIZE,
   MAX_EXCERPT_CHARACTERS,
   PROPOSED_CHANGE_FIELDS,
+  SOURCE_CHANGE_FIELDS,
+  SOURCE_CHANGE_REASONS,
+  SOURCE_CHANGE_STATES,
   buildProposedChange,
   clearEvidenceReviewState,
   createTargetEvidenceReviewApiClient,
@@ -207,6 +326,7 @@ const targetEvidenceReviewApi = {
   newEvidenceReviewState,
   proposedValue,
   validateSourceDetail,
+  validateSourceComparison,
   valueLabel
 };
 
