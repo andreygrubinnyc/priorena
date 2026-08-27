@@ -14,6 +14,7 @@ The controller is intentionally narrow:
 - an explicit canonical release root, resolved Node executable, private data file, private Source root, private operational log, and current-user home;
 - a fixed local runtime port of `3100`; no host override exists;
 - deterministic bounded plist bytes, validated with `/usr/bin/plutil` before any activation-capable operation;
+- deterministic registration convergence after each successful bootout or bootstrap: at most 25 exact-label read-only checks, separated by at most 24 waits of 200 milliseconds, with no repeated mutation while polling;
 - `RunAtLoad`, restart only after an unsuccessful exit, and a 30-second throttle to avoid a tight failure loop;
 - launchd stdout and stderr directed to `/dev/null`; the existing bounded mode-`0600` operational log remains authoritative;
 - same-directory atomic publication, retained private prior bytes for replacement rollback, exact registration verification, and automatic prior-state restoration after a failed transaction;
@@ -86,7 +87,7 @@ Use the same explicit configuration template as `plan`, changing only the action
 
 ## Later separately authorized first installation
 
-First installation requires the exact acknowledgement `INSTALL_PRIORENA_USER_AGENT`. It refuses an existing managed file, retained prior file, or already registered fixed label. It atomically publishes a mode-`0600` definition, bootstraps only the current GUI-user domain, and verifies the exact file bytes and exact label registration. A failed bootstrap or verification removes only the new definition and boots out only the exact label if necessary; failure to verify that rollback is a hard stop.
+First installation requires the exact acknowledgement `INSTALL_PRIORENA_USER_AGENT`. It refuses an existing managed file, retained prior file, or already registered fixed label. It atomically publishes a mode-`0600` definition, bootstraps only the current GUI-user domain, waits for bounded exact-label registration convergence without issuing another bootstrap, and verifies the exact file bytes and exact label registration. A failed bootstrap or verification removes only the new definition and boots out only the exact label if necessary; failure to verify that rollback is a hard stop.
 
 The authorized placeholder template is the `plan` template with action `install` and this additional pair:
 
@@ -104,10 +105,14 @@ The transaction then:
 
 1. records whether the exact label is registered;
 2. boots out only `gui/<CURRENT_UID>/com.priorena.local` when registered;
-3. atomically replaces only the exact managed plist with already-linted bytes;
-4. bootstraps only the exact current-user domain and exact managed destination;
-5. verifies the final definition bytes and exact registered label;
-6. on failure, boots out only that exact label when necessary, atomically restores the prior bytes, restores the prior registration state, verifies it, and stops.
+3. waits for bounded exact-label absence after a successful bootout without issuing another bootout;
+4. atomically replaces only the exact managed plist with already-linted bytes;
+5. bootstraps only the exact current-user domain and exact managed destination;
+6. waits for bounded exact-label registration after a successful bootstrap without issuing another bootstrap;
+7. verifies the final definition bytes and exact registered label;
+8. on failure, boots out only that exact label when necessary, waits for absence, atomically restores the prior bytes, makes at most one restoration bootstrap when the prior state was registered, waits for registration, verifies it, and stops.
+
+A replacement failure retains the existing stable top-level codes and may also carry only allowlisted public-safe `phase` and `status` values. Candidate phases are `candidate-bootout`, `candidate-definition`, `candidate-bootstrap`, and `candidate-verification`. Restoration phases are `restoration-bootout`, `restoration-definition`, `restoration-bootstrap`, and `restoration-verification`. Status is limited to a bounded category such as `mutation-failed`, `inspection-failed`, `convergence-timeout`, `definition-failed`, or `verification-failed`. A failed restoration may additionally identify the candidate phase and status. No child result, UID, path, plist byte, process identity, or private value is included.
 
 Use the complete explicit configuration describing the new intended definition, action `replace`, and:
 
@@ -127,7 +132,25 @@ Use action `rollback` with the explicit prior configuration and:
 --acknowledgement ROLLBACK_PRIORENA_USER_AGENT
 ```
 
-The `.previous` file remains private and retained. When it already matches the active bytes, rollback is safely idempotent. A later replacement may reuse it only when it exactly matches the then-active definition.
+The `.previous` file remains private and retained. When it already matches the active bytes and the exact service is registered, rollback is safely idempotent. When those bytes match but registration is absent, rollback stops with `STARTUP_REGISTRATION_RECOVERY_REQUIRED`; it does not bootstrap implicitly or report rollback success. A later replacement may reuse the retained file only when it exactly matches the then-active definition.
+
+## Separately authorized exact registration recovery
+
+Registration recovery is only for the narrow stopped state in which:
+
+- the complete explicit configuration passes every normal trust-boundary and plist check;
+- the active managed definition bytes exactly equal the deterministic bytes for that configuration;
+- the retained `.previous` definition exists, is valid, and exactly equals both the active and deterministic bytes;
+- the exact fixed label is not registered; and
+- separate operational evidence has already established that activation is safe, including an unused port and no conflicting process.
+
+It requires the exact acknowledgement:
+
+```text
+RECOVER_PRIORENA_USER_AGENT_REGISTRATION
+```
+
+Use the complete explicit configuration template with action `recover-registration`. The controller performs no definition write and no bootout. It issues exactly one bootstrap for the exact current-user domain and managed destination, waits for bounded registration convergence, and verifies the unchanged exact definition bytes and registration. A registered service, missing or mismatched retained definition, unknown or mismatched active definition, wrong acknowledgement, failed bootstrap, or convergence/verification failure stops without a second bootstrap. Any failed recovery requires inspection and new authority; do not retry it automatically.
 
 ## Later separately authorized removal
 
@@ -174,6 +197,8 @@ Use bounded controller codes, `inspect`, exact process evidence, and the existin
 | Plist validation failure | `STARTUP_PLIST_VALIDATION_FAILED` | Stop before write. Do not bypass `plutil` or hand-edit a plist. |
 | Registration failure | `STARTUP_INSTALL_FAILED`, `STARTUP_REPLACEMENT_FAILED`, or `STARTUP_SERVICE_MUTATION_FAILED` with verified rollback | Confirm exact label/domain ownership and resolve the private launchd condition before one newly authorized attempt. |
 | Rollback verification failure | An error ending in `_ROLLBACK_FAILED` or `_RESTORE_FAILED` | Treat state as unverified. Do not retry, use broad launchctl actions, or start another runtime; obtain focused authority after exact private inspection. |
+| Exact prior bytes active but registration absent | `STARTUP_REGISTRATION_RECOVERY_REQUIRED` with phase `registration-recovery-required` and status `recovery-required` | Stop. Inspect the exact definition, retained bytes, service, process, and port. Use `recover-registration` only under fresh exact activation authority. |
+| Registration recovery failure | `STARTUP_REGISTRATION_RECOVERY_FAILED` with an allowlisted registration-recovery phase and bounded status | Stop after the single bootstrap. Do not retry recovery or candidate activation; inspect and obtain new authority. |
 | Restart-loop throttling | Exact service remains registered but repeated unsuccessful exits are separated by the configured 30-second throttle | Inspect the bounded private startup category; do not lower the throttle or force repeated starts. |
 | Process mismatch | Existing process guard returns command, cwd, or loopback-port mismatch | Do not signal it. Resolve ownership separately. |
 | Port conflict | Exact configured process does not own `127.0.0.1:3100`, or another PID owns the port | Do not change the supported port or broaden exposure. Resolve the unrelated process under separate authority. |
@@ -181,6 +206,8 @@ Use bounded controller codes, `inspect`, exact process evidence, and the existin
 | Application smoke failure | Process identity and loopback bind pass, but read-only UI/API checks fail | Preserve data and retained definition, stop the acceptance sequence, and choose separately authorized rollback or runtime recovery. |
 
 Do not use `killall`, `pkill`, sudo, broad `launchctl` domains, service discovery, force flags, recursive deletion, a shell wrapper, or automatic retries.
+
+For a future replacement, perform one exact preflight, one acknowledged candidate replacement, and full process/listener/application/data-integrity acceptance. If candidate activation fails and automatic restoration verifies a registered prior state, stop on the restored prior state. If restoration stops with exact prior bytes active but registration absent, do not invoke rollback or retry the candidate: inspect the stopped state, then obtain separate authority for at most one exact `recover-registration` action. After recovery, repeat the complete prior-runtime acceptance and stop. No path permits a second automatic candidate activation, a second restoration bootstrap, or an automatic registration-recovery attempt.
 
 ## Source release interaction and retained boundaries
 

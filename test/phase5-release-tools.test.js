@@ -18,7 +18,11 @@ const {
 } = require('../scripts/release/file-operations');
 const { MAX_PROCESS_COMMAND_BYTES, assertNoLiveWriter, inspectValidatedProcess } = require('../scripts/release/process-safety');
 const { waitForRollbackReady } = require('../scripts/release/rollback-application');
-const { executeCutoverLifecycle, safeRehearsalErrorCategory } = require('../scripts/release/rehearse');
+const {
+  executeCutoverLifecycle,
+  rehearseStartupControllerLifecycle,
+  safeRehearsalErrorCategory
+} = require('../scripts/release/rehearse');
 
 const FIXED_TIME = new Date('2026-08-11T12:00:00.000Z');
 const RELEASE_COMMIT = 'a'.repeat(40);
@@ -305,6 +309,27 @@ test('cutover lifecycle fails before replacement and rolls back start or smoke f
       });
     });
   }
+});
+
+test('startup controller rehearsal restores a registered baseline or stops at exact recovery-required state', async () => {
+  const result = await rehearseStartupControllerLifecycle();
+  assert.deepEqual(result, {
+    status: 'passed',
+    syntheticOnly: true,
+    baselineRestoration: {
+      status: 'restored-and-registered',
+      candidateActivationAttempts: 1,
+      restorationRegistrationAttempts: 1,
+      secondCandidateActivationAttempts: 0
+    },
+    stoppedRecovery: {
+      status: 'registration-recovery-required',
+      candidateActivationAttempts: 1,
+      restorationRegistrationAttempts: 1,
+      automaticRegistrationRecoveryAttempts: 0,
+      secondCandidateActivationAttempts: 0
+    }
+  });
 });
 
 test('process guards require an exited PID, unused file, and unused expected port', () => {
