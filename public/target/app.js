@@ -2755,6 +2755,10 @@
 
   const briefingFormatLabels = Object.freeze({ teams: 'Teams-style', email: 'Email-style', confluence: 'Confluence-style' });
   const briefingTypeLabels = Object.freeze({ 'status-update': 'Status Update', 'delivery-status': 'Delivery Status', general: 'General' });
+  const briefingSectionLabels = Object.freeze({
+    summary: 'Summary', progress: 'Progress', risk: 'Risk', milestones: 'Milestones',
+    'follow-up': 'Follow-Up', evidence: 'Evidence', 'next-actions': 'Next actions'
+  });
   const lifecycleLabels = Object.freeze({ draft: 'Draft', finalized: 'Finalized', communicated: 'Communicated' });
 
   function briefingFormatLabel(value) {
@@ -2767,6 +2771,26 @@
 
   function lifecycleLabel(value) {
     return lifecycleLabels[value] || 'Unavailable state';
+  }
+
+  function briefingSectionLabel(value) {
+    return briefingSectionLabels[value] || value;
+  }
+
+  function candidateProvenanceLabel(value) {
+    const labels = {
+      'direct-work-item-state': 'Direct current state',
+      'direct-follow-up-state': 'Direct Follow-Up state',
+      'direct-milestone-state': 'Direct Milestone state',
+      'accepted-evidence': 'Accepted Evidence'
+    };
+    return labels[value] || 'Grounded candidate';
+  }
+
+  function candidateBaselineBadge(value) {
+    const labels = { available: 'Available', added: 'Added', changed: 'Changed', unchanged: 'Unchanged' };
+    const classes = { added: 'warning-badge', changed: 'review-badge', unchanged: 'muted-badge', available: 'readiness-badge' };
+    return badge(labels[value] || 'Available', classes[value] || 'muted-badge');
   }
 
   function checkedValues(container, selector) {
@@ -2801,6 +2825,11 @@
       option('general', 'General', existing?.briefingType === 'general')
     ]);
     const guidance = node('textarea', { value: existing?.draftingGuidance || '', attrs: { maxlength: '4000', rows: '4' }, placeholder: 'Optional drafting guidance' });
+    const presetChoice = node('select', {}, [
+      option('', 'Choose a starting point'),
+      ...briefingModule.BRIEFING_PRESETS.map(preset => option(preset.id, preset.label))
+    ]);
+    const presetDescription = node('p', { className: 'meta', text: 'Presets fill this form only. Nothing is created or saved until you submit the definition.' });
     const selectedWorkspaces = new Set(existing?.workspaces.map(workspace => workspace.id) || [state.context.activeWorkspaceId]);
     const selectedInitiatives = new Set(existing?.initiatives.map(initiative => initiative.id) || []);
     const workspaceControls = node('div', { className: 'selection-grid' }, (state.context.workspaces || []).map(workspace => {
@@ -2820,16 +2849,34 @@
       node('input', { type: 'checkbox', name: 'briefing-format', value: format, checked: existing ? existing.preferredFormats.includes(format) : true }),
       node('span', { text: label })
     ])));
-    const sectionNames = {
-      summary: 'Summary', progress: 'Progress', risk: 'Risk', milestones: 'Milestones',
-      'follow-up': 'Follow-Up', evidence: 'Evidence', 'next-actions': 'Next actions'
-    };
     const defaultSections = new Set(existing?.defaultSections || ['progress', 'risk', 'milestones', 'follow-up', 'evidence']);
-    const sectionControls = node('div', { className: 'check-row' }, Object.entries(sectionNames).map(([section, label]) => node('label', { className: 'choice' }, [
+    const sectionControls = node('div', { className: 'check-row' }, Object.entries(briefingSectionLabels).map(([section, label]) => node('label', { className: 'choice' }, [
       node('input', { type: 'checkbox', name: 'briefing-section', value: section, checked: defaultSections.has(section) }),
       node('span', { text: label })
     ])));
     form.append(
+      node('fieldset', { className: 'choice-group briefing-preset-picker' }, [
+        node('legend', { text: 'Start with a preset' }),
+        node('div', { className: 'field-group' }, [
+          node('label', { className: 'field' }, [node('span', { text: 'Preset' }), presetChoice]),
+          node('button', { className: 'button secondary', type: 'button', text: 'Apply preset to form', on: { click: () => {
+            try {
+              const preset = briefingModule.briefingPreset(presetChoice.value);
+              name.value = preset.name;
+              audience.value = preset.audienceProfile;
+              type.value = preset.briefingType;
+              guidance.value = preset.draftingGuidance;
+              form.querySelectorAll('[name="briefing-format"]').forEach(control => { control.checked = preset.preferredFormats.includes(control.value); });
+              form.querySelectorAll('[name="briefing-section"]').forEach(control => { control.checked = preset.defaultSections.includes(control.value); });
+              presetDescription.textContent = `${preset.description} Review every field before saving; the preset has not changed Priorena state.`;
+              setStatus('Preset applied to the form. Nothing has been saved.', 'success');
+            } catch (error) {
+              setStatus(error.message, 'error');
+            }
+          } } })
+        ]),
+        presetDescription
+      ]),
       node('div', { className: 'field-group' }, [
         node('label', { className: 'field' }, [node('span', { text: 'Name' }), name]),
         node('label', { className: 'field' }, [node('span', { text: 'Audience profile' }), audience]),
@@ -2903,7 +2950,7 @@
       state.briefings.tab = 'open';
       state.briefings.activeDefinitionId = definition.id;
       state.briefings.activeVersionId = created.body.version.id;
-      setStatus(`Draft created with ${prepared.body.candidates.length} reviewable candidate facts.`, 'success');
+      setStatus(`Draft created with ${prepared.body.candidates.length} available candidate facts and none selected. Review and save explicit selections.`, 'success');
       await renderBriefings();
     } catch (error) {
       if (!briefingOperationCurrent(token)) return;
@@ -2913,10 +2960,19 @@
 
   function renderPrepareBriefings() {
     const cards = state.briefings.definitions.map(definition => node('article', { className: 'card' }, [
-      node('div', { className: 'row-head' }, [node('h2', { text: definition.name }), badge(briefingTypeLabel(definition.briefingType))]),
+      node('div', { className: 'row-head' }, [
+        node('h2', { text: definition.name }),
+        node('span', { className: 'badge-row' }, [
+          badge(briefingTypeLabel(definition.briefingType)),
+          badge(definition.lastCommunicatedVersionId ? 'Baseline established' : 'No communicated baseline', definition.lastCommunicatedVersionId ? 'clear-badge' : 'readiness-badge')
+        ])
+      ]),
       node('p', { text: definition.audienceProfile }),
       node('p', { className: 'meta', text: definitionInitiativeLabel(definition) }),
       node('p', { className: 'meta', text: `Formats: ${definition.preferredFormats.map(briefingFormatLabel).join(', ')} · Sections: ${definition.defaultSections.join(', ')}` }),
+      node('p', { className: 'meta', text: definition.lastCommunicatedVersionId
+        ? 'New Drafts compare candidate facts with the last communicated Version.'
+        : 'The first Draft has no communicated comparison baseline; all candidate selection remains explicit.' }),
       node('div', { className: 'actions' }, [
         node('button', { className: 'button primary', type: 'button', text: 'Create Draft', on: { click: () => createBriefingDraft(definition) } }),
         node('details', { className: 'inline-editor' }, [
@@ -2975,22 +3031,58 @@
     const comparison = version.frozenSnapshot?.comparison;
     if (!comparison) return null;
     return node('p', { className: 'notice', text: comparison.baselineVersionId
-      ? `Compared with communicated baseline: ${comparison.addedFactIds.length} added, ${comparison.changedFactIds.length} changed, ${comparison.removedFactIds.length} removed.`
-      : `${comparison.addedFactIds.length} available facts; no communicated baseline exists yet.` });
+      ? `Compared with the last communicated baseline: ${comparison.addedFactIds.length} added, ${comparison.changedFactIds.length} changed, ${comparison.removedFactIds.length} removed. These differences guide review; they are not a risk score and do not change current state.`
+      : `${comparison.addedFactIds.length} available facts; no communicated baseline exists yet. Availability does not select, finalize, or communicate a fact.` });
   }
 
   function renderDraftEditor(definition, version) {
     const snapshot = version.frozenSnapshot;
-    const selected = new Set(snapshot.selectedFactIds);
+    const review = briefingModule.briefingCandidateReview(snapshot);
     const form = node('form', { className: 'briefing-editor' });
-    const candidateControls = node('div', { className: 'candidate-list' }, snapshot.candidates.map(candidate => node('label', { className: 'candidate' }, [
-      node('input', { type: 'checkbox', name: 'candidate-fact', value: candidate.id, checked: selected.has(candidate.id) }),
-      node('span', {}, [
-        node('strong', { text: candidate.title }),
-        node('span', { text: candidate.text }),
-        node('small', { text: `${candidate.kind} · ${candidate.section} · ${candidate.provenance.type}${candidate.truncated ? ' · shortened preview' : ''}` })
-      ])
-    ])));
+    const selectionSummary = node('p', { className: 'notice candidate-selection-summary', attrs: { 'aria-live': 'polite' } });
+    const candidateCheckboxes = () => [...form.querySelectorAll('[name="candidate-fact"]')];
+    const updateSelectionSummary = () => {
+      const selectedCount = candidateCheckboxes().filter(control => control.checked).length;
+      selectionSummary.textContent = `${selectedCount} of ${review.counts.total} candidate facts selected. Selection changes remain local to this form until Save Draft.`;
+    };
+    const replaceCandidateSelection = candidateIds => {
+      const selectedIds = new Set(candidateIds);
+      candidateCheckboxes().forEach(control => { control.checked = selectedIds.has(control.value); });
+      updateSelectionSummary();
+    };
+    const setGroupSelection = (candidateIds, checked) => {
+      const groupIds = new Set(candidateIds);
+      candidateCheckboxes().forEach(control => {
+        if (groupIds.has(control.value)) control.checked = checked;
+      });
+      updateSelectionSummary();
+    };
+    const candidateGroups = review.groups.length
+      ? node('div', { className: 'candidate-groups' }, review.groups.map(group => {
+        const candidateIds = group.items.map(item => item.candidate.id);
+        return node('fieldset', { className: 'choice-group candidate-group' }, [
+          node('legend', {}, [
+            node('strong', { text: briefingSectionLabel(group.section) }),
+            badge(`${group.items.length} candidate${group.items.length === 1 ? '' : 's'}`, 'muted-badge')
+          ]),
+          node('div', { className: 'actions candidate-group-actions' }, [
+            node('button', { className: 'button secondary compact-button', type: 'button', text: 'Select section', on: { click: () => setGroupSelection(candidateIds, true) } }),
+            node('button', { className: 'button secondary compact-button', type: 'button', text: 'Clear section', on: { click: () => setGroupSelection(candidateIds, false) } })
+          ]),
+          node('div', { className: 'candidate-list' }, group.items.map(item => node('label', { className: 'candidate' }, [
+            node('input', { type: 'checkbox', name: 'candidate-fact', value: item.candidate.id, checked: item.selected }),
+            node('span', {}, [
+              node('span', { className: 'row-head' }, [
+                node('strong', { text: item.candidate.title }),
+                candidateBaselineBadge(item.baselineState)
+              ]),
+              node('span', { text: item.candidate.text }),
+              node('small', { text: `${candidateProvenanceLabel(item.candidate.provenance.type)} · ${item.candidate.kind}${item.candidate.truncated ? ' · shortened preview' : ''}` })
+            ])
+          ])))
+        ]);
+      }))
+      : empty('No grounded candidate facts are available for this Briefing definition.');
     const manualRows = snapshot.manualInputs.map(input => {
       const textarea = node('textarea', { value: input.text, attrs: { maxlength: '4000', rows: '3', 'data-manual-id': input.id } });
       const section = node('select', { attrs: { 'data-manual-section': input.id } }, snapshot.definition.defaultSections.map(value => option(value, value, value === input.section)));
@@ -3004,9 +3096,25 @@
     const previewArea = node('div', { className: 'output-region', attrs: { 'aria-live': 'polite' } });
     form.append(
       comparisonSummary(version),
+      node('div', { className: 'metric-grid briefing-readiness' }, [
+        metric('Available candidates', review.counts.total),
+        metric('Direct current state', review.counts.currentState),
+        metric('Accepted Evidence', review.counts.acceptedEvidence),
+        metric(review.hasBaseline ? 'Added / changed' : 'Baseline changes', review.counts.added + review.counts.changed)
+      ]),
       node('h3', { text: 'Grounded candidate facts' }),
-      node('p', { className: 'meta', text: 'Current Work Item state and accepted Evidence are labeled separately. Select only facts that belong in this Draft.' }),
-      candidateControls,
+      node('p', { className: 'meta', text: 'Current Work Item state and accepted Evidence stay labeled separately. Baseline differences are review cues only. Select only facts that belong in this Draft.' }),
+      node('div', { className: 'actions candidate-selection-actions' }, [
+        node('button', { className: 'button secondary', type: 'button', text: 'Select all candidates', disabled: review.counts.total === 0, on: { click: () => replaceCandidateSelection(snapshot.candidates.map(candidate => candidate.id)) } }),
+        node('button', { className: 'button secondary', type: 'button', text: 'Clear selection', disabled: review.counts.total === 0, on: { click: () => replaceCandidateSelection([]) } }),
+        review.hasBaseline ? node('button', {
+          className: 'button secondary', type: 'button', text: 'Select added and changed',
+          disabled: review.actionableCandidateIds.length === 0,
+          on: { click: () => replaceCandidateSelection(review.actionableCandidateIds) }
+        }) : null
+      ]),
+      selectionSummary,
+      candidateGroups,
       node('h3', { text: 'Manual PM input' }),
       node('p', { className: 'meta', text: 'Manual PM input is explicitly labeled and is never presented as Evidence.' }),
       ...manualRows,
@@ -3063,6 +3171,10 @@
       ]),
       previewArea
     );
+    form.addEventListener('change', event => {
+      if (event.target?.name === 'candidate-fact') updateSelectionSummary();
+    });
+    updateSelectionSummary();
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const token = briefingOperationToken();
