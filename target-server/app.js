@@ -147,6 +147,12 @@ function createTargetApiApp(options = {}) {
   mutationRoute('post', `${workspaceBase}/proposed-changes/:proposedChangeId/review`, req => services.reviewProposedChange(req.params.organizationId, req.params.workspaceId, req.params.proposedChangeId, req.body));
   mutationRoute('post', `${workspaceBase}/proposed-changes/:proposedChangeId/apply`, req => services.applyProposedChange(req.params.organizationId, req.params.workspaceId, req.params.proposedChangeId, req.body));
 
+  jsonRoute(`${workspaceBase}/sources/change-review`, req => services.compareSources(
+    req.params.organizationId,
+    req.params.workspaceId,
+    req.query
+  ));
+
   const collections = Object.freeze({
     initiatives: 'initiatives',
     workstreams: 'workstreams',

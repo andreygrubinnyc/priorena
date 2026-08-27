@@ -2089,6 +2089,178 @@
     return (state.workflow?.sources || []).find(source => source.id === sourceId) || null;
   }
 
+  function sourceChangeValueText(changeValue) {
+    const value = changeValue?.value;
+    const label = value === '' ? '(empty string)' : evidenceReviewModule.valueLabel(value);
+    return changeValue?.truncated ? `${label} … (truncated from ${changeValue.originalCharacterCount} characters)` : label;
+  }
+
+  function sourceChangeFieldLabel(field) {
+    return field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, character => character.toUpperCase());
+  }
+
+  function sourceChangeRow(change) {
+    const summary = change.current || change.baseline;
+    const summaryText = sourceChangeValueText(summary.summary);
+    const itemType = sourceChangeValueText(summary.itemType);
+    return node('li', { className: `source-change-row source-change-${change.status}` }, [
+      node('div', { className: 'row-head' }, [
+        node('strong', { text: change.externalKey }),
+        badge(change.status, change.status === 'changed' ? 'review-badge' : (change.status === 'added' ? 'clear-badge' : (change.status === 'removed' ? 'warning-badge' : 'muted-badge')))
+      ]),
+      node('p', { text: `${summaryText} · ${itemType}` }),
+      change.fieldChanges.length ? node('ul', { className: 'source-change-fields' }, change.fieldChanges.map(fieldChange =>
+        node('li', {}, [
+          node('strong', { text: `${sourceChangeFieldLabel(fieldChange.field)}: ` }),
+          node('span', { text: `${sourceChangeValueText(fieldChange.baseline)} → ${sourceChangeValueText(fieldChange.current)}` })
+        ]))) : node('p', { className: 'meta', text: change.status === 'unchanged'
+        ? 'No allowlisted field changed.'
+        : `This exact external key exists only in the ${change.status === 'added' ? 'current' : 'baseline'} Source.` })
+    ]);
+  }
+
+  function sourceComparisonResultPanel() {
+    const comparison = state.evidenceReview.sourceComparison;
+    if (!comparison) return node('p', { className: 'meta', text: 'No Source comparison has been run in this Workspace session.' });
+    const clear = node('button', { className: 'button secondary', type: 'button', text: 'Clear comparison result', on: { click: () => {
+      state.evidenceReview.sourceComparison = null;
+      state.evidenceReview.sourceComparisonRevision = null;
+      renderSourceLibrary();
+    } } });
+    if (!comparison.readiness.ready) {
+      return node('section', { className: 'source-change-result', attrs: { 'aria-live': 'polite' } }, [
+        node('div', { className: 'row-head' }, [node('h3', { text: 'Comparison blocked safely' }), badge('No partial result', 'warning-badge')]),
+        node('p', { text: 'Priorena found an ambiguous or unsupported comparison input and returned no change rows.' }),
+        node('ul', {}, comparison.readiness.reasons.map(reason => node('li', {
+          text: `${sourceChangeFieldLabel(reason.sourceRole)} Source: ${evidenceReviewModule.SOURCE_CHANGE_REASONS[reason.reason]}${reason.affectedRecords ? ` (${reason.affectedRecords} affected row${reason.affectedRecords === 1 ? '' : 's'})` : ''}`
+        }))),
+        clear
+      ]);
+    }
+    const groups = evidenceReviewModule.SOURCE_CHANGE_STATES.map(status => ({
+      status,
+      changes: comparison.changes.filter(change => change.status === status)
+    }));
+    return node('section', { className: 'source-change-result', attrs: { 'aria-live': 'polite' } }, [
+      node('div', { className: 'row-head' }, [node('h3', { text: 'Deterministic comparison result' }), badge('Read-only', 'clear-badge')]),
+      node('p', { className: 'meta', text: `Baseline: ${comparison.baselineSource.title} · Current: ${comparison.currentSource.title}` }),
+      node('div', { className: 'metric-grid source-change-metrics' }, [
+        metric('Added', comparison.counts.added),
+        metric('Removed', comparison.counts.removed),
+        metric('Changed', comparison.counts.changed),
+        metric('Unchanged', comparison.counts.unchanged)
+      ]),
+      node('p', { className: 'notice', text: comparison.comparisonBasis.trustLabel }),
+      node('div', { className: 'source-change-groups' }, groups.map(group => node('section', {}, [
+        node('h4', { text: `${sourceChangeFieldLabel(group.status)} · ${group.changes.length}` }),
+        group.changes.length
+          ? node('ul', { className: 'list source-change-list' }, group.changes.map(sourceChangeRow))
+          : node('p', { className: 'meta', text: `No ${group.status} exact external keys.` })
+      ]))),
+      clear
+    ]);
+  }
+
+  async function compareSelectedSources() {
+    const token = workspaceOperationToken();
+    const selection = state.evidenceReview.sourceComparisonSelection;
+    if (!selection.baselineSourceId || !selection.currentSourceId) {
+      setStatus('Select both a baseline Source and a current Source.', 'error');
+      return;
+    }
+    if (selection.baselineSourceId === selection.currentSourceId) {
+      setStatus('Select two different normalized-feed Sources.', 'error');
+      return;
+    }
+    setStatus('Comparing the two explicitly selected Sources without writing data…');
+    try {
+      const result = await evidenceReviewApi.compareSources(
+        token.organizationId,
+        token.workspaceId,
+        selection.baselineSourceId,
+        selection.currentSourceId
+      );
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.sourceComparison = evidenceReviewModule.validateSourceComparison(
+        result,
+        token.organizationId,
+        token.workspaceId,
+        selection.baselineSourceId,
+        selection.currentSourceId,
+        state.workflow.revision
+      );
+      state.evidenceReview.sourceComparisonRevision = result.revision;
+      renderSourceLibrary();
+      document.getElementById('source-change-review')?.focus();
+      setStatus(state.evidenceReview.sourceComparison.readiness.ready
+        ? 'Source comparison completed. Nothing was saved or accepted as Evidence.'
+        : 'Source comparison stopped safely without returning partial changes.', 'success');
+    } catch (error) {
+      if (!workspaceOperationCurrent(token)) return;
+      state.evidenceReview.sourceComparison = null;
+      state.evidenceReview.sourceComparisonRevision = null;
+      if (error.code === 'REVISION_CONFLICT') {
+        try {
+          state.workflow = null;
+          await loadWorkflow();
+          if (workspaceOperationCurrent(token)) renderSourceLibrary();
+        } catch (refreshError) {
+          if (workspaceOperationCurrent(token)) setStatus(refreshError.message, 'error');
+          return;
+        }
+      }
+      if (workspaceOperationCurrent(token)) setStatus(error.message, 'error');
+    }
+  }
+
+  function sourceComparisonPanel() {
+    const sources = (state.workflow?.sources || []).filter(source => source.sourceKind === 'normalized-feed');
+    const selection = state.evidenceReview.sourceComparisonSelection;
+    if (state.evidenceReview.sourceComparison && state.evidenceReview.sourceComparisonRevision !== state.workflow?.revision) {
+      state.evidenceReview.sourceComparison = null;
+      state.evidenceReview.sourceComparisonRevision = null;
+    }
+    const sourceIds = new Set(sources.map(source => source.id));
+    if (!sourceIds.has(selection.baselineSourceId)) selection.baselineSourceId = null;
+    if (!sourceIds.has(selection.currentSourceId)) selection.currentSourceId = null;
+    const baseline = node('select', {}, [
+      option('', 'Select baseline Source', selection.baselineSourceId === null),
+      ...sources.map(source => option(source.id, `${source.title} · ${source.date} · ${source.id}`, source.id === selection.baselineSourceId))
+    ]);
+    const current = node('select', {}, [
+      option('', 'Select current Source', selection.currentSourceId === null),
+      ...sources.map(source => option(source.id, `${source.title} · ${source.date} · ${source.id}`, source.id === selection.currentSourceId))
+    ]);
+    const updateSelection = (field, select) => {
+      selection[field] = select.value || null;
+      if (state.evidenceReview.sourceComparison) {
+        state.evidenceReview.sourceComparison = null;
+        state.evidenceReview.sourceComparisonRevision = null;
+        renderSourceLibrary();
+      }
+    };
+    baseline.addEventListener('change', () => updateSelection('baselineSourceId', baseline));
+    current.addEventListener('change', () => updateSelection('currentSourceId', current));
+    return node('section', {
+      id: 'source-change-review',
+      className: 'panel source-change-review',
+      attrs: { tabindex: '-1' }
+    }, [
+      node('p', { className: 'eyebrow', text: 'Source Snapshot Change Review' }),
+      node('div', { className: 'row-head' }, [node('h2', { text: 'Compare two normalized-feed Sources' }), badge('Exact external keys', 'readiness-badge')]),
+      node('p', { text: 'Choose both roles explicitly. Priorena does not infer chronology, automatically choose a baseline, or save either role.' }),
+      node('p', { className: 'notice', text: 'This is a bounded, read-only Source comparison. It does not create or change Sources, Findings, Evidence, Work Items, or current state.' }),
+      sources.length < 2 ? empty('At least two normalized-feed Sources are required in this Workspace.') : node('div', { className: 'field-group' }, [
+        node('label', { className: 'field' }, [node('span', { text: 'Baseline Source' }), baseline]),
+        node('label', { className: 'field' }, [node('span', { text: 'Current Source' }), current])
+      ]),
+      node('div', { className: 'actions source-change-actions' }, [
+        node('button', { className: 'button primary', type: 'button', text: 'Compare selected Sources', disabled: sources.length < 2, on: { click: compareSelectedSources } })
+      ]),
+      sourceComparisonResultPanel()
+    ]);
+  }
+
   function selectedReviewWorkItem(workItemId) {
     return workItemId ? (state.workflow?.workItems || []).find(item => item.id === workItemId) || null : null;
   }
@@ -2284,6 +2456,7 @@
       : null;
     elements.view.replaceChildren(...[
       node('p', { className: 'notice', text: 'Source lists show safe metadata only. Full Source content is returned only after you explicitly open one Source.' }),
+      sourceComparisonPanel(),
       outcome,
       node('div', { className: `source-library-layout${state.evidenceReview.sourceDetail ? ' detail-open' : ''}` }, [
         recordList(state.workflow?.sources || [], source => [

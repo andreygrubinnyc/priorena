@@ -178,6 +178,17 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .import-apply-acknowledgement { display: flex; align-items: flex-start; gap: .65rem; margin: 1rem 0 .5rem; padding: .85rem; border: 1px solid #f1b5b0; border-radius: .6rem; background: var(--surface); font-weight: 700; }
 .import-apply-acknowledgement input { flex: 0 0 auto; margin-top: .2rem; }
 .source-library-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+.source-change-review { border-left: 4px solid #7f56d9; }
+.source-change-actions, .source-change-result { margin-top: 1rem; }
+.source-change-result { padding-top: 1rem; border-top: 1px solid var(--border); }
+.source-change-metrics { margin: 1rem 0; }
+.source-change-metrics .metric { background: var(--subtle); }
+.source-change-groups { display: grid; gap: 1rem; }
+.source-change-groups > section { min-width: 0; padding: .85rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--subtle); }
+.source-change-groups h4 { margin: 0 0 .5rem; }
+.source-change-row { padding: .8rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--surface); }
+.source-change-row:last-child { border-bottom: 1px solid var(--border); }
+.source-change-fields { display: grid; gap: .35rem; padding-left: 1.25rem; overflow-wrap: anywhere; }
 .source-library-layout.detail-open { grid-template-columns: minmax(16rem, .8fr) minmax(22rem, 1.2fr); }
 .source-detail-panel { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; border-left: 4px solid var(--warning); }
 .source-content-field textarea { width: 100%; min-height: 20rem; white-space: pre-wrap; }
