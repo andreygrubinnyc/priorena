@@ -395,6 +395,7 @@
     try {
       const result = await triageApi.detail(token.organizationId, token.workspaceId, workItemId);
       if (!workspaceOperationCurrent(token) || requestId !== state.triage.detailRequestId) return;
+      triageModule.validateDependencyContext(result, token.organizationId, token.workspaceId, workItemId);
       state.triage.detail = result.body;
       state.triage.sourceDetail = null;
       state.triage.revision = result.revision;
@@ -1020,6 +1021,7 @@
       }
       const refreshed = await triageApi.detail(token.organizationId, token.workspaceId, detail.workItem.id);
       if (!workspaceOperationCurrent(token)) return;
+      triageModule.validateDependencyContext(refreshed, token.organizationId, token.workspaceId, detail.workItem.id);
       state.triage.detail = refreshed.body;
       state.triage.sourceDetail = null;
       state.triage.revision = refreshed.revision;
@@ -1039,6 +1041,59 @@
     renderWorkItems();
     document.getElementById('triage-structure-assignment')?.focus();
     setStatus('Work Item selected. Review the existing write-free structure preview before applying anything.', 'success');
+  }
+
+  function dependencyCueLabel(cue) {
+    return {
+      archived: 'Archived dependency',
+      'blocked-status': 'Dependency status: Blocked',
+      'at-risk-status': 'Dependency status: At risk',
+      'unknown-status': 'Dependency status: Unknown',
+      'state-needs-confirmation': 'Dependency state needs confirmation'
+    }[cue];
+  }
+
+  function dependencyContextPanel(context) {
+    const cueBadges = triageModule.DEPENDENCY_REVIEW_CUES
+      .filter(cue => context.cueCounts[cue] > 0)
+      .map(cue => badge(`${context.cueCounts[cue]} ${dependencyCueLabel(cue)}`, 'muted-badge'));
+    const listed = recordList(context.listedDependencies.items, item => [
+      node('div', { className: 'row-head' }, [
+        node('strong', { text: item.jiraKey || item.id }),
+        badge(item.initiative?.name || 'Unassigned')
+      ]),
+      node('p', { text: item.summary }),
+      node('p', { className: 'meta', text: `Canonical status: ${item.canonicalStatus} · Confidence: ${item.currentStateConfidence} · ${item.archived ? 'Archived' : 'Active'}` }),
+      item.reviewCues.length
+        ? node('div', { className: 'triage-signal-list', attrs: { 'aria-label': `Dependency review cues for ${item.jiraKey || item.id}` } },
+            item.reviewCues.map(cue => badge(dependencyCueLabel(cue), 'muted-badge')))
+        : node('p', { className: 'meta', text: 'No allowlisted dependency review cue is present. This does not assess satisfaction or impact.' })
+    ], 'No explicit dependencies are listed for this Work Item. This does not assess whether outside dependencies exist.');
+    const referencing = recordList(context.referencingWorkItems.items, item => [
+      node('div', { className: 'row-head' }, [
+        node('strong', { text: item.jiraKey || item.id }),
+        badge(item.initiative?.name || 'Unassigned')
+      ]),
+      node('p', { text: item.summary }),
+      node('p', { className: 'meta', text: `Canonical status: ${item.canonicalStatus} · Confidence: ${item.currentStateConfidence} · ${item.archived ? 'Archived' : 'Active'}` })
+    ], 'No same-Workspace Work Item explicitly lists this item as a dependency.');
+    return node('section', { className: 'triage-trust-note', attrs: { 'aria-labelledby': 'dependency-context-title' } }, [
+      node('h3', { id: 'dependency-context-title', text: 'Explicit dependency context' }),
+      node('p', { className: 'warning', text: context.trustLabel }),
+      node('p', { className: 'meta', text: 'Priorena shows only direct schema-v5 links in this Workspace. It does not infer whether a relationship blocks work, is satisfied, creates impact or risk, or should change priority.' }),
+      node('div', { className: 'triage-signal-list', attrs: { 'aria-label': 'Listed dependency review cue counts' } },
+        cueBadges.length ? cueBadges : [badge('No allowlisted review cues', 'muted-badge')]),
+      node('h4', { text: `Listed dependencies (${context.listedDependencies.total})` }),
+      listed,
+      context.listedDependencies.truncated
+        ? node('p', { className: 'warning', text: `Showing the first ${context.listedDependencies.limit} listed dependencies in deterministic non-priority order.` })
+        : null,
+      node('h4', { text: `Work Items listing this item as a dependency (${context.referencingWorkItems.total})` }),
+      referencing,
+      context.referencingWorkItems.truncated
+        ? node('p', { className: 'warning', text: `Showing the first ${context.referencingWorkItems.limit} referencing Work Items in deterministic non-priority order.` })
+        : null
+    ]);
   }
 
   function triageDetailPanel(detail) {
@@ -1102,6 +1157,7 @@
         node('h3', { text: 'Derived triage signals' }),
         node('ul', {}, triageModule.activeSignalLabels(detail.triageSignals).map(label => node('li', { text: label })))
       ]),
+      dependencyContextPanel(detail.dependencyContext),
       node('section', { className: 'triage-type-review' }, [
         node('h3', { text: 'Review canonical type' }),
         node('p', { className: 'meta', text: 'Priorena does not infer a type. Choosing a value makes no change until Save canonical type is pressed.' }),
