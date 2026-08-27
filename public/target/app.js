@@ -303,6 +303,23 @@
     return node('span', { className: `badge${className ? ` ${className}` : ''}`, text });
   }
 
+  function attentionBadge(level, label) {
+    const classes = {
+      urgent: 'risk-badge',
+      attention: 'warning-badge',
+      review: 'review-badge',
+      readiness: 'readiness-badge',
+      clear: 'clear-badge'
+    };
+    return badge(label, classes[level] || 'muted-badge');
+  }
+
+  function attentionSignals(signals) {
+    if (!signals.length) return node('p', { className: 'meta', text: 'No current attention signals.' });
+    return node('div', { className: 'attention-signal-list' }, signals.map(signal =>
+      attentionBadge(signal.level, `${signal.count} ${signal.label}`)));
+  }
+
   function recordList(records, renderer, emptyMessage) {
     if (!records.length) return empty(emptyMessage);
     return node('ul', { className: 'list' }, records.map(record => node('li', { className: 'list-item' }, renderer(record))));
@@ -436,23 +453,67 @@
     if (generation !== state.generation || organizationId !== state.context?.activeOrganizationId) return;
     const portfolio = result.body;
     const counts = portfolio.counts;
+    const attentionCount = key => portfolio.attention.signals.find(signal => signal.key === key)?.count || 0;
+    const reviewDecisions = attentionCount('pending-findings') + attentionCount('pending-proposed-changes') +
+      attentionCount('approved-proposed-changes');
+    const readinessSignals = attentionCount('unknown-status') + attentionCount('unknown-type') +
+      attentionCount('unassigned-work') + attentionCount('current-state-confirmation');
     elements.view.replaceChildren(
       node('div', { className: 'metric-grid' }, [
         metric('Workspaces', counts.workspaces),
         metric('Work Items', counts.workItems),
-        metric('Findings to review', counts.findingsToReview),
-        metric('Open Follow-Ups', counts.openFollowUps),
-        metric('Milestones', counts.milestones),
+        metric('Urgent Workspaces', portfolio.attention.workspaceLevels.urgent),
+        metric('Blocked / at risk', counts.blockedWorkItems),
+        metric('Overdue Milestones', counts.overdueMilestones),
+        metric('Review decisions', reviewDecisions),
+        metric('Readiness signals', readinessSignals),
         metric('Briefings', counts.briefings)
       ]),
+      node('p', {
+        className: 'notice attention-explainer',
+        text: 'Attention signals are deterministic counts from current Priorena state. A record can contribute to more than one signal; these counts prioritize review and are not a risk score.'
+      }),
       node('section', { className: 'panel' }, [
-        node('h2', { text: 'Workspaces' }),
+        node('div', { className: 'row-head' }, [
+          node('h2', { text: 'Workspace attention' }),
+          badge(`${portfolio.attention.queueMeta.total} Workspaces with signals`, 'muted-badge')
+        ]),
+        recordList(portfolio.attention.queue, item => [
+          node('div', { className: 'row-head' }, [
+            node('strong', { text: item.workspace.name }),
+            attentionBadge(item.level, item.label)
+          ]),
+          attentionSignals(item.signals),
+          node('div', { className: 'actions attention-actions' }, [
+            node('button', {
+              className: 'button secondary',
+              text: 'Open Today',
+              attrs: { type: 'button', 'aria-label': `Open Today for ${item.workspace.name}` },
+              on: { click: () => openPortfolioWorkspaceToday(item.workspace.id).catch(error => setStatus(error.message, 'error')) }
+            })
+          ])
+        ], 'No active Workspace has a current attention signal.'),
+        portfolio.attention.queueMeta.truncated
+          ? node('p', { className: 'warning', text: `Showing the first ${portfolio.attention.queueMeta.limit} Workspaces in deterministic attention order.` })
+          : null
+      ]),
+      node('section', { className: 'panel' }, [
+        node('h2', { text: 'All Workspaces' }),
         recordList(portfolio.workspaces, workspace => [
-          node('div', { className: 'row-head' }, [node('strong', { text: workspace.name }), badge(`${workspace.counts.workItems} Work Items`)]),
-          node('p', { className: 'meta', text: `${workspace.counts.openFollowUps} open Follow-Ups · ${workspace.counts.findingsToReview} Findings to review · ${workspace.counts.unassignedWorkItems} Unassigned` })
+          node('div', { className: 'row-head' }, [
+            node('strong', { text: workspace.name }),
+            attentionBadge(workspace.attention.level, workspace.attention.label)
+          ]),
+          node('p', { className: 'meta', text: `${workspace.counts.workItems} Work Items · ${workspace.counts.openFollowUps} open Follow-Ups · ${workspace.counts.findingsToReview + workspace.counts.proposedChangesToReview + workspace.counts.approvedChangesToApply} review decisions · ${workspace.counts.unassignedWorkItems} Unassigned` })
         ], 'This Organization has no Workspaces.')
       ])
     );
+  }
+
+  async function openPortfolioWorkspaceToday(workspaceId) {
+    stableId(workspaceId);
+    state.activeView = 'today';
+    await selectWorkspace(workspaceId);
   }
 
   async function renderToday() {
@@ -466,21 +527,33 @@
     const result = await requestJson(`/api/v2/organizations/${encoded(organizationId)}/workspaces/${encoded(workspaceId)}/today`);
     if (generation !== state.generation || organizationId !== state.context?.activeOrganizationId || workspaceId !== state.context?.activeWorkspaceId) return;
     const today = result.body;
+    const deliveryAttention = today.attention.blockedWorkItems;
+    const reviewDecisions = today.counts.findingsToReview + today.counts.proposedChangesToReview + today.counts.approvedChangesToApply;
+    const readinessSignals = today.counts.unknownStatusWorkItems + today.counts.unknownTypeWorkItems +
+      today.counts.unassignedWorkItems + today.counts.currentStateNeedsConfirmation;
     elements.view.replaceChildren(
       node('div', { className: 'metric-grid' }, [
         metric('Blocked or at risk', today.counts.blockedWorkItems),
         metric('Open Follow-Ups', today.counts.openFollowUps),
-        metric('Milestones', today.counts.milestones),
-        metric('Findings to review', today.counts.findingsToReview),
-        metric('Unassigned', today.counts.unassignedWorkItems)
+        metric('Milestone pressure', today.counts.overdueMilestones + today.counts.dueSoonMilestones),
+        metric('Review decisions', reviewDecisions),
+        metric('Readiness signals', readinessSignals)
+      ]),
+      node('section', { className: 'panel attention-summary' }, [
+        node('div', { className: 'row-head' }, [
+          node('h2', { text: 'Attention summary' }),
+          attentionBadge(today.attention.level, today.attention.label)
+        ]),
+        node('p', { className: 'meta', text: `Calculated from current state as of ${today.attention.referenceDate}. Signals can overlap and are not a risk score.` }),
+        attentionSignals(today.attention.signals)
       ]),
       node('div', { className: 'card-grid' }, [
         node('section', { className: 'card' }, [
           node('h2', { text: 'Delivery attention' }),
-          recordList(today.attention.blockedWorkItems, item => [
+          recordList(deliveryAttention, item => [
             node('div', { className: 'row-head' }, [node('strong', { text: item.summary }), badge(item.initiative?.name || 'Unassigned')]),
             node('p', { className: 'risk', text: item.canonicalStatus }),
-            node('p', { className: 'meta', text: `How this status was confirmed: ${item.currentStateProvenance}` })
+            node('p', { className: 'meta', text: `Current-state provenance: ${item.currentStateProvenance} · Confidence: ${item.currentStateConfidence}` })
           ], 'No blocked or at-risk Work Items in this Workspace.')
         ]),
         node('section', { className: 'card' }, [
@@ -506,6 +579,30 @@
             node('blockquote', { text: finding.exactExcerpt }),
             node('p', { className: 'meta', text: `Source ${finding.sourceId} · ${finding.proposedInitiativeId ? `Initiative ${finding.proposedInitiativeId}` : 'Initiative not selected'} · ${finding.proposedWorkItemId ? `Work Item ${finding.proposedWorkItemId}` : 'Work Item not selected'}` })
           ], 'No Findings are awaiting review in this Workspace.')
+        ]),
+        node('section', { className: 'card' }, [
+          node('h2', { text: 'Proposed Changes' }),
+          node('p', { className: 'meta', text: 'Pending review and approved-but-not-applied changes remain separate from current Work Item state.' }),
+          recordList(today.attention.proposedChangesToReview, change => [
+            node('div', { className: 'row-head' }, [
+              node('strong', { text: change.workItem.summary }),
+              badge(change.reviewStatus)
+            ]),
+            node('p', { text: `Field: ${change.field}` }),
+            node('p', { className: 'meta', text: change.workItem.initiative?.name || 'Unassigned' })
+          ], 'No Proposed Changes are awaiting review or apply.')
+        ]),
+        node('section', { className: 'card' }, [
+          node('h2', { text: 'Readiness gaps' }),
+          node('p', { className: 'meta', text: 'Readiness identifies missing or unconfirmed current-state context. It does not infer or change values.' }),
+          recordList(today.attention.readinessWorkItems, item => [
+            node('div', { className: 'row-head' }, [
+              node('strong', { text: item.summary }),
+              badge(item.initiative?.name || 'Unassigned')
+            ]),
+            attentionSignals(item.attentionReasons.map(reason => ({ ...reason, count: 1, level: 'readiness' }))),
+            node('p', { className: 'meta', text: `Status: ${item.canonicalStatus} · Type: ${item.itemType} · Confidence: ${item.currentStateConfidence}` })
+          ], 'No Work Item readiness gaps are visible in this Workspace.')
         ])
       ])
     );
