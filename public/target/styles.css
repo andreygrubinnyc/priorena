@@ -72,6 +72,7 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .list-item:last-child { border-bottom: 0; }
 .row-head, .actions, .filters, .tabs { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
 .row-head { justify-content: space-between; }
+.badge-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
 .attention-explainer { margin: 1rem 0; }
 .attention-summary { margin-bottom: 1rem; }
 .attention-signal-list { display: flex; flex-wrap: wrap; gap: .4rem; margin: .65rem 0; }
@@ -115,6 +116,7 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .status-actions { margin-top: .75rem; }
 .briefing-form, .briefing-editor, .communication-form { display: grid; gap: 1rem; }
 .briefing-form h3, .briefing-editor h3, .communication-form h3 { margin: .5rem 0 0; }
+.briefing-preset-picker { background: #f8faff; }
 .selection-grid, .output-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; }
 .choice-group { min-width: 0; margin: 0; border: 1px solid var(--border); border-radius: .65rem; padding: .75rem; }
 .choice { display: flex; align-items: flex-start; gap: .55rem; padding: .3rem; color: var(--ink); overflow-wrap: anywhere; }
@@ -125,6 +127,13 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .inline-editor > summary::-webkit-details-marker { display: none; }
 .inline-editor[open] > summary { margin-bottom: 1rem; }
 .candidate-list { display: grid; gap: .6rem; max-height: 34rem; overflow: auto; padding: .2rem; }
+.candidate-groups { display: grid; gap: 1rem; }
+.candidate-group legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: 0 .25rem; }
+.candidate-group .candidate-list { max-height: 22rem; }
+.candidate-group-actions { margin: .25rem 0 .75rem; }
+.candidate-selection-actions { margin-top: -.25rem; }
+.candidate-selection-summary { margin: 0; }
+.compact-button { min-height: 2rem; padding: .35rem .65rem; font-size: .82rem; }
 .candidate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .7rem; padding: .8rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--subtle); }
 .candidate > span { display: grid; gap: .25rem; min-width: 0; overflow-wrap: anywhere; }
 .candidate small { color: var(--muted); }
