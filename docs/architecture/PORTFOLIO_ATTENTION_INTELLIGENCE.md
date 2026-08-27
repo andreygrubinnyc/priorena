@@ -2,7 +2,7 @@
 
 **Status:** Isolated target implementation
 
-**Persisted model:** strict `schemaVersion: 5`
+**Persisted model:** strict `schemaVersion: 6`; projection behavior unchanged from its schema-v5 introduction
 
 **API namespace:** `/api/v2`
 

@@ -53,7 +53,7 @@ function workstream(id, organizationId, workspaceId, initiativeId, name = 'Dupli
     workspaceId,
     initiativeId,
     name,
-    description: 'Fictional Workstream used only for schema-v5 isolation tests.'
+    description: 'Fictional Workstream used only for schema-v6 isolation tests.'
   };
 }
 
@@ -116,7 +116,7 @@ function workItem(
     jiraKey: null,
     itemType: 'Task',
     summary,
-    description: 'Synthetic Work Item for schema-v5 tests.',
+    description: 'Synthetic Work Item for schema-v6 tests.',
     canonicalStatus: 'Planned',
     currentStateProvenance: 'fictional-manual-review',
     currentStateConfidence: 'confirmed',
@@ -325,7 +325,7 @@ function createMultiOrganizationFixture() {
         sourceId: 'source-alpha-sentinel',
         exactExcerpt: 'The fictional Alpha dependency is waiting for review.',
         extractionMethod: 'deterministic-test-extraction',
-        extractionVersion: 'target-v5-fixture-1',
+        extractionVersion: 'target-v6-fixture-1',
         category: 'dependency',
         reviewStatus: 'accepted',
         proposedWorkItemId: 'work-item-alpha-assigned',
@@ -340,7 +340,7 @@ function createMultiOrganizationFixture() {
         sourceId: 'source-beta-sentinel',
         exactExcerpt: 'The fictional Beta checkpoint is ready.',
         extractionMethod: 'deterministic-test-extraction',
-        extractionVersion: 'target-v5-fixture-1',
+        extractionVersion: 'target-v6-fixture-1',
         category: 'progress',
         reviewStatus: 'accepted',
         proposedWorkItemId: 'work-item-beta-assigned',
@@ -396,6 +396,8 @@ function createMultiOrganizationFixture() {
         snapshotHash: 'fictional-alpha-snapshot-hash'
       }
     ],
+    decisions: [],
+    risks: [],
     briefings: [
       {
         id: 'briefing-alpha',

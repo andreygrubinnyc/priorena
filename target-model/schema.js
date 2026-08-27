@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const TARGET_SCHEMA_VERSION = 5;
+const TARGET_SCHEMA_VERSION = 6;
 const UNASSIGNED_INITIATIVE = Object.freeze({ initiativeId: null, label: 'Unassigned' });
 
 const ROOT_COLLECTIONS = Object.freeze([
@@ -15,6 +15,8 @@ const ROOT_COLLECTIONS = Object.freeze([
   'findings',
   'evidence',
   'proposedChanges',
+  'decisions',
+  'risks',
   'briefings',
   'briefingVersions',
   'auditEvents'
@@ -38,6 +40,8 @@ const FOLLOW_UP_STATES = new Set(['none', 'open', 'waiting', 'resolved']);
 const MAPPING_STATUSES = new Set(['pending', 'verified', 'inactive']);
 const FINDING_REVIEW_STATUSES = new Set(['pending', 'accepted', 'rejected']);
 const PROPOSED_CHANGE_REVIEW_STATUSES = new Set(['pending', 'approved', 'rejected', 'applied', 'stale']);
+const DECISION_STATUSES = new Set(['draft', 'decided']);
+const RISK_STATUSES = new Set(['open', 'closed']);
 const CURRENTNESS_STATES = new Set(['current', 'historical', 'superseded', 'contradicted', 'unknown']);
 const CURRENT_STATE_CONFIDENCE = new Set(['confirmed', 'inferred', 'unknown']);
 const BRIEFING_STATUSES = new Set(['draft', 'finalized', 'communicated']);
@@ -56,7 +60,9 @@ const WORKSPACE_OWNED_AUDIT_ENTITY_TYPES = new Set([
   'source',
   'finding',
   'evidence',
-  'proposedChange'
+  'proposedChange',
+  'decision',
+  'risk'
 ]);
 
 const ENTITY_PREFIXES = Object.freeze({
@@ -71,6 +77,8 @@ const ENTITY_PREFIXES = Object.freeze({
   finding: 'finding',
   evidence: 'evidence',
   proposedChange: 'proposed-change',
+  decision: 'decision',
+  risk: 'risk',
   briefing: 'briefing',
   briefingVersion: 'briefing-version',
   auditEvent: 'audit-event'
@@ -504,6 +512,87 @@ function validateProposedChange(record, path) {
   assertString(record.snapshotHash, `${path}.snapshotHash`, { max: 256 });
 }
 
+function validateDecision(record, path) {
+  const fields = new Set([
+    'id', 'organizationId', 'workspaceId', 'initiativeId', 'workItemId', 'title', 'outcome',
+    'rationale', 'evidenceIds', 'status', 'supersedesDecisionId', 'createdAt', 'updatedAt',
+    'decidedAt', 'decidedBy'
+  ]);
+  assertAllowedKeys(record, path, fields);
+  assertId(record.id, `${path}.id`);
+  assertId(record.organizationId, `${path}.organizationId`);
+  assertId(record.workspaceId, `${path}.workspaceId`);
+  assertNullableId(record.initiativeId, `${path}.initiativeId`);
+  assertNullableId(record.workItemId, `${path}.workItemId`);
+  assertString(record.title, `${path}.title`, { max: 500 });
+  assertNullableString(record.outcome, `${path}.outcome`, { max: 10_000 });
+  assertNullableString(record.rationale, `${path}.rationale`, { max: 10_000 });
+  assertUniqueStrings(record.evidenceIds, `${path}.evidenceIds`, { ids: true });
+  assertEnum(record.status, `${path}.status`, DECISION_STATUSES);
+  assertNullableId(record.supersedesDecisionId, `${path}.supersedesDecisionId`);
+  assertTimestamp(record.createdAt, `${path}.createdAt`);
+  assertTimestamp(record.updatedAt, `${path}.updatedAt`);
+  assertNullableTimestamp(record.decidedAt, `${path}.decidedAt`);
+  assertNullableString(record.decidedBy, `${path}.decidedBy`, { max: 300 });
+
+  if (Date.parse(record.updatedAt) < Date.parse(record.createdAt)) {
+    fail(`${path}.updatedAt`, 'must be equal to or later than createdAt');
+  }
+  if (record.status === 'draft') {
+    if (record.decidedAt !== null || record.decidedBy !== null) {
+      fail(path, 'Draft Decisions cannot have decidedAt or decidedBy');
+    }
+  } else {
+    if (record.outcome === null || !record.outcome.trim()) fail(`${path}.outcome`, 'is required for a Decided Decision');
+    if (record.rationale === null || !record.rationale.trim()) fail(`${path}.rationale`, 'is required for a Decided Decision');
+    if (record.decidedAt === null || record.decidedBy === null || !record.decidedBy.trim()) {
+      fail(path, 'Decided Decisions require decidedAt and decidedBy');
+    }
+    if (record.decidedAt !== record.updatedAt) fail(`${path}.decidedAt`, 'must equal updatedAt when the Decision is decided');
+  }
+}
+
+function validateRisk(record, path) {
+  const fields = new Set([
+    'id', 'organizationId', 'workspaceId', 'initiativeId', 'workItemId', 'title', 'description',
+    'responsePlan', 'owner', 'reviewOn', 'evidenceIds', 'status', 'createdAt', 'updatedAt',
+    'closedAt', 'closedBy', 'closureNote'
+  ]);
+  assertAllowedKeys(record, path, fields);
+  assertId(record.id, `${path}.id`);
+  assertId(record.organizationId, `${path}.organizationId`);
+  assertId(record.workspaceId, `${path}.workspaceId`);
+  assertNullableId(record.initiativeId, `${path}.initiativeId`);
+  assertNullableId(record.workItemId, `${path}.workItemId`);
+  assertString(record.title, `${path}.title`, { max: 500 });
+  assertString(record.description, `${path}.description`, { max: 10_000 });
+  assertNullableString(record.responsePlan, `${path}.responsePlan`, { max: 10_000 });
+  assertNullableString(record.owner, `${path}.owner`, { max: 300 });
+  assertNullableDate(record.reviewOn, `${path}.reviewOn`);
+  assertUniqueStrings(record.evidenceIds, `${path}.evidenceIds`, { ids: true });
+  assertEnum(record.status, `${path}.status`, RISK_STATUSES);
+  assertTimestamp(record.createdAt, `${path}.createdAt`);
+  assertTimestamp(record.updatedAt, `${path}.updatedAt`);
+  assertNullableTimestamp(record.closedAt, `${path}.closedAt`);
+  assertNullableString(record.closedBy, `${path}.closedBy`, { max: 300 });
+  assertNullableString(record.closureNote, `${path}.closureNote`, { max: 4_000 });
+
+  if (Date.parse(record.updatedAt) < Date.parse(record.createdAt)) {
+    fail(`${path}.updatedAt`, 'must be equal to or later than createdAt');
+  }
+  if (record.status === 'open') {
+    if (record.closedAt !== null || record.closedBy !== null || record.closureNote !== null) {
+      fail(path, 'Open Risks cannot have closure fields');
+    }
+  } else {
+    if (record.closedAt === null || record.closedBy === null || !record.closedBy.trim() ||
+      record.closureNote === null || !record.closureNote.trim()) {
+      fail(path, 'Closed Risks require closedAt, closedBy, and a closureNote');
+    }
+    if (record.closedAt !== record.updatedAt) fail(`${path}.closedAt`, 'must equal updatedAt when the Risk is closed');
+  }
+}
+
 function validateBriefing(record, path) {
   const fields = new Set([
     'id', 'organizationId', 'name', 'workspaceIds', 'initiativeIds', 'audienceProfile', 'preferredFormats',
@@ -624,6 +713,8 @@ const VALIDATORS = Object.freeze({
   findings: validateFinding,
   evidence: validateEvidence,
   proposedChanges: validateProposedChange,
+  decisions: validateDecision,
+  risks: validateRisk,
   briefings: validateBriefing,
   briefingVersions: validateBriefingVersion,
   auditEvents: validateAuditEvent
@@ -698,6 +789,60 @@ function requireOwnedRecord(index, organizationId, workspaceId, id, path, label)
     fail(path, `must reference ${label} with matching Organization and Workspace parents`);
   }
   return record;
+}
+
+function validateWorkspaceRecordScope(indexes, record, path) {
+  requireWorkspace(indexes, record.organizationId, record.workspaceId, `${path}.workspaceId`);
+  if (record.initiativeId !== null) {
+    requireInitiative(indexes, record.organizationId, record.workspaceId, record.initiativeId, `${path}.initiativeId`);
+  }
+  let linkedWorkItem = null;
+  if (record.workItemId !== null) {
+    linkedWorkItem = requireWorkItem(indexes, record.organizationId, record.workspaceId, record.workItemId, `${path}.workItemId`);
+  }
+  if (linkedWorkItem && record.initiativeId !== null && linkedWorkItem.initiativeId !== record.initiativeId) {
+    fail(`${path}.initiativeId`, 'must match the Initiative of the referenced Work Item');
+  }
+}
+
+function validateRecordEvidence(indexes, record, path) {
+  const selectedWorkItem = record.workItemId === null
+    ? null
+    : requireWorkItem(indexes, record.organizationId, record.workspaceId, record.workItemId, `${path}.workItemId`);
+  const effectiveInitiativeId = record.initiativeId === null
+    ? selectedWorkItem?.initiativeId ?? null
+    : record.initiativeId;
+  record.evidenceIds.forEach((evidenceId, evidenceIndex) => {
+    const evidencePath = `${path}.evidenceIds[${evidenceIndex}]`;
+    const evidence = requireOwnedRecord(
+      indexes.evidence,
+      record.organizationId,
+      record.workspaceId,
+      evidenceId,
+      evidencePath,
+      'Evidence'
+    );
+    if (record.workItemId !== null && evidence.workItemId !== null && evidence.workItemId !== record.workItemId) {
+      fail(evidencePath, 'must not reference Evidence associated with a different Work Item');
+    }
+    if (effectiveInitiativeId !== null) {
+      if (evidence.initiativeId !== null && evidence.initiativeId !== effectiveInitiativeId) {
+        fail(evidencePath, 'must not reference Evidence associated with a different Initiative');
+      }
+      if (evidence.workItemId !== null) {
+        const evidenceWorkItem = requireWorkItem(
+          indexes,
+          record.organizationId,
+          record.workspaceId,
+          evidence.workItemId,
+          evidencePath
+        );
+        if (evidenceWorkItem.initiativeId !== effectiveInitiativeId) {
+          fail(evidencePath, 'must reference Evidence compatible with the selected Initiative');
+        }
+      }
+    }
+  });
 }
 
 function validateParentRelationships(document, indexes) {
@@ -834,6 +979,33 @@ function validateParentRelationships(document, indexes) {
     if (!findingIsSupported) fail(`${path}.evidenceIds`, 'must include Evidence accepted from the Proposed Change Finding');
   });
 
+  const supersededDecisionIds = new Set();
+  document.decisions.forEach((decision, index) => {
+    const path = `decisions[${index}]`;
+    validateWorkspaceRecordScope(indexes, decision, path);
+    validateRecordEvidence(indexes, decision, path);
+    if (decision.supersedesDecisionId !== null) {
+      if (decision.supersedesDecisionId === decision.id) fail(`${path}.supersedesDecisionId`, 'must not reference the Decision itself');
+      const superseded = requireOwnedRecord(
+        indexes.decisions,
+        decision.organizationId,
+        decision.workspaceId,
+        decision.supersedesDecisionId,
+        `${path}.supersedesDecisionId`,
+        'a Decision'
+      );
+      if (superseded.status !== 'decided') fail(`${path}.supersedesDecisionId`, 'must reference a Decided Decision');
+      if (supersededDecisionIds.has(superseded.id)) fail(`${path}.supersedesDecisionId`, 'must not supersede a Decision more than once');
+      supersededDecisionIds.add(superseded.id);
+    }
+  });
+
+  document.risks.forEach((risk, index) => {
+    const path = `risks[${index}]`;
+    validateWorkspaceRecordScope(indexes, risk, path);
+    validateRecordEvidence(indexes, risk, path);
+  });
+
   document.briefings.forEach((briefing, index) => {
     const path = `briefings[${index}]`;
     requireOrganization(indexes, briefing.organizationId, `${path}.organizationId`);
@@ -893,6 +1065,8 @@ function validateParentRelationships(document, indexes) {
     finding: indexes.findings,
     evidence: indexes.evidence,
     proposedChange: indexes.proposedChanges,
+    decision: indexes.decisions,
+    risk: indexes.risks,
     briefing: indexes.briefings,
     briefingVersion: indexes.briefingVersions
   };
@@ -972,6 +1146,7 @@ module.exports = {
   BRIEFING_STATUSES,
   CURRENTNESS_STATES,
   CURRENT_STATE_CONFIDENCE,
+  DECISION_STATUSES,
   ENTITY_PREFIXES,
   FINDING_REVIEW_STATUSES,
   FOLLOW_UP_STATES,
@@ -980,6 +1155,7 @@ module.exports = {
   MAX_ROOT_COLLECTION_RECORDS,
   MAPPING_STATUSES,
   PROPOSED_CHANGE_REVIEW_STATUSES,
+  RISK_STATUSES,
   ROOT_COLLECTIONS,
   TARGET_SCHEMA_VERSION,
   TargetSchemaVersionError,

@@ -33,10 +33,10 @@ const {
   createInvalidCrossOrganizationFixture,
   createMultiOrganizationFixture,
   workItem
-} = require('../test-support/target-v5-fixtures');
+} = require('../test-support/target-v6-fixtures');
 
 async function temporaryDirectory(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v5-test-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-v6-test-'));
   t.after(async () => fs.rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -123,6 +123,50 @@ function createFinalizedFixture() {
   version.facts = [{ text: 'Fictional finalized fact.' }];
   version.outputs = [{ format: 'teams', content: 'Fictional finalized output.' }];
   return document;
+}
+
+function decisionRecord(overrides = {}) {
+  return {
+    id: 'decision-persistence-fixture',
+    organizationId: 'org-fixture-alpha',
+    workspaceId: 'workspace-alpha-shared',
+    initiativeId: null,
+    workItemId: null,
+    title: 'Choose a fictional migration sequence',
+    outcome: null,
+    rationale: null,
+    evidenceIds: [],
+    status: 'draft',
+    supersedesDecisionId: null,
+    createdAt: '2026-08-07T12:00:00.000Z',
+    updatedAt: '2026-08-07T12:00:00.000Z',
+    decidedAt: null,
+    decidedBy: null,
+    ...overrides
+  };
+}
+
+function riskRecord(overrides = {}) {
+  return {
+    id: 'risk-persistence-fixture',
+    organizationId: 'org-fixture-alpha',
+    workspaceId: 'workspace-alpha-shared',
+    initiativeId: null,
+    workItemId: null,
+    title: 'Fictional migration window may close',
+    description: 'A fictional migration window may become unavailable.',
+    responsePlan: null,
+    owner: null,
+    reviewOn: null,
+    evidenceIds: [],
+    status: 'open',
+    createdAt: '2026-08-07T12:00:00.000Z',
+    updatedAt: '2026-08-07T12:00:00.000Z',
+    closedAt: null,
+    closedBy: null,
+    closureNote: null,
+    ...overrides
+  };
 }
 
 function communicationAuditEvent(version, options = {}) {
@@ -1260,6 +1304,49 @@ test('existing Jira Epic mapping IDs cannot be deleted or moved while metadata r
   const stored = await readTargetData(filePath);
   assert.equal(stored.workItems.find(item => item.id === 'work-item-alpha-assigned').jiraEpicMappingId, 'jira-mapping-alpha-one');
   assert.equal(stored.jiraEpicMappings.find(mapping => mapping.id === 'jira-mapping-alpha-one').mappingStatus, 'inactive');
+});
+
+test('Decision and Risk transitions preserve parents and make terminal records immutable', async t => {
+  const directory = await temporaryDirectory(t);
+  const filePath = path.join(directory, 'target-data.json');
+  const existing = createUncommunicatedFixture();
+  existing.decisions.push(decisionRecord());
+  existing.risks.push(riskRecord());
+  await createTarget(filePath, existing);
+
+  const terminal = structuredClone(existing);
+  Object.assign(terminal.decisions[0], {
+    outcome: 'Use the bounded fictional migration sequence.',
+    rationale: 'The fictional review established the sequence.',
+    status: 'decided',
+    updatedAt: '2026-08-08T12:00:00.000Z',
+    decidedAt: '2026-08-08T12:00:00.000Z',
+    decidedBy: 'fictional-decision-owner'
+  });
+  Object.assign(terminal.risks[0], {
+    status: 'closed',
+    updatedAt: '2026-08-08T13:00:00.000Z',
+    closedAt: '2026-08-08T13:00:00.000Z',
+    closedBy: 'fictional-risk-owner',
+    closureNote: 'The fictional window was confirmed.'
+  });
+  await updateTarget(filePath, terminal);
+
+  const changedDecision = structuredClone(terminal);
+  changedDecision.decisions[0].title = 'Changed after decision';
+  await assertRejectedWritePreservesFile(filePath, changedDecision, /Decided Decisions are immutable/);
+
+  const changedRisk = structuredClone(terminal);
+  changedRisk.risks[0].description = 'Changed after closure.';
+  await assertRejectedWritePreservesFile(filePath, changedRisk, /Closed Risks are immutable/);
+
+  const removedDecision = structuredClone(terminal);
+  removedDecision.decisions = [];
+  await assertRejectedWritePreservesFile(filePath, removedDecision, /existing Decision cannot be removed/);
+
+  const movedRisk = structuredClone(terminal);
+  movedRisk.risks[0].workspaceId = 'workspace-alpha-secondary';
+  await assertRejectedWritePreservesFile(filePath, movedRisk, /existing Risk cannot move to another parent/);
 });
 
 test('invalid candidate data never creates a new target or temporary file', async t => {

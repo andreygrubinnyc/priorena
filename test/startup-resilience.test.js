@@ -116,7 +116,7 @@ async function harness(t, runnerOptions = {}) {
   const targetServer = path.join(repositoryRoot, 'target-server');
   const privateRoot = path.join(root, 'fictional-private-state');
   const sourceFilesRoot = path.join(privateRoot, 'Source Library');
-  const dataFile = path.join(privateRoot, 'target-v5.json');
+  const dataFile = path.join(privateRoot, 'target-v6.json');
   const logFile = path.join(privateRoot, 'logs', 'priorena.log');
   const nodeExecutable = path.join(root, 'fictional-runtime', 'node');
   const userHome = path.join(root, 'fictional-user-home');
@@ -131,7 +131,7 @@ async function harness(t, runnerOptions = {}) {
   await Promise.all([
     fs.writeFile(path.join(repositoryRoot, 'package.json'), '{"name":"priorena","private":true}\n', { mode: 0o600 }),
     fs.writeFile(path.join(targetServer, 'start.js'), "'use strict';\n", { mode: 0o600 }),
-    fs.writeFile(dataFile, '{"schemaVersion":5,"fictional":true}\n', { mode: 0o600 }),
+    fs.writeFile(dataFile, '{"schemaVersion":6,"fictional":true}\n', { mode: 0o600 }),
     fs.writeFile(nodeExecutable, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
   ]);
   await fs.chmod(sourceFilesRoot, 0o700);

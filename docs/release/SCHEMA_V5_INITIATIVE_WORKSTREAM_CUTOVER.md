@@ -1,6 +1,10 @@
 # Schema-v5 Initiative and Workstream cutover
 
-**Status:** Current controlled-cutover runbook
+**Status:** Historical schema-v5 clean-cutover runbook; not valid for schema-v6
+
+Schema-v6 source uses the separate one-way migration boundary documented in
+`docs/architecture/DECISION_RISK_SCHEMA_V6_FOUNDATION.md`. This historical
+reset procedure must not be used to migrate or release schema-v6 data.
 **Date:** 2026-08-14
 
 ## Authorization boundary

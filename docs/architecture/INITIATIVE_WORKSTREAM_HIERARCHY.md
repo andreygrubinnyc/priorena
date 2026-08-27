@@ -1,6 +1,6 @@
 # Initiative and Workstream hierarchy
 
-**Status:** Current schema-v5 architecture
+**Status:** Retained hierarchy in the current schema-v6 architecture
 **Date:** 2026-08-14
 
 ## Decision
@@ -24,7 +24,7 @@ Strategy and Sub-task hierarchy are intentionally absent.
 
 ## Strict schema boundary
 
-Persisted data uses `schemaVersion: 5` and requires `initiatives[]` and `workstreams[]`. The schema-v5 reader rejects schema v4 and unknown fields. There is no migration, compatibility reader, alias route, dual write, or legacy-ID translation layer.
+Persisted data uses `schemaVersion: 6` and requires `initiatives[]` and `workstreams[]`. Their record shapes are unchanged from schema v5. The strict runtime reader rejects schema v5 and unknown fields; the only v5 path is the separate one-way offline migration candidate tool. There is no runtime compatibility reader, alias route, dual write, or legacy-ID translation layer.
 
 Initiatives have stable Organization and Workspace parents. Workstreams have stable Organization, Workspace, and Initiative parents. Existing Initiatives, Workstreams, and Jira Epic mappings cannot be removed or moved through ordinary persistence transitions.
 
@@ -63,8 +63,8 @@ Briefing definitions and new Drafts select optional Initiatives within selected 
 
 ## Import boundary
 
-The strict import contract is `target-v4`, distinct from persisted `schemaVersion: 5`. The parser rejects the prior contract and legacy relationship fields. Mutable source text does not infer an Initiative or Workstream. External labels such as Feature remain bounded provenance only. Imports never create a Workstream or Jira Epic mapping, never assign a relationship without explicit review/apply, and never call Jira.
+The strict import contract is `target-v4`, distinct from persisted `schemaVersion: 6`. The parser rejects the prior contract and legacy relationship fields. Mutable source text does not infer an Initiative or Workstream. External labels such as Feature remain bounded provenance only. Imports never create a Workstream or Jira Epic mapping, never assign a relationship without explicit review/apply, and never call Jira.
 
 ## Security and release boundary
 
-The application remains bound to `127.0.0.1`, local-only, single-user, and free of automatic external transmission. Source merge authorization does not authorize replacing the live schema-v4 runtime. The one-time empty schema-v4-to-schema-v5 reset has a separate, explicit post-merge gate.
+The application remains bound to `127.0.0.1`, local-only, single-user, and free of automatic external transmission. The historical schema-v4-to-schema-v5 reset remains separate from the schema-v6 one-way migration boundary; neither source merge nor this architecture authorizes a live migration or release.

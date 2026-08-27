@@ -718,7 +718,7 @@ test('target styles cover focus, responsive layouts, wrapping, dialogs, and redu
 
 test('target UI is the release root and does not mutate target data', async t => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase4-shell-'));
-  const targetDataFile = path.join(tempRoot, 'target-v5.json');
+  const targetDataFile = path.join(tempRoot, 'target-v6.json');
   const sourceFilesRoot = path.join(tempRoot, 'source-files');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });

@@ -114,7 +114,9 @@ function validateTargetTransition(existingDocument, candidateDocument) {
   for (const [collection, label, parentFields] of [
     ['initiatives', 'Initiative', ['organizationId', 'workspaceId']],
     ['workstreams', 'Workstream', ['organizationId', 'workspaceId', 'initiativeId']],
-    ['jiraEpicMappings', 'Jira Epic mapping', ['organizationId', 'workspaceId', 'initiativeId']]
+    ['jiraEpicMappings', 'Jira Epic mapping', ['organizationId', 'workspaceId', 'initiativeId']],
+    ['decisions', 'Decision', ['organizationId', 'workspaceId']],
+    ['risks', 'Risk', ['organizationId', 'workspaceId']]
   ]) {
     const candidates = recordsById(candidateDocument[collection]);
     existingDocument[collection].forEach(existingRecord => {
@@ -127,6 +129,22 @@ function validateTargetTransition(existingDocument, candidateDocument) {
       }
     });
   }
+
+  const candidateDecisions = recordsById(candidateDocument.decisions);
+  existingDocument.decisions.forEach(existingDecision => {
+    const candidateDecision = candidateDecisions.get(existingDecision.id);
+    if (existingDecision.status === 'decided' && !isDeepStrictEqual(existingDecision, candidateDecision)) {
+      transitionFail(`decisions.${existingDecision.id}`, 'Decided Decisions are immutable');
+    }
+  });
+
+  const candidateRisks = recordsById(candidateDocument.risks);
+  existingDocument.risks.forEach(existingRisk => {
+    const candidateRisk = candidateRisks.get(existingRisk.id);
+    if (existingRisk.status === 'closed' && !isDeepStrictEqual(existingRisk, candidateRisk)) {
+      transitionFail(`risks.${existingRisk.id}`, 'Closed Risks are immutable');
+    }
+  });
 
   if (candidateDocument.auditEvents.length < existingDocument.auditEvents.length) {
     transitionFail('auditEvents', 'existing Audit Events cannot be deleted');

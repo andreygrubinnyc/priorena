@@ -1,9 +1,15 @@
 # Priorena Clean-Cutover Implementation Plan
 
-**Status:** Proposed implementation plan; no implementation or runtime-data change is authorized by this document
+**Status:** Historical implementation plan; superseded for schema v6
 **Target hierarchy:** Organization → PM Workspace → Scope → Work Item
 **Cutover approach:** Clean reset, not migration
 **Authority:** `PRIORENA_TARGET_PRODUCT_MODEL_SPEC.md`, `docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md`, and the approved disposable-runtime-data decision
+
+This document records the original target-build plan and must not be used to
+operate, migrate, or release schema v6. The current Decision/Risk model and
+whole-document v5-to-v6 migration boundary are defined by
+`PRIORENA_TARGET_PRODUCT_MODEL_SPEC.md` and
+`docs/architecture/DECISION_RISK_SCHEMA_V6_FOUNDATION.md`.
 
 ## 1. Decision and implementation contract
 

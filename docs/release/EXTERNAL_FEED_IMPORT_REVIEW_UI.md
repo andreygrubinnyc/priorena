@@ -2,7 +2,7 @@
 
 **Status:** source change awaiting review and merge authorization
 
-**Persistence:** unchanged strict `schemaVersion: 5`
+**Persistence:** strict `schemaVersion: 6`; import-review behavior unchanged from schema v5
 
 **Feed contract:** strict `target-v4`; no compatibility readers
 

@@ -132,7 +132,7 @@ async function createStartupRehearsalCase(root, name, bootstrapFailures) {
   const privateRoot = path.join(caseRoot, 'fictional-private');
   const userHome = path.join(caseRoot, 'fictional-user');
   const sourceFilesRoot = path.join(privateRoot, 'source-files');
-  const dataFile = path.join(privateRoot, 'target-v5.json');
+  const dataFile = path.join(privateRoot, 'target-v6.json');
   const logFile = path.join(privateRoot, 'logs', 'priorena.log');
   const nodeExecutable = path.join(caseRoot, 'fictional-runtime', 'node');
   const launchAgentsDirectory = path.join(userHome, 'Library', 'LaunchAgents');
@@ -146,7 +146,7 @@ async function createStartupRehearsalCase(root, name, bootstrapFailures) {
   await Promise.all([
     fs.writeFile(path.join(repositoryRoot, 'package.json'), '{"name":"priorena","private":true}\n', { mode: 0o600 }),
     fs.writeFile(path.join(repositoryRoot, 'target-server', 'start.js'), "'use strict';\n", { mode: 0o600 }),
-    fs.writeFile(dataFile, '{"schemaVersion":5,"fictional":true}\n', { mode: 0o600 }),
+    fs.writeFile(dataFile, '{"schemaVersion":6,"fictional":true}\n', { mode: 0o600 }),
     fs.writeFile(nodeExecutable, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
   ]);
   const destination = path.join(launchAgentsDirectory, `${AGENT_LABEL}.plist`);

@@ -14,6 +14,8 @@ const OPERATIONAL_COLLECTIONS = Object.freeze([
   'findings',
   'evidence',
   'proposedChanges',
+  'decisions',
+  'risks',
   'briefings',
   'briefingVersions',
   'auditEvents'

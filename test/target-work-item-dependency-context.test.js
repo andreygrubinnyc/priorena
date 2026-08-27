@@ -24,7 +24,7 @@ const {
   workspaceBase
 } = require('../test-support/target-api-harness');
 const { createTriageFixture } = require('../test-support/target-triage-fixtures');
-const { workItem } = require('../test-support/target-v5-fixtures');
+const { workItem } = require('../test-support/target-v6-fixtures');
 
 const root = path.join(__dirname, '..');
 const SELECTED_ID = 'work-item-alpha-unassigned';
@@ -76,7 +76,7 @@ function resultFor(response) {
   };
 }
 
-test('exact schema-v5 dependencies produce deterministic bounded same-Workspace context without a write', async t => {
+test('exact schema-v6 dependencies produce deterministic bounded same-Workspace context without a write', async t => {
   const { app, targetDataFile } = await dependencyHarness(t);
   const before = await fs.readFile(targetDataFile);
   const first = await requestApp(app, { url: detailUrl() });
@@ -262,7 +262,7 @@ test('Work Item detail validates before state assignment and renders dependency 
   assert.doesNotMatch(`${client}\n${state}`, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/);
   assert.match(state, /Dependency context does not match the validated parent context/);
   assert.match(state, /Dependency context is not deterministically ordered/);
-  assert.match(architecture, /unchanged strict `schemaVersion: 5`/);
+  assert.match(architecture, /strict `schemaVersion: 6`/);
   assert.match(architecture, /not a score, severity order, satisfaction assessment, blocker/);
   assert.match(architecture, /Descriptions, notes, labels, assignees/);
 });

@@ -13,7 +13,7 @@ ChatGPT conversation, download the resulting raw feed, and then bring that
 feed back to Priorena. There is no ChatGPT, OpenAI, Jira, telemetry, analytics,
 remote-storage, hosting, LAN, or communication client in this workflow.
 
-The persisted model remains strict `schemaVersion: 5`. The generic seed and
+The persisted model is strict `schemaVersion: 6`. The generic seed and
 root collections do not change. Review decisions are request data only and are
 never added to a Source, Work Item, or another persisted record.
 
@@ -152,7 +152,7 @@ The resulting hash binds the full consequential state. Apply requires that
 revision, the original input, exact decisions, the final preview hash, and the
 complete approvable proposal-ID set. The server rebuilds the preview, rejects a
 stale or mismatched request, validates dependencies and parents, and performs
-one atomic schema-v5 replacement. A validation or persistence failure writes
+one atomic schema-v6 replacement. A validation or persistence failure writes
 nothing. While apply is in progress, the action is disabled and re-entry is
 ignored. Any failed validation, final preview, or apply removes stale review
 controls before presenting the next corrective action.
