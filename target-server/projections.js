@@ -9,6 +9,9 @@ const { MAX_SOURCE_FILE_BYTES, MEDIA_TYPES_BY_EXTENSION, safeDownloadName } = re
 const MAX_SEARCH_QUERY_CHARACTERS = 200;
 const MIN_SEARCH_QUERY_CHARACTERS = 2;
 const MAX_SEARCH_RESULTS = 50;
+const MAX_PORTFOLIO_ATTENTION_WORKSPACES = 50;
+const MAX_TODAY_ATTENTION_ITEMS = 50;
+const CLOSED_MILESTONE_STATUSES = new Set(['complete', 'completed', 'done', 'cancelled', 'canceled']);
 const SAFE_BRIEFING_FORMATS = new Set(['teams', 'email', 'confluence']);
 const SAFE_BRIEFING_MEDIA_TYPES = new Set([
   'application/json',
@@ -391,10 +394,132 @@ function resolveActiveContext(document, organizationId, requestedWorkspaceId = n
   };
 }
 
+function normalizedStatus(value) {
+  return String(value || '').trim().toLocaleLowerCase('en-US');
+}
+
+function isClosedMilestone(milestone) {
+  return CLOSED_MILESTONE_STATUSES.has(normalizedStatus(milestone.status));
+}
+
+function readinessReasons(workItem) {
+  const reasons = [];
+  const status = normalizedStatus(workItem.canonicalStatus);
+  if (status === 'unknown') reasons.push({ key: 'unknown-status', label: 'Unknown status' });
+  if (workItem.itemType === 'Unknown') reasons.push({ key: 'unknown-type', label: 'Unknown type' });
+  if (workItem.initiativeId === null) reasons.push({ key: 'unassigned', label: 'Unassigned' });
+  if (status !== 'unknown' && workItem.currentStateConfidence !== 'confirmed') {
+    reasons.push({ key: 'current-state-needs-confirmation', label: 'Current state needs confirmation' });
+  }
+  return reasons;
+}
+
+function attentionSignal(key, label, count, level, destination) {
+  return { key, label, count, level, destination };
+}
+
+function workspaceAttention(document, organizationId, workspace, options = {}) {
+  const referenceDate = options.referenceDate || new Date().toISOString().slice(0, 10);
+  const workItems = recordsForWorkspace(document, 'workItems', organizationId, workspace.id).filter(item => !item.archived);
+  const milestones = recordsForWorkspace(document, 'milestones', organizationId, workspace.id);
+  const findings = recordsForWorkspace(document, 'findings', organizationId, workspace.id);
+  const proposedChanges = recordsForWorkspace(document, 'proposedChanges', organizationId, workspace.id);
+  const activeFollowUps = workItems.filter(item => ['open', 'waiting'].includes(item.followUp.state));
+  const overdueFollowUps = activeFollowUps.filter(item => item.followUp.dueAt !== null && item.followUp.dueAt < referenceDate);
+  const milestoneRecords = milestones
+    .filter(milestone => !isClosedMilestone(milestone))
+    .map(milestone => ({
+      milestone,
+      timing: milestoneTiming(milestone.date, milestoneOptions(workspace, { referenceDate }))
+    }));
+  const blockedWorkItems = workItems.filter(item => normalizedStatus(item.canonicalStatus) === 'blocked');
+  const atRiskWorkItems = workItems.filter(item => ['at risk', 'at-risk'].includes(normalizedStatus(item.canonicalStatus)));
+  const readinessWorkItems = workItems
+    .map(workItem => ({ workItem, reasons: readinessReasons(workItem) }))
+    .filter(item => item.reasons.length > 0);
+  const pendingFindings = findings.filter(finding => finding.reviewStatus === 'pending');
+  const pendingProposedChanges = proposedChanges.filter(change => change.reviewStatus === 'pending');
+  const approvedProposedChanges = proposedChanges.filter(change => change.reviewStatus === 'approved');
+  const counts = {
+    blockedWorkItems: blockedWorkItems.length,
+    atRiskWorkItems: atRiskWorkItems.length,
+    openFollowUps: activeFollowUps.length,
+    overdueFollowUps: overdueFollowUps.length,
+    overdueMilestones: milestoneRecords.filter(item => item.timing.pressure === 'overdue').length,
+    dueSoonMilestones: milestoneRecords.filter(item => item.timing.pressure === 'due-soon').length,
+    findingsToReview: pendingFindings.length,
+    proposedChangesToReview: pendingProposedChanges.length,
+    approvedChangesToApply: approvedProposedChanges.length,
+    unknownStatusWorkItems: workItems.filter(item => normalizedStatus(item.canonicalStatus) === 'unknown').length,
+    unknownTypeWorkItems: workItems.filter(item => item.itemType === 'Unknown').length,
+    unassignedWorkItems: workItems.filter(item => item.initiativeId === null).length,
+    currentStateNeedsConfirmation: workItems.filter(item => {
+      const status = normalizedStatus(item.canonicalStatus);
+      return status !== 'unknown' && item.currentStateConfidence !== 'confirmed';
+    }).length
+  };
+  const signals = [
+    attentionSignal('blocked-work', 'Blocked Work Items', counts.blockedWorkItems, 'urgent', 'today'),
+    attentionSignal('overdue-milestones', 'Overdue Milestones', counts.overdueMilestones, 'urgent', 'milestones'),
+    attentionSignal('overdue-follow-ups', 'Overdue Follow-Ups', counts.overdueFollowUps, 'urgent', 'follow-up'),
+    attentionSignal('at-risk-work', 'At-risk Work Items', counts.atRiskWorkItems, 'attention', 'today'),
+    attentionSignal('due-soon-milestones', 'Milestones due soon', counts.dueSoonMilestones, 'attention', 'milestones'),
+    attentionSignal('other-open-follow-ups', 'Other open Follow-Ups', counts.openFollowUps - counts.overdueFollowUps, 'attention', 'follow-up'),
+    attentionSignal('pending-findings', 'Findings awaiting review', counts.findingsToReview, 'review', 'review'),
+    attentionSignal('pending-proposed-changes', 'Proposed Changes awaiting review', counts.proposedChangesToReview, 'review', 'review'),
+    attentionSignal('approved-proposed-changes', 'Approved Changes awaiting apply', counts.approvedChangesToApply, 'review', 'review'),
+    attentionSignal('unknown-status', 'Work Items with Unknown status', counts.unknownStatusWorkItems, 'readiness', 'work'),
+    attentionSignal('unknown-type', 'Work Items with Unknown type', counts.unknownTypeWorkItems, 'readiness', 'work'),
+    attentionSignal('unassigned-work', 'Unassigned Work Items', counts.unassignedWorkItems, 'readiness', 'work'),
+    attentionSignal('current-state-confirmation', 'Current states needing confirmation', counts.currentStateNeedsConfirmation, 'readiness', 'review')
+  ].filter(signal => signal.count > 0);
+  const level = ['urgent', 'attention', 'review', 'readiness'].find(candidate => signals.some(signal => signal.level === candidate)) || 'clear';
+  const labels = {
+    urgent: 'Urgent attention',
+    attention: 'Attention needed',
+    review: 'Review queue',
+    readiness: 'Readiness gaps',
+    clear: 'No current signals'
+  };
+  return {
+    level,
+    label: labels[level],
+    referenceDate,
+    counts,
+    signals,
+    records: {
+      blockedWorkItems,
+      atRiskWorkItems,
+      activeFollowUps,
+      milestoneRecords,
+      pendingFindings,
+      proposedChangesToReview: [...pendingProposedChanges, ...approvedProposedChanges],
+      readinessWorkItems
+    }
+  };
+}
+
+function proposedChangeAttention(change, workItem, initiativeIndex) {
+  const initiative = workItem.initiativeId === null ? null : initiativeIndex.get(workItem.initiativeId);
+  return {
+    id: change.id,
+    organizationId: change.organizationId,
+    workspaceId: change.workspaceId,
+    workItem: {
+      id: workItem.id,
+      summary: workItem.summary,
+      initiative: initiative ? { id: initiative.id, name: initiative.name } : null
+    },
+    field: change.field,
+    reviewStatus: change.reviewStatus
+  };
+}
+
 function buildPortfolio(document, organizationId) {
   const resolvers = createTargetResolvers(document);
   const organization = resolvers.resolveOrganization(organizationId);
   const workspaces = recordsForOrganization(document, 'workspaces', organization.id);
+  const referenceDate = new Date().toISOString().slice(0, 10);
   const workspaceRows = workspaces.map(workspace => {
     const initiatives = recordsForWorkspace(document, 'initiatives', organization.id, workspace.id);
     const workstreams = recordsForWorkspace(document, 'workstreams', organization.id, workspace.id);
@@ -403,6 +528,7 @@ function buildPortfolio(document, organizationId) {
     const sources = recordsForWorkspace(document, 'sources', organization.id, workspace.id);
     const findings = recordsForWorkspace(document, 'findings', organization.id, workspace.id);
     const evidence = recordsForWorkspace(document, 'evidence', organization.id, workspace.id);
+    const attention = workspaceAttention(document, organization.id, workspace, { referenceDate });
     return {
       ...publicWorkspace(workspace),
       counts: {
@@ -414,11 +540,43 @@ function buildPortfolio(document, organizationId) {
         milestones: milestones.length,
         sources: sources.length,
         findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').length,
-        acceptedEvidence: evidence.length
+        acceptedEvidence: evidence.length,
+        blockedWorkItems: attention.counts.blockedWorkItems + attention.counts.atRiskWorkItems,
+        atRiskWorkItems: attention.counts.atRiskWorkItems,
+        overdueFollowUps: attention.counts.overdueFollowUps,
+        overdueMilestones: attention.counts.overdueMilestones,
+        dueSoonMilestones: attention.counts.dueSoonMilestones,
+        proposedChangesToReview: attention.counts.proposedChangesToReview,
+        approvedChangesToApply: attention.counts.approvedChangesToApply,
+        unknownStatusWorkItems: attention.counts.unknownStatusWorkItems,
+        unknownTypeWorkItems: attention.counts.unknownTypeWorkItems,
+        currentStateNeedsConfirmation: attention.counts.currentStateNeedsConfirmation
+      },
+      attention: {
+        level: attention.level,
+        label: attention.label,
+        signals: attention.signals
       }
     };
   });
   const total = field => workspaceRows.reduce((sum, workspace) => sum + workspace.counts[field], 0);
+  const activeWorkspaceRows = workspaceRows.filter(workspace => !workspace.archived);
+  const activeTotal = field => activeWorkspaceRows.reduce((sum, workspace) => sum + workspace.counts[field], 0);
+  const levelRank = new Map([['urgent', 0], ['attention', 1], ['review', 2], ['readiness', 3], ['clear', 4]]);
+  const attentionQueue = activeWorkspaceRows
+    .filter(workspace => workspace.attention.level !== 'clear')
+    .sort((left, right) =>
+      levelRank.get(left.attention.level) - levelRank.get(right.attention.level) ||
+      left.name.localeCompare(right.name, 'en-US') ||
+      left.id.localeCompare(right.id, 'en-US'));
+  const aggregateSignals = new Map();
+  activeWorkspaceRows.forEach(workspace => {
+    workspace.attention.signals.forEach(signal => {
+      const current = aggregateSignals.get(signal.key) || { ...signal, count: 0 };
+      current.count += signal.count;
+      aggregateSignals.set(signal.key, current);
+    });
+  });
   return {
     organization: publicOrganization(organization),
     counts: {
@@ -432,7 +590,40 @@ function buildPortfolio(document, organizationId) {
       sources: total('sources'),
       findingsToReview: total('findingsToReview'),
       acceptedEvidence: total('acceptedEvidence'),
-      briefings: recordsForOrganization(document, 'briefings', organization.id).filter(briefing => !briefing.archived).length
+      briefings: recordsForOrganization(document, 'briefings', organization.id).filter(briefing => !briefing.archived).length,
+      blockedWorkItems: activeTotal('blockedWorkItems'),
+      atRiskWorkItems: activeTotal('atRiskWorkItems'),
+      overdueFollowUps: activeTotal('overdueFollowUps'),
+      overdueMilestones: activeTotal('overdueMilestones'),
+      dueSoonMilestones: activeTotal('dueSoonMilestones'),
+      proposedChangesToReview: activeTotal('proposedChangesToReview'),
+      approvedChangesToApply: activeTotal('approvedChangesToApply'),
+      unknownStatusWorkItems: activeTotal('unknownStatusWorkItems'),
+      unknownTypeWorkItems: activeTotal('unknownTypeWorkItems'),
+      currentStateNeedsConfirmation: activeTotal('currentStateNeedsConfirmation')
+    },
+    attention: {
+      referenceDate,
+      workspaceLevels: Object.fromEntries(['urgent', 'attention', 'review', 'readiness', 'clear']
+        .map(level => [level, activeWorkspaceRows.filter(workspace => workspace.attention.level === level).length])),
+      signals: [...aggregateSignals.values()],
+      queue: attentionQueue.slice(0, MAX_PORTFOLIO_ATTENTION_WORKSPACES).map(workspace => ({
+        workspace: {
+          id: workspace.id,
+          organizationId: workspace.organizationId,
+          name: workspace.name,
+          archived: workspace.archived
+        },
+        level: workspace.attention.level,
+        label: workspace.attention.label,
+        signals: workspace.attention.signals
+      })),
+      queueMeta: {
+        total: attentionQueue.length,
+        returned: Math.min(attentionQueue.length, MAX_PORTFOLIO_ATTENTION_WORKSPACES),
+        truncated: attentionQueue.length > MAX_PORTFOLIO_ATTENTION_WORKSPACES,
+        limit: MAX_PORTFOLIO_ATTENTION_WORKSPACES
+      }
     },
     workspaces: workspaceRows
   };
@@ -452,7 +643,10 @@ function buildToday(document, organizationId, workspaceId) {
   const milestones = recordsForWorkspace(document, 'milestones', organization.id, workspace.id);
   const findings = recordsForWorkspace(document, 'findings', organization.id, workspace.id);
   const evidence = recordsForWorkspace(document, 'evidence', organization.id, workspace.id);
-  const blockedStatuses = new Set(['blocked', 'at risk']);
+  const attention = workspaceAttention(document, organization.id, workspace);
+  const workItemIndex = new Map(recordsForWorkspace(document, 'workItems', organization.id, workspace.id)
+    .map(item => [item.id, item]));
+  const toPublicWorkItem = item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex);
   return {
     organization: publicOrganization(organization),
     workspace: publicWorkspace(workspace),
@@ -461,10 +655,19 @@ function buildToday(document, organizationId, workspaceId) {
       workstreams: workstreams.length,
       assignedWorkItems: workItems.filter(item => item.initiativeId !== null).length,
       unassignedWorkItems: workItems.filter(item => item.initiativeId === null).length,
-      blockedWorkItems: workItems.filter(item => blockedStatuses.has(item.canonicalStatus.trim().toLowerCase())).length,
+      blockedWorkItems: attention.counts.blockedWorkItems + attention.counts.atRiskWorkItems,
+      atRiskWorkItems: attention.counts.atRiskWorkItems,
       openFollowUps: workItems.filter(item => ['open', 'waiting'].includes(item.followUp.state)).length,
+      overdueFollowUps: attention.counts.overdueFollowUps,
       milestones: milestones.length,
+      overdueMilestones: attention.counts.overdueMilestones,
+      dueSoonMilestones: attention.counts.dueSoonMilestones,
       findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').length,
+      proposedChangesToReview: attention.counts.proposedChangesToReview,
+      approvedChangesToApply: attention.counts.approvedChangesToApply,
+      unknownStatusWorkItems: attention.counts.unknownStatusWorkItems,
+      unknownTypeWorkItems: attention.counts.unknownTypeWorkItems,
+      currentStateNeedsConfirmation: attention.counts.currentStateNeedsConfirmation,
       acceptedEvidence: evidence.length
     },
     initiatives: initiatives.map(publicInitiative),
@@ -472,14 +675,39 @@ function buildToday(document, organizationId, workspaceId) {
     jiraEpicMappings: jiraEpicMappings.map(publicJiraEpicMapping),
     workItems: workItems.map(item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex)),
     attention: {
-      blockedWorkItems: workItems
-        .filter(item => blockedStatuses.has(item.canonicalStatus.trim().toLowerCase()))
-        .map(item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex)),
-      followUps: workItems
-        .filter(item => ['open', 'waiting'].includes(item.followUp.state))
-        .map(item => publicWorkItem(item, initiativeIndex, workstreamIndex, jiraEpicMappingIndex)),
-      milestones: milestones.map(milestone => publicMilestone(milestone, initiativeIndex, milestoneOptions(workspace))),
-      findingsToReview: findings.filter(finding => finding.reviewStatus === 'pending').map(publicFinding)
+      level: attention.level,
+      label: attention.label,
+      referenceDate: attention.referenceDate,
+      signals: attention.signals,
+      blockedWorkItems: [...attention.records.blockedWorkItems, ...attention.records.atRiskWorkItems]
+        .slice(0, MAX_TODAY_ATTENTION_ITEMS)
+        .map(toPublicWorkItem),
+      atRiskWorkItems: attention.records.atRiskWorkItems.slice(0, MAX_TODAY_ATTENTION_ITEMS).map(toPublicWorkItem),
+      followUps: attention.records.activeFollowUps.slice(0, MAX_TODAY_ATTENTION_ITEMS).map(toPublicWorkItem),
+      milestones: attention.records.milestoneRecords
+        .filter(item => ['overdue', 'due-soon'].includes(item.timing.pressure))
+        .slice(0, MAX_TODAY_ATTENTION_ITEMS)
+        .map(item => publicMilestone(item.milestone, initiativeIndex, milestoneOptions(workspace, { referenceDate: attention.referenceDate }))),
+      findingsToReview: attention.records.pendingFindings.slice(0, MAX_TODAY_ATTENTION_ITEMS).map(publicFinding),
+      proposedChangesToReview: attention.records.proposedChangesToReview
+        .slice(0, MAX_TODAY_ATTENTION_ITEMS)
+        .map(change => proposedChangeAttention(change, workItemIndex.get(change.workItemId), initiativeIndex)),
+      readinessWorkItems: attention.records.readinessWorkItems.slice(0, MAX_TODAY_ATTENTION_ITEMS).map(item => ({
+        ...toPublicWorkItem(item.workItem),
+        attentionReasons: item.reasons
+      })),
+      limits: {
+        itemsPerCategory: MAX_TODAY_ATTENTION_ITEMS,
+        truncated: {
+          blockedWorkItems: attention.records.blockedWorkItems.length + attention.records.atRiskWorkItems.length > MAX_TODAY_ATTENTION_ITEMS,
+          atRiskWorkItems: attention.records.atRiskWorkItems.length > MAX_TODAY_ATTENTION_ITEMS,
+          followUps: attention.records.activeFollowUps.length > MAX_TODAY_ATTENTION_ITEMS,
+          milestones: attention.records.milestoneRecords.filter(item => ['overdue', 'due-soon'].includes(item.timing.pressure)).length > MAX_TODAY_ATTENTION_ITEMS,
+          findingsToReview: attention.records.pendingFindings.length > MAX_TODAY_ATTENTION_ITEMS,
+          proposedChangesToReview: attention.records.proposedChangesToReview.length > MAX_TODAY_ATTENTION_ITEMS,
+          readinessWorkItems: attention.records.readinessWorkItems.length > MAX_TODAY_ATTENTION_ITEMS
+        }
+      }
     }
   };
 }
