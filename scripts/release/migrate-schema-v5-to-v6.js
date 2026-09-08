@@ -75,42 +75,50 @@ async function writeExclusiveCandidate(destinationPath, bytes) {
   let handle = null;
   let destinationCreated = false;
   let candidateIdentity = null;
+  const release = async () => {
+    if (!handle) return;
+    const candidateHandle = handle;
+    handle = null;
+    await candidateHandle.close();
+  };
   try {
     handle = await fs.open(temporaryPath, 'wx', 0o600);
     await handle.writeFile(bytes);
     await handle.sync();
     const candidateStats = await handle.stat();
     candidateIdentity = { dev: candidateStats.dev, ino: candidateStats.ino };
-    await handle.close();
-    handle = null;
 
     await fs.link(temporaryPath, destinationPath);
     destinationCreated = true;
     await fs.unlink(temporaryPath);
     await syncDirectory(directory);
     const remove = async () => {
-      if (!destinationCreated) return;
-      let currentStats;
       try {
-        currentStats = await fs.lstat(destinationPath);
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          destinationCreated = false;
-          return;
+        if (!destinationCreated) return;
+        let currentStats;
+        try {
+          currentStats = await fs.lstat(destinationPath);
+        } catch (error) {
+          if (error.code === 'ENOENT') {
+            destinationCreated = false;
+            return;
+          }
+          throw error;
         }
-        throw error;
+        if (currentStats.dev !== candidateIdentity.dev || currentStats.ino !== candidateIdentity.ino) {
+          throw new SchemaMigrationFileError(
+            'Migration candidate path no longer identifies the created candidate',
+            'MIGRATION_CANDIDATE_CLEANUP_REFUSED'
+          );
+        }
+        await fs.unlink(destinationPath);
+        await syncDirectory(directory);
+        destinationCreated = false;
+      } finally {
+        await release();
       }
-      if (currentStats.dev !== candidateIdentity.dev || currentStats.ino !== candidateIdentity.ino) {
-        throw new SchemaMigrationFileError(
-          'Migration candidate path no longer identifies the created candidate',
-          'MIGRATION_CANDIDATE_CLEANUP_REFUSED'
-        );
-      }
-      await fs.unlink(destinationPath);
-      await syncDirectory(directory);
-      destinationCreated = false;
     };
-    return { candidateIdentity, remove };
+    return { candidateIdentity, release, remove };
   } catch (error) {
     if (handle) {
       try {
@@ -186,6 +194,7 @@ async function migrateFile(sourcePath, destinationPath) {
       destinationStats.dev !== candidateFile.candidateIdentity.dev || destinationStats.ino !== candidateFile.candidateIdentity.ino) {
       throw new SchemaMigrationFileError('Migration candidate file boundary verification failed', 'MIGRATION_CANDIDATE_FILE_INVALID');
     }
+    await candidateFile.release();
     return {
       fromSchemaVersion: 5,
       toSchemaVersion: verified.document.schemaVersion,
