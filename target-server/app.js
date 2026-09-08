@@ -31,7 +31,8 @@ const TARGET_MODULE_ASSETS = Object.freeze([
   ['target-triage-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-triage-state.js'), 'utf8')],
   ['target-import-feed-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-import-feed-state.js'), 'utf8')],
   ['target-evidence-review-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-evidence-review-state.js'), 'utf8')],
-  ['target-briefing-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-briefing-state.js'), 'utf8')]
+  ['target-briefing-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-briefing-state.js'), 'utf8')],
+  ['target-decision-risk-state.js', fs.readFileSync(path.join(PUBLIC_ROOT, 'target-decision-risk-state.js'), 'utf8')]
 ].map(([name, source]) => Object.freeze({ route: `/target-modules/${name}`, source })));
 
 function createTargetApiApp(options = {}) {

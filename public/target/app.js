@@ -7,7 +7,8 @@
   const importFeedModule = window.PriorenaTargetImportFeed;
   const evidenceReviewModule = window.PriorenaTargetEvidenceReview;
   const briefingModule = window.PriorenaTargetBriefing;
-  if (!contextModule || !workflowModule || !triageModule || !importFeedModule || !evidenceReviewModule || !briefingModule) throw new Error('Target state modules are unavailable');
+  const decisionRiskModule = window.PriorenaTargetDecisionRisk;
+  if (!contextModule || !workflowModule || !triageModule || !importFeedModule || !evidenceReviewModule || !briefingModule || !decisionRiskModule) throw new Error('Target state modules are unavailable');
 
   const byId = id => document.getElementById(id);
   const elements = Object.freeze({
@@ -37,6 +38,8 @@
     'work-items': ['Work Items', 'Review what Priorena knows, where it came from, and what explicit action to take next.'],
     'follow-up': ['Follow-Up', 'PM attention attached to Work Items in this Workspace.'],
     milestones: ['Milestones', 'Workspace and Initiative delivery checkpoints.'],
+    decisions: ['Decisions', 'Record explicit choices, supporting Evidence, and immutable outcomes for this Workspace.'],
+    risks: ['Risks', 'Track explicit conditions, response plans, and immutable closures without scores or inferred priority.'],
     'add-source': ['Add Source', 'Add local material for separate Finding review.'],
     'import-feed': ['Import Feed', 'Validate, review, map, and explicitly apply a local target-v4 feed.'],
     'source-library': ['Source Library', 'Workspace Sources and how each one was added.'],
@@ -61,6 +64,7 @@
     triage: triageModule.createTriageState(),
     importFeed: importFeedModule.createImportFeedState(),
     evidenceReview: evidenceReviewModule.newEvidenceReviewState(),
+    decisionRisk: decisionRiskModule.createDecisionRiskState(),
     generation: 0
   };
 
@@ -74,6 +78,10 @@
 
   function clearEvidenceReviewData() {
     state.evidenceReview = evidenceReviewModule.newEvidenceReviewState();
+  }
+
+  function clearDecisionRiskData() {
+    state.decisionRisk = decisionRiskModule.createDecisionRiskState();
   }
 
   function invalidateTriageData() {
@@ -161,6 +169,7 @@
   const triageApi = triageModule.createTargetTriageApiClient({ request: (url, options) => fetch(url, options) });
   const evidenceReviewApi = evidenceReviewModule.createTargetEvidenceReviewApiClient({ request: (url, options) => fetch(url, options) });
   const briefingApi = briefingModule.createTargetBriefingApiClient({ request: (url, options) => fetch(url, options) });
+  const decisionRiskApi = decisionRiskModule.createTargetDecisionRiskApiClient({ request: (url, options) => fetch(url, options) });
 
   function clearBriefingData() {
     state.briefings = { tab: 'prepare', definitions: [], revision: null, initiativesByWorkspace: new Map(), activeDefinitionId: null, activeVersionId: null, renderGeneration: 0 };
@@ -229,6 +238,7 @@
     const reset = workflowModule.defaultWorkItemUiState();
     state.workflow = null;
     invalidateTriageData();
+    clearDecisionRiskData();
     state.initiativeFilter = reset.filters.initiativeId;
     state.workstreamFilter = reset.filters.workstreamId;
     state.jiraEpicFilter = reset.filters.jiraEpicMappingId;
@@ -1238,6 +1248,531 @@
       node('p', { text: `Applies to: ${milestone.applicability.label}` }),
       node('p', { className: milestone.timing.pressure === 'overdue' ? 'risk' : (milestone.timing.pressure === 'due-soon' ? 'warning' : 'meta'), text: `${milestone.date} · ${milestone.timing.pressure} · ${milestone.linkedWorkItemIds.length} linked Work Items` })
     ], 'No Milestones exist in this Workspace.'));
+  }
+
+  function managementPageState(kind) {
+    return state.decisionRisk[kind === 'decision' ? 'decisions' : 'risks'];
+  }
+
+  function renderManagement(kind) {
+    if (kind === 'decision') renderDecisions();
+    else renderRisks();
+  }
+
+  function managementErrorMessage(error) {
+    return ['REVISION_CONFLICT', 'PREVIEW_CONFLICT'].includes(error?.code)
+      ? 'The Workspace changed. Reload this page and review the action again.'
+      : error.message;
+  }
+
+  async function loadManagedRecords(kind) {
+    const token = workspaceOperationToken();
+    const pageState = managementPageState(kind);
+    const requestId = ++state.decisionRisk.requestId;
+    const query = { page: pageState.page, pageSize: pageState.pageSize, status: pageState.status };
+    const primaryRequest = kind === 'decision'
+      ? decisionRiskApi.listDecisions(token.organizationId, token.workspaceId, query)
+      : decisionRiskApi.listRisks(token.organizationId, token.workspaceId, query);
+    const results = kind === 'decision'
+      ? await Promise.all([
+        primaryRequest,
+        decisionRiskApi.listDecisions(token.organizationId, token.workspaceId, { page: 1, pageSize: 100, status: 'decided' })
+      ])
+      : [await primaryRequest];
+    if (!workspaceOperationCurrent(token) || requestId !== state.decisionRisk.requestId) return null;
+    const body = decisionRiskModule.validateManagementList(results[0], kind, token.organizationId, token.workspaceId);
+    const references = kind === 'decision'
+      ? decisionRiskModule.validateManagementList(results[1], 'decision', token.organizationId, token.workspaceId)
+      : null;
+    if (state.workflow?.revision !== results[0].revision) {
+      const error = new Error('Decision and Risk data changed while the page was loading');
+      error.code = 'REVISION_CONFLICT';
+      throw error;
+    }
+    if (references && results[1].revision !== results[0].revision) {
+      const error = new Error('Decision references changed while the page was loading');
+      error.code = 'REVISION_CONFLICT';
+      throw error;
+    }
+    state.decisionRisk[kind === 'decision' ? 'decisions' : 'risks'] = {
+      page: body.page,
+      pageSize: body.pageSize,
+      status: pageState.status,
+      total: body.total,
+      records: [...body[kind === 'decision' ? 'decisions' : 'risks']],
+      revision: results[0].revision
+    };
+    if (references) {
+      state.decisionRisk.decisionReferences = {
+        records: [...references.decisions],
+        total: references.total,
+        revision: results[1].revision
+      };
+    }
+    return body;
+  }
+
+  async function refreshManagement(kind, message) {
+    showLoading(`Loading bounded ${kind === 'decision' ? 'Decision' : 'Risk'} records…`);
+    try {
+      const loaded = await loadManagedRecords(kind);
+      if (!loaded) return;
+      renderManagement(kind);
+      setStatus(message, 'success');
+    } catch (error) {
+      elements.view.replaceChildren(empty(`The ${kind === 'decision' ? 'Decision' : 'Risk'} page could not be loaded.`));
+      setStatus(managementErrorMessage(error), 'error');
+    }
+  }
+
+  async function refreshAfterManagementWrite(kind, token, message) {
+    state.workflow = null;
+    await loadWorkflow();
+    if (!workspaceOperationCurrent(token)) return;
+    const loaded = await loadManagedRecords(kind);
+    if (!loaded || !workspaceOperationCurrent(token)) return;
+    renderManagement(kind);
+    setStatus(message, 'success');
+  }
+
+  function nullableControlValue(control) {
+    const value = control.value.trim();
+    return value === '' ? null : value;
+  }
+
+  function selectedStableIds(control) {
+    return Array.from(control.selectedOptions).map(item => decisionRiskModule.managementStableId(item.value));
+  }
+
+  function managementReferenceControls(record = {}) {
+    const selectedEvidenceIds = new Set(record.evidenceIds || []);
+    const initiatives = state.workflow?.initiatives || [];
+    const workItems = state.workflow?.workItems || [];
+    const evidence = state.workflow?.evidence || [];
+    const initiative = node('select', { attrs: { 'aria-label': 'Decision or Risk Initiative' } }, [
+      option('', 'Workspace-level / no Initiative', record.initiativeId === null || record.initiativeId === undefined),
+      ...initiatives.map(item => option(item.id, `${item.name}${item.archived ? ' · Archived' : ''} · ${item.id}`, record.initiativeId === item.id))
+    ]);
+    const workItem = node('select', { attrs: { 'aria-label': 'Decision or Risk Work Item' } });
+    const evidenceSelect = node('select', {
+      attrs: { multiple: 'multiple', size: '6', 'aria-label': 'Compatible accepted Evidence IDs' }
+    });
+    const evidenceHelp = node('p', { className: 'meta', text: 'Evidence choices are accepted Workspace Evidence compatible with the selected Initiative and Work Item. Source content is not shown.' });
+    let workItemsInitialized = false;
+
+    const refreshEvidence = () => {
+      const selection = { initiativeId: nullableControlValue(initiative), workItemId: nullableControlValue(workItem) };
+      const available = evidence.filter(item => decisionRiskModule.compatibleEvidence(item, selection, workItems));
+      evidenceSelect.replaceChildren(...available.map(item => option(
+        item.id,
+        `${item.id} · ${item.currentness} · accepted ${dateLabel(item.acceptedAt)}`,
+        selectedEvidenceIds.has(item.id)
+      )));
+      selectedEvidenceIds.clear();
+      Array.from(evidenceSelect.selectedOptions).forEach(item => selectedEvidenceIds.add(item.value));
+      evidenceHelp.textContent = available.length
+        ? 'Select zero or more compatible accepted Evidence IDs. Source content is not shown.'
+        : 'No compatible accepted Evidence is available for this selection.';
+    };
+    const refreshWorkItems = () => {
+      const initiativeId = nullableControlValue(initiative);
+      const previous = workItemsInitialized ? workItem.value : (record.workItemId || '');
+      const available = workItems.filter(item => initiativeId === null || item.initiativeId === initiativeId);
+      workItem.replaceChildren(
+        option('', 'No Work Item', previous === ''),
+        ...available.map(item => option(item.id, `${item.jiraKey || 'No Jira key'} — ${item.summary} · ${item.id}`, previous === item.id))
+      );
+      if (!available.some(item => item.id === previous)) workItem.value = '';
+      workItemsInitialized = true;
+      refreshEvidence();
+    };
+    initiative.addEventListener('change', refreshWorkItems);
+    workItem.addEventListener('change', refreshEvidence);
+    evidenceSelect.addEventListener('change', () => {
+      selectedEvidenceIds.clear();
+      Array.from(evidenceSelect.selectedOptions).forEach(item => selectedEvidenceIds.add(item.value));
+    });
+    refreshWorkItems();
+
+    return {
+      element: node('fieldset', { className: 'control-group management-reference-group' }, [
+        node('legend', { text: 'Optional scope and Evidence' }),
+        node('div', { className: 'field-group' }, [
+          node('label', { className: 'field' }, [node('span', { text: 'Initiative' }), initiative]),
+          node('label', { className: 'field' }, [node('span', { text: 'Work Item' }), workItem])
+        ]),
+        node('label', { className: 'field management-evidence-field' }, [node('span', { text: 'Accepted Evidence' }), evidenceSelect]),
+        evidenceHelp
+      ]),
+      value: () => ({
+        initiativeId: nullableControlValue(initiative),
+        workItemId: nullableControlValue(workItem),
+        evidenceIds: selectedStableIds(evidenceSelect)
+      })
+    };
+  }
+
+  function decisionSupersessionControl(record = {}) {
+    const references = state.decisionRisk.decisionReferences.records || [];
+    const currentId = record.supersedesDecisionId || '';
+    const current = currentId && !references.some(item => item.id === currentId)
+      ? { id: currentId, title: 'Current supersession reference' }
+      : null;
+    const choices = current ? [current, ...references] : references;
+    return node('select', { attrs: { 'aria-label': 'Earlier Decided Decision to supersede' } }, [
+      option('', 'Does not supersede another Decision', currentId === ''),
+      ...choices.filter(item => item.id !== record.id).map(item => option(item.id, `${item.title} · ${item.id}`, item.id === currentId))
+    ]);
+  }
+
+  async function submitDecisionForm(record, title, references, supersedes) {
+    const token = workspaceOperationToken();
+    const pageState = managementPageState('decision');
+    const decision = {
+      title: title.value.trim(),
+      ...references.value(),
+      supersedesDecisionId: nullableControlValue(supersedes)
+    };
+    if (!decision.title) {
+      setStatus('Decision title is required.', 'error');
+      return;
+    }
+    setStatus(record ? 'Saving the Draft Decision…' : 'Creating the Draft Decision…');
+    try {
+      const result = record
+        ? await decisionRiskApi.updateDecision(token.organizationId, token.workspaceId, record.id, {
+          expectedRevision: pageState.revision, actor: 'local-target-ui', changes: decision
+        })
+        : await decisionRiskApi.createDecision(token.organizationId, token.workspaceId, {
+          expectedRevision: pageState.revision, actor: 'local-target-ui', decision
+        });
+      decisionRiskModule.validateMutationRecord(result, 'decision', token.organizationId, token.workspaceId);
+      if (!workspaceOperationCurrent(token)) return;
+      if (!record) Object.assign(pageState, { page: 1, status: 'all' });
+      await refreshAfterManagementWrite('decision', token, record ? 'Draft Decision updated.' : 'Draft Decision created.');
+    } catch (error) {
+      if (workspaceOperationCurrent(token)) setStatus(managementErrorMessage(error), 'error');
+    }
+  }
+
+  function decisionDraftForm(record = null) {
+    const title = node('input', { value: record?.title || '', attrs: { maxlength: '500', required: 'required' } });
+    const references = managementReferenceControls(record || { initiativeId: null, workItemId: null, evidenceIds: [] });
+    const supersedes = decisionSupersessionControl(record || {});
+    const form = node('form', { className: 'management-form', attrs: { novalidate: 'novalidate' } }, [
+      node('label', { className: 'field' }, [node('span', { text: 'Decision title' }), title]),
+      references.element,
+      node('label', { className: 'field' }, [node('span', { text: 'Earlier Decided Decision superseded by this Draft' }), supersedes]),
+      state.decisionRisk.decisionReferences.total > 100
+        ? node('p', { className: 'meta', text: 'Supersession choices are bounded to the first 100 most recently updated Decided Decisions.' })
+        : null,
+      node('button', { className: 'button primary', type: 'submit', text: record ? 'Save Draft Decision' : 'Create Draft Decision' })
+    ]);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      submitDecisionForm(record, title, references, supersedes);
+    });
+    return form;
+  }
+
+  async function previewDecisionFinalization(record, controls) {
+    const token = workspaceOperationToken();
+    const expectedRevision = managementPageState('decision').revision;
+    const decision = {
+      outcome: controls.outcome.value.trim(),
+      rationale: controls.rationale.value.trim(),
+      decidedBy: controls.decidedBy.value.trim()
+    };
+    if (!decision.outcome || !decision.rationale || !decision.decidedBy) {
+      setStatus('Outcome, rationale, and decision owner are required.', 'error');
+      return;
+    }
+    setStatus('Preparing an exact write-free Decision preview…');
+    try {
+      const result = await decisionRiskApi.previewDecision(token.organizationId, token.workspaceId, record.id, decision);
+      if (!workspaceOperationCurrent(token)) return;
+      const preview = decisionRiskModule.validateTransitionPreview(result, 'decision', token, record.id, decision, expectedRevision);
+      const approved = await confirmAction('Decide this Draft?', [
+        node('p', { className: 'notice', text: 'This exact transition is irreversible. The Decision becomes read-only; Priorena sends nothing externally.' }),
+        node('p', { text: `Decision: ${record.title}` }),
+        node('p', { text: `Outcome: ${preview.outcome}` }),
+        node('p', { text: `Rationale: ${preview.rationale}` }),
+        node('p', { text: `Decision owner: ${preview.decidedBy}` }),
+        node('p', { className: 'meta', text: `${record.evidenceIds.length} accepted Evidence reference${record.evidenceIds.length === 1 ? '' : 's'} remain linked by stable ID. No Source content is included.` })
+      ], 'Decide');
+      if (!approved || !workspaceOperationCurrent(token)) {
+        if (workspaceOperationCurrent(token)) setStatus('Decision preview cancelled. Nothing was changed.');
+        return;
+      }
+      const applied = await decisionRiskApi.decide(token.organizationId, token.workspaceId, record.id, {
+        expectedRevision: preview.expectedRevision,
+        actor: 'local-target-ui',
+        decision,
+        previewHash: preview.previewHash
+      });
+      decisionRiskModule.validateMutationRecord(applied, 'decision', token.organizationId, token.workspaceId);
+      if (!workspaceOperationCurrent(token)) return;
+      await refreshAfterManagementWrite('decision', token, 'Decision recorded and now immutable. Priorena sent nothing externally.');
+    } catch (error) {
+      if (workspaceOperationCurrent(token)) setStatus(managementErrorMessage(error), 'error');
+    }
+  }
+
+  function decisionFinalizeForm(record) {
+    const controls = {
+      outcome: node('textarea', { attrs: { maxlength: '10000', rows: '5', required: 'required' } }),
+      rationale: node('textarea', { attrs: { maxlength: '10000', rows: '5', required: 'required' } }),
+      decidedBy: node('input', { attrs: { maxlength: '300', required: 'required' } })
+    };
+    const form = node('form', { className: 'management-transition-form', attrs: { novalidate: 'novalidate' } }, [
+      node('h4', { text: 'Decide Draft' }),
+      node('p', { className: 'meta', text: 'Preview first. Apply is exact, revision-bound, audited, and irreversible.' }),
+      node('label', { className: 'field' }, [node('span', { text: 'Outcome' }), controls.outcome]),
+      node('label', { className: 'field' }, [node('span', { text: 'Rationale' }), controls.rationale]),
+      node('label', { className: 'field' }, [node('span', { text: 'Decision owner' }), controls.decidedBy]),
+      node('button', { className: 'button danger', type: 'submit', text: 'Preview Decision' })
+    ]);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      previewDecisionFinalization(record, controls);
+    });
+    return form;
+  }
+
+  function decisionCard(record) {
+    const terminal = record.status === 'decided';
+    return [
+      node('div', { className: 'row-head' }, [
+        node('strong', { text: record.title }),
+        badge(terminal ? 'Decided' : 'Draft', terminal ? 'clear-badge' : 'review-badge')
+      ]),
+      node('p', { className: 'meta', text: `Stable ID: ${record.id} · Initiative: ${initiativeName(record.initiativeId)} · Work Item: ${record.workItemId || 'None'} · Evidence: ${record.evidenceIds.length} · Updated: ${dateLabel(record.updatedAt)}` }),
+      record.supersedesDecisionId ? node('p', { className: 'meta', text: `Explicitly supersedes Decision ${record.supersedesDecisionId}. The earlier record remains unchanged.` }) : null,
+      terminal ? node('section', { className: 'management-terminal' }, [
+        node('h4', { text: 'Immutable outcome' }),
+        node('p', { className: 'long-text', text: record.outcome }),
+        node('h4', { text: 'Rationale' }),
+        node('p', { className: 'long-text', text: record.rationale }),
+        node('p', { className: 'meta', text: `Decided ${dateLabel(record.decidedAt)} by ${record.decidedBy}.` })
+      ]) : node('div', { className: 'management-draft-actions' }, [
+        node('details', { className: 'inline-editor' }, [
+          node('summary', { className: 'button secondary', text: 'Edit Draft' }),
+          decisionDraftForm(record)
+        ]),
+        decisionFinalizeForm(record)
+      ])
+    ];
+  }
+
+  async function submitRiskForm(record, controls, references) {
+    const token = workspaceOperationToken();
+    const pageState = managementPageState('risk');
+    const risk = {
+      title: controls.title.value.trim(),
+      description: controls.description.value.trim(),
+      responsePlan: nullableControlValue(controls.responsePlan),
+      owner: nullableControlValue(controls.owner),
+      reviewOn: controls.reviewOn.value || null,
+      ...references.value()
+    };
+    if (!risk.title || !risk.description) {
+      setStatus('Risk title and description are required.', 'error');
+      return;
+    }
+    setStatus(record ? 'Saving the Open Risk…' : 'Creating the Open Risk…');
+    try {
+      const result = record
+        ? await decisionRiskApi.updateRisk(token.organizationId, token.workspaceId, record.id, {
+          expectedRevision: pageState.revision, actor: 'local-target-ui', changes: risk
+        })
+        : await decisionRiskApi.createRisk(token.organizationId, token.workspaceId, {
+          expectedRevision: pageState.revision, actor: 'local-target-ui', risk
+        });
+      decisionRiskModule.validateMutationRecord(result, 'risk', token.organizationId, token.workspaceId);
+      if (!workspaceOperationCurrent(token)) return;
+      if (!record) Object.assign(pageState, { page: 1, status: 'all' });
+      await refreshAfterManagementWrite('risk', token, record ? 'Open Risk updated.' : 'Open Risk created.');
+    } catch (error) {
+      if (workspaceOperationCurrent(token)) setStatus(managementErrorMessage(error), 'error');
+    }
+  }
+
+  function riskOpenForm(record = null) {
+    const controls = {
+      title: node('input', { value: record?.title || '', attrs: { maxlength: '500', required: 'required' } }),
+      description: node('textarea', { value: record?.description || '', attrs: { maxlength: '10000', rows: '5', required: 'required' } }),
+      responsePlan: node('textarea', { value: record?.responsePlan || '', attrs: { maxlength: '10000', rows: '4' } }),
+      owner: node('input', { value: record?.owner || '', attrs: { maxlength: '300' } }),
+      reviewOn: node('input', { type: 'date', value: record?.reviewOn || '' })
+    };
+    const references = managementReferenceControls(record || { initiativeId: null, workItemId: null, evidenceIds: [] });
+    const form = node('form', { className: 'management-form', attrs: { novalidate: 'novalidate' } }, [
+      node('div', { className: 'field-group' }, [
+        node('label', { className: 'field' }, [node('span', { text: 'Risk title' }), controls.title]),
+        node('label', { className: 'field' }, [node('span', { text: 'Optional owner' }), controls.owner]),
+        node('label', { className: 'field' }, [node('span', { text: 'Optional review date' }), controls.reviewOn])
+      ]),
+      node('label', { className: 'field' }, [node('span', { text: 'Description' }), controls.description]),
+      node('label', { className: 'field' }, [node('span', { text: 'Optional response plan' }), controls.responsePlan]),
+      references.element,
+      node('button', { className: 'button primary', type: 'submit', text: record ? 'Save Open Risk' : 'Create Open Risk' })
+    ]);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      submitRiskForm(record, controls, references);
+    });
+    return form;
+  }
+
+  async function previewRiskClosure(record, controls) {
+    const token = workspaceOperationToken();
+    const expectedRevision = managementPageState('risk').revision;
+    const closure = { closureNote: controls.closureNote.value.trim(), closedBy: controls.closedBy.value.trim() };
+    if (!closure.closureNote || !closure.closedBy) {
+      setStatus('Closure note and closure owner are required.', 'error');
+      return;
+    }
+    setStatus('Preparing an exact write-free Risk closure preview…');
+    try {
+      const result = await decisionRiskApi.previewRiskClosure(token.organizationId, token.workspaceId, record.id, closure);
+      if (!workspaceOperationCurrent(token)) return;
+      const preview = decisionRiskModule.validateTransitionPreview(result, 'risk', token, record.id, closure, expectedRevision);
+      const approved = await confirmAction('Close this Risk?', [
+        node('p', { className: 'notice', text: 'This exact transition is irreversible. The Risk becomes read-only; Priorena sends nothing externally.' }),
+        node('p', { text: `Risk: ${record.title}` }),
+        node('p', { text: `Closure note: ${preview.closureNote}` }),
+        node('p', { text: `Closure owner: ${preview.closedBy}` }),
+        node('p', { className: 'meta', text: `${record.evidenceIds.length} accepted Evidence reference${record.evidenceIds.length === 1 ? '' : 's'} remain linked by stable ID. No Source content is included.` })
+      ], 'Close Risk');
+      if (!approved || !workspaceOperationCurrent(token)) {
+        if (workspaceOperationCurrent(token)) setStatus('Risk closure preview cancelled. Nothing was changed.');
+        return;
+      }
+      const applied = await decisionRiskApi.closeRisk(token.organizationId, token.workspaceId, record.id, {
+        expectedRevision: preview.expectedRevision,
+        actor: 'local-target-ui',
+        closure,
+        previewHash: preview.previewHash
+      });
+      decisionRiskModule.validateMutationRecord(applied, 'risk', token.organizationId, token.workspaceId);
+      if (!workspaceOperationCurrent(token)) return;
+      await refreshAfterManagementWrite('risk', token, 'Risk closed and now immutable. Priorena sent nothing externally.');
+    } catch (error) {
+      if (workspaceOperationCurrent(token)) setStatus(managementErrorMessage(error), 'error');
+    }
+  }
+
+  function riskClosureForm(record) {
+    const controls = {
+      closureNote: node('textarea', { attrs: { maxlength: '4000', rows: '4', required: 'required' } }),
+      closedBy: node('input', { attrs: { maxlength: '300', required: 'required' } })
+    };
+    const form = node('form', { className: 'management-transition-form', attrs: { novalidate: 'novalidate' } }, [
+      node('h4', { text: 'Close Risk' }),
+      node('p', { className: 'meta', text: 'Preview first. Apply is exact, revision-bound, audited, and irreversible. There is no reopen action.' }),
+      node('label', { className: 'field' }, [node('span', { text: 'Closure note' }), controls.closureNote]),
+      node('label', { className: 'field' }, [node('span', { text: 'Closure owner' }), controls.closedBy]),
+      node('button', { className: 'button danger', type: 'submit', text: 'Preview Risk closure' })
+    ]);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      previewRiskClosure(record, controls);
+    });
+    return form;
+  }
+
+  function riskCard(record) {
+    const terminal = record.status === 'closed';
+    return [
+      node('div', { className: 'row-head' }, [
+        node('strong', { text: record.title }),
+        badge(terminal ? 'Closed' : 'Open', terminal ? 'muted-badge' : 'warning-badge')
+      ]),
+      node('p', { className: 'long-text', text: record.description }),
+      node('p', { className: 'meta', text: `Stable ID: ${record.id} · Initiative: ${initiativeName(record.initiativeId)} · Work Item: ${record.workItemId || 'None'} · Evidence: ${record.evidenceIds.length} · Owner: ${record.owner || 'Not set'} · Review: ${record.reviewOn || 'Not set'} · Updated: ${dateLabel(record.updatedAt)}` }),
+      record.responsePlan ? node('section', {}, [node('h4', { text: 'Response plan' }), node('p', { className: 'long-text', text: record.responsePlan })]) : null,
+      terminal ? node('section', { className: 'management-terminal' }, [
+        node('h4', { text: 'Immutable closure' }),
+        node('p', { className: 'long-text', text: record.closureNote }),
+        node('p', { className: 'meta', text: `Closed ${dateLabel(record.closedAt)} by ${record.closedBy}.` })
+      ]) : node('div', { className: 'management-draft-actions' }, [
+        node('details', { className: 'inline-editor' }, [
+          node('summary', { className: 'button secondary', text: 'Edit Open Risk' }),
+          riskOpenForm(record)
+        ]),
+        riskClosureForm(record)
+      ])
+    ];
+  }
+
+  async function changeManagementPage(kind, changes, message) {
+    const current = managementPageState(kind);
+    Object.assign(current, changes);
+    await refreshManagement(kind, message);
+  }
+
+  function managementToolbar(kind) {
+    const pageState = managementPageState(kind);
+    const statuses = kind === 'decision'
+      ? [['all', 'All Decision states'], ['draft', 'Draft'], ['decided', 'Decided']]
+      : [['all', 'All Risk states'], ['open', 'Open'], ['closed', 'Closed']];
+    const status = node('select', {
+      attrs: { 'aria-label': `Filter ${kind === 'decision' ? 'Decisions' : 'Risks'} by status` },
+      on: { change: event => changeManagementPage(kind, { status: event.target.value, page: 1 }, 'Status filter applied.') }
+    }, statuses.map(([value, label]) => option(value, label, pageState.status === value)));
+    return node('section', { className: 'panel management-toolbar' }, [
+      node('div', { className: 'row-head' }, [
+        node('p', { text: `${pageState.total} matching ${kind === 'decision' ? 'Decision' : 'Risk'}${pageState.total === 1 ? '' : 's'}` }),
+        node('label', { className: 'field' }, [node('span', { text: 'Status' }), status])
+      ]),
+      node('p', { className: 'meta', text: kind === 'decision'
+        ? 'Decisions are explicit human choices. Priorena does not infer an outcome or rank Decisions.'
+        : 'Risks have no severity, probability, impact score, or inferred priority.' })
+    ]);
+  }
+
+  function managementPagination(kind) {
+    const pageState = managementPageState(kind);
+    const totalPages = Math.max(1, Math.ceil(pageState.total / pageState.pageSize));
+    return node('nav', { className: 'management-pagination', attrs: { 'aria-label': `${kind === 'decision' ? 'Decision' : 'Risk'} pages` } }, [
+      node('button', { className: 'button secondary', type: 'button', text: 'Previous page', disabled: pageState.page <= 1, on: { click: () => changeManagementPage(kind, { page: pageState.page - 1 }, 'Previous page loaded.') } }),
+      node('span', { text: `Page ${pageState.page} of ${totalPages}` }),
+      node('button', { className: 'button secondary', type: 'button', text: 'Next page', disabled: pageState.page >= totalPages, on: { click: () => changeManagementPage(kind, { page: pageState.page + 1 }, 'Next page loaded.') } })
+    ]);
+  }
+
+  function managementCreatePanel(kind) {
+    return node('details', { className: 'panel management-create' }, [
+      node('summary', { className: 'button primary', text: `Create ${kind === 'decision' ? 'Draft Decision' : 'Open Risk'}` }),
+      node('p', { className: 'notice', text: 'This creates a local Workspace record only. It does not change Work Item current state or send anything externally.' }),
+      kind === 'decision' ? decisionDraftForm() : riskOpenForm()
+    ]);
+  }
+
+  function renderDecisions() {
+    const pageState = managementPageState('decision');
+    elements.view.replaceChildren(
+      managementToolbar('decision'),
+      managementCreatePanel('decision'),
+      node('section', { className: 'panel management-list', attrs: { 'aria-labelledby': 'decision-list-title' } }, [
+        node('h2', { id: 'decision-list-title', text: 'Workspace Decisions' }),
+        recordList(pageState.records, decisionCard, 'No Decisions match this status filter.'),
+        managementPagination('decision')
+      ])
+    );
+  }
+
+  function renderRisks() {
+    const pageState = managementPageState('risk');
+    elements.view.replaceChildren(
+      managementToolbar('risk'),
+      managementCreatePanel('risk'),
+      node('section', { className: 'panel management-list', attrs: { 'aria-labelledby': 'risk-list-title' } }, [
+        node('h2', { id: 'risk-list-title', text: 'Workspace Risks' }),
+        recordList(pageState.records, riskCard, 'No Risks match this status filter.'),
+        managementPagination('risk')
+      ])
+    );
   }
 
   function sourceForm() {
@@ -4049,6 +4584,16 @@
           if (generation !== state.generation) return;
           if (state.activeView === 'follow-up') renderFollowUp();
           if (state.activeView === 'milestones') renderMilestones();
+          if (state.activeView === 'decisions') {
+            await loadManagedRecords('decision');
+            if (generation !== state.generation) return;
+            renderDecisions();
+          }
+          if (state.activeView === 'risks') {
+            await loadManagedRecords('risk');
+            if (generation !== state.generation) return;
+            renderRisks();
+          }
           if (state.activeView === 'add-source') elements.view.replaceChildren(sourceForm());
           if (state.activeView === 'import-feed') await renderImportFeed();
           if (state.activeView === 'source-library') renderSourceLibrary();
