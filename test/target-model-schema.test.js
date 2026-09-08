@@ -826,6 +826,20 @@ test('Decision and Risk parents and optional Evidence remain exact and compatibl
   wrongWorkItem.decisions.push(decisionRecord({ workItemId: 'work-item-alpha-unassigned' }));
   assertInvalid(wrongWorkItem, /Initiative of the referenced Work Item|different Work Item/);
 
+  const unassignedWorkItem = clonedFixture();
+  const initiativeEvidence = {
+    ...structuredClone(unassignedWorkItem.evidence[0]),
+    id: 'evidence-alpha-initiative-only',
+    workItemId: null
+  };
+  unassignedWorkItem.evidence.push(initiativeEvidence);
+  unassignedWorkItem.risks.push(riskRecord({
+    initiativeId: null,
+    workItemId: 'work-item-alpha-unassigned',
+    evidenceIds: [initiativeEvidence.id]
+  }));
+  assertInvalid(unassignedWorkItem, /Evidence associated with a different Initiative/);
+
   const foreignEvidence = clonedFixture();
   foreignEvidence.risks.push(riskRecord({ evidenceIds: ['evidence-beta-accepted'] }));
   assertInvalid(foreignEvidence, /Evidence with matching Organization and Workspace parents/);
@@ -861,12 +875,29 @@ test('Decision supersession is same-Workspace, decided-only, non-self, and uniqu
     decidedAt: '2026-08-08T10:00:00.000Z',
     decidedBy: 'fictional-decision-owner'
   });
-  document.decisions.push(original, decisionRecord({ id: 'decision-alpha-replacement', supersedesDecisionId: original.id }));
+  document.decisions.push(original, decisionRecord({
+    id: 'decision-alpha-replacement',
+    supersedesDecisionId: original.id,
+    createdAt: '2026-08-09T10:00:00.000Z',
+    updatedAt: '2026-08-09T10:00:00.000Z'
+  }));
   validateTargetData(document);
 
   const duplicate = structuredClone(document);
-  duplicate.decisions.push(decisionRecord({ id: 'decision-alpha-second-replacement', supersedesDecisionId: original.id }));
+  duplicate.decisions.push(decisionRecord({
+    id: 'decision-alpha-second-replacement',
+    supersedesDecisionId: original.id,
+    createdAt: '2026-08-10T10:00:00.000Z',
+    updatedAt: '2026-08-10T10:00:00.000Z'
+  }));
   assertInvalid(duplicate, /must not supersede a Decision more than once/);
+
+  const notLater = clonedFixture();
+  notLater.decisions.push(original, decisionRecord({
+    id: 'decision-alpha-not-later',
+    supersedesDecisionId: original.id
+  }));
+  assertInvalid(notLater, /must reference a Decision decided before this Decision was created/);
 
   const draftTarget = clonedFixture();
   draftTarget.decisions.push(decisionRecord({ id: 'decision-alpha-draft-target' }));

@@ -812,6 +812,7 @@ function validateRecordEvidence(indexes, record, path) {
   const effectiveInitiativeId = record.initiativeId === null
     ? selectedWorkItem?.initiativeId ?? null
     : record.initiativeId;
+  const initiativeIsConstrained = record.initiativeId !== null || selectedWorkItem !== null;
   record.evidenceIds.forEach((evidenceId, evidenceIndex) => {
     const evidencePath = `${path}.evidenceIds[${evidenceIndex}]`;
     const evidence = requireOwnedRecord(
@@ -825,7 +826,7 @@ function validateRecordEvidence(indexes, record, path) {
     if (record.workItemId !== null && evidence.workItemId !== null && evidence.workItemId !== record.workItemId) {
       fail(evidencePath, 'must not reference Evidence associated with a different Work Item');
     }
-    if (effectiveInitiativeId !== null) {
+    if (initiativeIsConstrained) {
       if (evidence.initiativeId !== null && evidence.initiativeId !== effectiveInitiativeId) {
         fail(evidencePath, 'must not reference Evidence associated with a different Initiative');
       }
@@ -995,6 +996,9 @@ function validateParentRelationships(document, indexes) {
         'a Decision'
       );
       if (superseded.status !== 'decided') fail(`${path}.supersedesDecisionId`, 'must reference a Decided Decision');
+      if (Date.parse(superseded.decidedAt) >= Date.parse(decision.createdAt)) {
+        fail(`${path}.supersedesDecisionId`, 'must reference a Decision decided before this Decision was created');
+      }
       if (supersededDecisionIds.has(superseded.id)) fail(`${path}.supersedesDecisionId`, 'must not supersede a Decision more than once');
       supersededDecisionIds.add(superseded.id);
     }
