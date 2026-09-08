@@ -27,6 +27,7 @@ const { readSourceFile, requireExplicitRoot } = require('./source-files');
 const { createCaptureServices } = require('./capture-services');
 const { createBriefingServices } = require('./briefing-services');
 const { createWorkServices } = require('./work-services');
+const { createDecisionRiskServices } = require('./decision-risk-services');
 const { buildSourceChangeReview } = require('./source-change-projections');
 const {
   buildSourceMatchDetail,
@@ -60,6 +61,7 @@ function createTargetServices(options = {}) {
   const captureServices = createCaptureServices({ ...options, targetDataFile });
   const briefingServices = createBriefingServices({ ...options, targetDataFile });
   const workServices = createWorkServices({ ...options, targetDataFile });
+  const decisionRiskServices = createDecisionRiskServices({ ...options, targetDataFile });
 
   async function read(projector) {
     const { document, revision } = await readTargetDataWithRevision(targetDataFile);
@@ -70,6 +72,7 @@ function createTargetServices(options = {}) {
     ...captureServices,
     ...briefingServices,
     ...workServices,
+    ...decisionRiskServices,
     listOrganizations: () => read(listOrganizations),
     getOrganization: organizationId => read(document => getOrganization(document, organizationId)),
     listWorkspaces: organizationId => read(document => listWorkspaces(document, organizationId)),
