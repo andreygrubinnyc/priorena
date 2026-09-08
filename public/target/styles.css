@@ -224,6 +224,20 @@ button, select, input, textarea, summary { outline-offset: 3px; }
 .triage-trust-note, .triage-type-review, .triage-source-detail { padding: .85rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--subtle); overflow-wrap: anywhere; }
 .triage-source-detail { margin-top: 1rem; border-left: 4px solid var(--warning); background: #fffaf0; }
 .long-text, .triage-detail blockquote { white-space: pre-wrap; overflow-wrap: anywhere; }
+.management-toolbar p { margin: 0; }
+.management-create > summary { display: inline-flex; list-style: none; }
+.management-create > summary::-webkit-details-marker { display: none; }
+.management-create[open] > summary { margin-bottom: 1rem; }
+.management-form, .management-transition-form { display: grid; gap: .85rem; margin-top: 1rem; }
+.management-reference-group { margin: 0; background: var(--subtle); }
+.management-evidence-field select { width: 100%; min-height: 8rem; }
+.management-list .list-item { padding: 1rem 0; }
+.management-draft-actions { display: grid; gap: 1rem; margin-top: 1rem; }
+.management-transition-form, .management-terminal { padding: 1rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--subtle); }
+.management-transition-form { border-left: 4px solid var(--warning); }
+.management-terminal { margin-top: 1rem; border-left: 4px solid var(--success); }
+.management-transition-form h4, .management-terminal h4 { margin: 0; }
+.management-pagination { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .75rem; margin-top: 1rem; }
 dialog { width: min(38rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); padding: 0; border: 0; border-radius: .8rem; box-shadow: 0 1rem 4rem rgb(0 0 0 / 30%); }
 dialog::backdrop { background: rgb(15 23 42 / 65%); }
 .dialog-card { padding: 1.4rem; overflow: auto; }
@@ -263,8 +277,8 @@ dialog::backdrop { background: rgb(15 23 42 / 65%); }
   .import-current-grid { grid-template-columns: 1fr; }
   .import-bulk-controls .actions { align-items: stretch; flex-direction: column; }
   .import-bulk-controls .actions select, .import-bulk-controls .actions .button { width: 100%; }
-  .review-pagination { align-items: stretch; flex-direction: column; }
-  .review-pagination .button { width: 100%; }
+  .review-pagination, .management-pagination { align-items: stretch; flex-direction: column; }
+  .review-pagination .button, .management-pagination .button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

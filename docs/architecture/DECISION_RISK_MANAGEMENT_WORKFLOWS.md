@@ -1,6 +1,6 @@
 # Decision and Risk management workflows
 
-**Status:** Source-only target API implementation
+**Status:** Repository-source target API and browser UI implementation; not released
 
 **Persisted model:** strict `schemaVersion: 6`
 
@@ -12,13 +12,12 @@
 
 This capability activates explicit human management of the separate Decision
 and Risk entities introduced by the schema-v6 foundation. It adds bounded,
-parent-scoped API reads and writes while preserving the foundation's deliberate
-absence of scores, rankings, inferred priority, automation, and external
-actions.
+parent-scoped API reads and writes plus local browser workflows while preserving
+the foundation's deliberate absence of scores, rankings, inferred priority,
+automation, and external actions.
 
 Decision and Risk records remain outside Search, Today, Portfolio, dependency
-context, Source parsing, Briefing facts, optional AI context, and browser
-navigation in this slice.
+context, Source parsing, Briefing facts, and optional AI context in this slice.
 
 ## Decision workflow
 
@@ -85,6 +84,32 @@ Reads return stored Decision or Risk fields only. They do not include Source
 content, file paths, Finding text, Evidence excerpts, unrelated records, or
 foreign-parent existence information.
 
+## Browser interaction model
+
+Workspace navigation exposes separate Decisions and Risks destinations. Each
+page loads one bounded status-filtered page at a time and validates the exact
+Organization, Workspace, lifecycle fields, and file revision before assigning
+response data to browser state. Organization or Workspace changes clear all
+Decision and Risk browser state, and late responses are ignored.
+
+Create and edit forms use stable-ID Initiative, Work Item, Evidence, and
+Decision-supersession choices. Evidence selectors show metadata only and are
+locally narrowed to choices compatible with the selected Initiative and Work
+Item; the server repeats the authoritative parent and compatibility checks.
+
+Deciding a Draft or closing an Open Risk always follows this sequence:
+
+1. the user enters every required terminal value;
+2. the browser requests a write-free, revision-bound server preview;
+3. the browser validates the preview against the exact active parents, entity,
+   action, revision, and entered values;
+4. an in-application modal presents the irreversible result; and
+5. only explicit confirmation applies the exact preview hash and values.
+
+Cancellation performs no write. A stale revision or preview conflict requires a
+fresh page load and new review. Decided Decisions and Closed Risks render as
+read-only history with no edit, reopen, or repeat-transition control.
+
 ## Routes
 
 All routes are under:
@@ -128,18 +153,20 @@ do not write or append Audit Events.
 
 ## Explicit exclusions
 
-This capability adds no browser UI, seed or Demo records, Decision-to-Risk
-relationship, deletion, reopening, score, probability, severity, impact,
-ranking, inferred priority, automatic owner, automatic due date, automatic
-transition, notification, Jira action, provider or AI behavior, external call,
-schema migration execution, runtime operation, LaunchAgent operation,
-private/live-data access or mutation, release, or merge.
+This capability adds no seed or Demo records, Decision-to-Risk relationship,
+deletion, reopening, score, probability, severity, impact, ranking, inferred
+priority, automatic owner, automatic due date, automatic transition,
+notification, Jira action, provider or AI behavior, external call, schema
+migration execution, runtime operation, LaunchAgent operation, private/live-data
+access or mutation, release, or merge.
 
 ## Verification
 
 Synthetic tests cover Draft and Open creation, editing, bounded list/detail
 reads, exact parent and Evidence isolation, supersession, preview write-freedom,
 preview-hash conflicts, stale revisions, terminal immutability, audit actions,
-unknown fields, prohibited scoring fields, and pagination bounds. The complete
-repository security, syntax, regression, build, legacy, release-rehearsal, and
-dependency gates remain required before publication.
+unknown fields, prohibited scoring fields, pagination bounds, exact client
+routes, response validation, context clearing, inert rendering, confirmation
+copy, and bounded browser selectors. The complete repository security, syntax,
+regression, build, legacy, release-rehearsal, and dependency gates remain
+required before publication.

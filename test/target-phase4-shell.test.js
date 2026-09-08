@@ -732,7 +732,7 @@ test('target UI is the release root and does not mutate target data', async t =>
   const rootResponse = await requestApp(app, { url: '/' });
   assert.equal(rootResponse.status, 302);
   assert.equal(rootResponse.headers.location, '/target/');
-  for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-import-feed-state.js', 'target-evidence-review-state.js', 'target-briefing-state.js']) {
+  for (const moduleName of ['target-context-state.js', 'target-workflow-state.js', 'target-import-feed-state.js', 'target-evidence-review-state.js', 'target-briefing-state.js', 'target-decision-risk-state.js']) {
     const response = await requestApp(app, { url: `/target-modules/${moduleName}` });
     assert.equal(response.status, 200);
     assert.match(response.headers['content-type'], /^application\/javascript/);
