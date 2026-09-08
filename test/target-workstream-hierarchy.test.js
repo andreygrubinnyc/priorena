@@ -462,7 +462,7 @@ test('Workstream context is available in Today, search, export, AI context, and 
   assert.equal(aiContext.workItems.find(item => item.id === 'work-item-alpha-assigned').workstreamId, 'workstream-alpha-mapped');
 });
 
-test('schema-v5 exposes no Scope or Feature route and action aliases', async t => {
+test('schema-v6 exposes no Scope or Feature route and action aliases', async t => {
   const { app } = await createTargetApiHarness(t);
   for (const route of [
     `${workspaceBase(ALPHA)}/scopes`,

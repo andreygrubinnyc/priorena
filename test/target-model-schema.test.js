@@ -4,9 +4,11 @@ const test = require('node:test');
 const { CLEAN_SEED, createCleanSeed } = require('../target-model/clean-seed');
 const {
   AUDIT_ACTIONS,
+  DECISION_STATUSES,
   MAX_AGGREGATE_ROOT_RECORDS,
   MAX_ROOT_COLLECTION_RECORDS,
   ROOT_COLLECTIONS,
+  RISK_STATUSES,
   TARGET_SCHEMA_VERSION,
   TargetResourceLimitError,
   TargetSchemaVersionError,
@@ -17,15 +19,60 @@ const {
   validateTargetData
 } = require('../target-model/schema');
 const {
+  FIXTURE_TIMESTAMP,
   createWorkstreamIndependenceFixture,
   createInvalidCrossOrganizationFixture,
   createInvalidCrossWorkspaceFixture,
   createMultiOrganizationFixture,
   followUp
-} = require('../test-support/target-v5-fixtures');
+} = require('../test-support/target-v6-fixtures');
 
 function clonedFixture() {
   return createMultiOrganizationFixture();
+}
+
+function decisionRecord(overrides = {}) {
+  return {
+    id: 'decision-alpha-foundation',
+    organizationId: 'org-fixture-alpha',
+    workspaceId: 'workspace-alpha-shared',
+    initiativeId: 'initiative-alpha-multiple-mappings',
+    workItemId: 'work-item-alpha-assigned',
+    title: 'Choose the fictional rollout sequence',
+    outcome: null,
+    rationale: null,
+    evidenceIds: ['evidence-alpha-accepted'],
+    status: 'draft',
+    supersedesDecisionId: null,
+    createdAt: FIXTURE_TIMESTAMP,
+    updatedAt: FIXTURE_TIMESTAMP,
+    decidedAt: null,
+    decidedBy: null,
+    ...overrides
+  };
+}
+
+function riskRecord(overrides = {}) {
+  return {
+    id: 'risk-alpha-foundation',
+    organizationId: 'org-fixture-alpha',
+    workspaceId: 'workspace-alpha-shared',
+    initiativeId: 'initiative-alpha-multiple-mappings',
+    workItemId: 'work-item-alpha-assigned',
+    title: 'Fictional review capacity may be unavailable',
+    description: 'The planned review may not have enough fictional reviewer capacity.',
+    responsePlan: 'Confirm availability before the fictional checkpoint.',
+    owner: 'Fictional Delivery Owner',
+    reviewOn: '2026-08-21',
+    evidenceIds: ['evidence-alpha-accepted'],
+    status: 'open',
+    createdAt: FIXTURE_TIMESTAMP,
+    updatedAt: FIXTURE_TIMESTAMP,
+    closedAt: null,
+    closedBy: null,
+    closureNote: null,
+    ...overrides
+  };
 }
 
 function assertInvalid(document, pattern = /must|invalid|required|unsupported|duplicate|reference/i) {
@@ -61,7 +108,7 @@ function documentWithAggregateRootCount(count) {
   return document;
 }
 
-test('the deterministic clean seed is a valid complete schema-v5 document', () => {
+test('the deterministic clean seed is a valid complete schema-v6 document', () => {
   const first = createCleanSeed();
   const second = createCleanSeed();
   assert.equal(first.schemaVersion, TARGET_SCHEMA_VERSION);
@@ -106,7 +153,7 @@ test('the clean seed contains none of the prohibited data collections or catch-a
   const seed = createCleanSeed();
   [
     'workstreams', 'jiraEpicMappings', 'workItems', 'milestones', 'sources', 'findings', 'evidence',
-    'proposedChanges', 'briefings', 'briefingVersions', 'auditEvents'
+    'proposedChanges', 'decisions', 'risks', 'briefings', 'briefingVersions', 'auditEvents'
   ].forEach(collection => assert.deepEqual(seed[collection], []));
   assert.equal('projects' in seed, false);
   assert.equal('deliveryProjects' in seed, false);
@@ -125,7 +172,7 @@ test('schemaVersion is mandatory', () => {
 
 test('unsupported past schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 4;
+  document.schemaVersion = 5;
   assert.throws(() => validateTargetData(document), error => {
     assert.equal(error instanceof TargetSchemaVersionError, true);
     assert.equal(error.code, 'UNSUPPORTED_TARGET_SCHEMA_VERSION');
@@ -135,9 +182,9 @@ test('unsupported past schema versions fail closed', () => {
 
 test('unknown future schema versions fail closed', () => {
   const document = createCleanSeed();
-  document.schemaVersion = 6;
+  document.schemaVersion = 7;
   assert.throws(() => validateTargetData(document), TargetSchemaVersionError);
-  assert.equal(document.schemaVersion, 6);
+  assert.equal(document.schemaVersion, 7);
 });
 
 test('every root collection is mandatory and must be an array', () => {
@@ -272,7 +319,7 @@ test('hierarchy, Jira, and Sub-task labels are not Work Item types', () => {
   }
 });
 
-test('the complete schema-v5 Work Item type set is accepted', () => {
+test('the complete schema-v6 Work Item type set is accepted', () => {
   for (const itemType of ['Story', 'Task', 'Bug', 'Other', 'Unknown']) {
     const document = clonedFixture();
     document.workItems[0].itemType = itemType;
@@ -280,7 +327,7 @@ test('the complete schema-v5 Work Item type set is accepted', () => {
   }
 });
 
-test('schema-v5 Work Items require an explicit nullable Jira Epic mapping reference', () => {
+test('schema-v6 Work Items require an explicit nullable Jira Epic mapping reference', () => {
   const document = clonedFixture();
   const assigned = document.workItems.find(item => item.id === 'work-item-alpha-assigned');
   const unassigned = document.workItems.find(item => item.id === 'work-item-alpha-unassigned');
@@ -312,7 +359,7 @@ test('Work Item Jira Epic references require exact Organization, Workspace, and 
   assertInvalid(foreign, /Jira Epic mapping with matching Organization, Workspace, and Initiative/);
 });
 
-test('schema-v5 permits all five independent Initiative, Workstream, and Jira Epic association states', () => {
+test('schema-v6 permits all five independent Initiative, Workstream, and Jira Epic association states', () => {
   const document = clonedFixture();
   const template = structuredClone(document.workItems.find(item => item.id === 'work-item-alpha-assigned'));
   document.workItems = [
@@ -602,7 +649,7 @@ test('Finding extraction method and version preserve explicit extraction provena
   const document = clonedFixture();
   const finding = document.findings[0];
   assert.equal(finding.extractionMethod, 'deterministic-test-extraction');
-  assert.equal(finding.extractionVersion, 'target-v5-fixture-1');
+  assert.equal(finding.extractionVersion, 'target-v6-fixture-1');
   validateTargetData(document);
 });
 
@@ -713,6 +760,155 @@ test('accepted Evidence remains separate from current Work Item state', () => {
   assert.equal(workItem.canonicalStatus, 'Planned');
 });
 
+test('schema-v6 Decision and Risk vocabularies remain deliberately small and unscored', () => {
+  assert.deepEqual([...DECISION_STATUSES], ['draft', 'decided']);
+  assert.deepEqual([...RISK_STATUSES], ['open', 'closed']);
+  assert.equal(createStableId('decision', { uuid: '123e4567-e89b-12d3-a456-426614174001' }), 'decision-123e4567-e89b-12d3-a456-426614174001');
+  assert.equal(createStableId('risk', { uuid: '123e4567-e89b-12d3-a456-426614174002' }), 'risk-123e4567-e89b-12d3-a456-426614174002');
+});
+
+test('Decision lifecycle requires explicit final values and exact decision metadata', () => {
+  const draft = clonedFixture();
+  draft.decisions.push(decisionRecord());
+  validateTargetData(draft);
+
+  const decided = clonedFixture();
+  decided.decisions.push(decisionRecord({
+    outcome: 'Use the bounded fictional sequence.',
+    rationale: 'The accepted fictional Evidence supports that sequence.',
+    status: 'decided',
+    updatedAt: '2026-08-08T12:00:00.000Z',
+    decidedAt: '2026-08-08T12:00:00.000Z',
+    decidedBy: 'fictional-decision-owner'
+  }));
+  validateTargetData(decided);
+
+  const incomplete = clonedFixture();
+  incomplete.decisions.push(decisionRecord({ status: 'decided' }));
+  assertInvalid(incomplete, /Decided Decisions require|required for a Decided Decision/);
+
+  const premature = clonedFixture();
+  premature.decisions.push(decisionRecord({ decidedAt: FIXTURE_TIMESTAMP, decidedBy: 'fictional-owner' }));
+  assertInvalid(premature, /Draft Decisions cannot/);
+});
+
+test('Risk lifecycle keeps open records free of closure claims and makes closure explicit', () => {
+  const open = clonedFixture();
+  open.risks.push(riskRecord());
+  validateTargetData(open);
+
+  const closed = clonedFixture();
+  closed.risks.push(riskRecord({
+    status: 'closed',
+    updatedAt: '2026-08-08T13:00:00.000Z',
+    closedAt: '2026-08-08T13:00:00.000Z',
+    closedBy: 'fictional-risk-owner',
+    closureNote: 'The fictional review capacity was confirmed.'
+  }));
+  validateTargetData(closed);
+
+  const premature = clonedFixture();
+  premature.risks.push(riskRecord({ closureNote: 'Not allowed while open.' }));
+  assertInvalid(premature, /Open Risks cannot/);
+
+  const incomplete = clonedFixture();
+  incomplete.risks.push(riskRecord({ status: 'closed' }));
+  assertInvalid(incomplete, /Closed Risks require/);
+});
+
+test('Decision and Risk parents and optional Evidence remain exact and compatible', () => {
+  const matching = clonedFixture();
+  matching.decisions.push(decisionRecord());
+  matching.risks.push(riskRecord());
+  validateTargetData(matching);
+
+  const wrongWorkItem = clonedFixture();
+  wrongWorkItem.decisions.push(decisionRecord({ workItemId: 'work-item-alpha-unassigned' }));
+  assertInvalid(wrongWorkItem, /Initiative of the referenced Work Item|different Work Item/);
+
+  const unassignedWorkItem = clonedFixture();
+  const initiativeEvidence = {
+    ...structuredClone(unassignedWorkItem.evidence[0]),
+    id: 'evidence-alpha-initiative-only',
+    workItemId: null
+  };
+  unassignedWorkItem.evidence.push(initiativeEvidence);
+  unassignedWorkItem.risks.push(riskRecord({
+    initiativeId: null,
+    workItemId: 'work-item-alpha-unassigned',
+    evidenceIds: [initiativeEvidence.id]
+  }));
+  assertInvalid(unassignedWorkItem, /Evidence associated with a different Initiative/);
+
+  const foreignEvidence = clonedFixture();
+  foreignEvidence.risks.push(riskRecord({ evidenceIds: ['evidence-beta-accepted'] }));
+  assertInvalid(foreignEvidence, /Evidence with matching Organization and Workspace parents/);
+
+  const implicitInitiativeMismatch = clonedFixture();
+  const incompatibleInitiativeEvidence = {
+    ...structuredClone(implicitInitiativeMismatch.evidence[0]),
+    id: 'evidence-alpha-other-initiative',
+    initiativeId: 'initiative-alpha-zero-mapping',
+    workItemId: null
+  };
+  implicitInitiativeMismatch.evidence.push(incompatibleInitiativeEvidence);
+  implicitInitiativeMismatch.decisions.push(decisionRecord({
+    initiativeId: null,
+    evidenceIds: [incompatibleInitiativeEvidence.id]
+  }));
+  assertInvalid(implicitInitiativeMismatch, /Evidence associated with a different Initiative/);
+
+  const workspaceLevel = clonedFixture();
+  workspaceLevel.decisions.push(decisionRecord({ initiativeId: null, workItemId: null, evidenceIds: [] }));
+  workspaceLevel.risks.push(riskRecord({ initiativeId: null, workItemId: null, evidenceIds: [] }));
+  validateTargetData(workspaceLevel);
+});
+
+test('Decision supersession is same-Workspace, decided-only, non-self, and unique', () => {
+  const document = clonedFixture();
+  const original = decisionRecord({
+    id: 'decision-alpha-original',
+    outcome: 'Use the original fictional sequence.',
+    rationale: 'The original fictional rationale.',
+    status: 'decided',
+    updatedAt: '2026-08-08T10:00:00.000Z',
+    decidedAt: '2026-08-08T10:00:00.000Z',
+    decidedBy: 'fictional-decision-owner'
+  });
+  document.decisions.push(original, decisionRecord({
+    id: 'decision-alpha-replacement',
+    supersedesDecisionId: original.id,
+    createdAt: '2026-08-09T10:00:00.000Z',
+    updatedAt: '2026-08-09T10:00:00.000Z'
+  }));
+  validateTargetData(document);
+
+  const duplicate = structuredClone(document);
+  duplicate.decisions.push(decisionRecord({
+    id: 'decision-alpha-second-replacement',
+    supersedesDecisionId: original.id,
+    createdAt: '2026-08-10T10:00:00.000Z',
+    updatedAt: '2026-08-10T10:00:00.000Z'
+  }));
+  assertInvalid(duplicate, /must not supersede a Decision more than once/);
+
+  const notLater = clonedFixture();
+  notLater.decisions.push(original, decisionRecord({
+    id: 'decision-alpha-not-later',
+    supersedesDecisionId: original.id
+  }));
+  assertInvalid(notLater, /must reference a Decision decided before this Decision was created/);
+
+  const draftTarget = clonedFixture();
+  draftTarget.decisions.push(decisionRecord({ id: 'decision-alpha-draft-target' }));
+  draftTarget.decisions.push(decisionRecord({ id: 'decision-alpha-invalid-replacement', supersedesDecisionId: 'decision-alpha-draft-target' }));
+  assertInvalid(draftTarget, /must reference a Decided Decision/);
+
+  const self = clonedFixture();
+  self.decisions.push(decisionRecord({ supersedesDecisionId: 'decision-alpha-foundation' }));
+  assertInvalid(self, /must not reference the Decision itself/);
+});
+
 test('Briefings may select only Workspaces and Initiatives inside one Organization', () => {
   const document = clonedFixture();
   validateTargetData(document);
@@ -771,6 +967,43 @@ test('Workspace-owned Audit Events require the exact target Workspace', () => {
   const foreignWorkspace = clonedFixture();
   foreignWorkspace.auditEvents[0].workspaceId = 'workspace-alpha-secondary';
   assertInvalid(foreignWorkspace, /must match the target entity Workspace/);
+});
+
+test('Decision and Risk Audit Events resolve only exact Workspace-owned targets', () => {
+  const document = clonedFixture();
+  document.decisions.push(decisionRecord());
+  document.risks.push(riskRecord());
+  document.auditEvents.push(
+    {
+      id: 'audit-event-alpha-decision-created',
+      organizationId: 'org-fixture-alpha',
+      workspaceId: 'workspace-alpha-shared',
+      entityType: 'decision',
+      entityId: 'decision-alpha-foundation',
+      action: 'decision-draft-created',
+      actor: 'fictional-decision-owner',
+      timestamp: FIXTURE_TIMESTAMP,
+      beforeHash: null,
+      afterHash: 'fictional-decision-hash'
+    },
+    {
+      id: 'audit-event-alpha-risk-created',
+      organizationId: 'org-fixture-alpha',
+      workspaceId: 'workspace-alpha-shared',
+      entityType: 'risk',
+      entityId: 'risk-alpha-foundation',
+      action: 'risk-created',
+      actor: 'fictional-risk-owner',
+      timestamp: FIXTURE_TIMESTAMP,
+      beforeHash: null,
+      afterHash: 'fictional-risk-hash'
+    }
+  );
+  validateTargetData(document);
+
+  const wrongWorkspace = structuredClone(document);
+  wrongWorkspace.auditEvents.at(-1).workspaceId = 'workspace-alpha-secondary';
+  assertInvalid(wrongWorkspace, /must match the target entity Workspace/);
 });
 
 test('valid Organization-level and Workspace-level Audit Events succeed', () => {

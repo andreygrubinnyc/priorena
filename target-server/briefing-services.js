@@ -37,7 +37,7 @@ const MAX_MANUAL_INPUTS = 50;
 const MAX_OUTPUT_BYTES = 128 * 1024;
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit schema-v5 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target Briefing services require an explicit schema-v6 data-file path');
   return path.resolve(filePath);
 }
 

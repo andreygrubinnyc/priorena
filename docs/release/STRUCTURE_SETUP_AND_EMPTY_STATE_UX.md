@@ -2,7 +2,7 @@
 
 **Status:** source change awaiting review and merge authorization
 
-**Persistence:** unchanged strict `schemaVersion: 5`
+**Persistence:** strict `schemaVersion: 6`; hierarchy behavior unchanged from schema v5
 
 **Application boundary:** single-user, local-only, `127.0.0.1`
 
@@ -15,7 +15,7 @@ Work Items are selected, distinguishes a genuinely empty Workspace from an
 empty filtered result, and simplifies ordinary interface copy.
 
 Archive remains reversible and does not delete related records. Initiative,
-Workstream, and Jira Epic relationships keep their existing schema-v5 model and
+Workstream, and Jira Epic relationships keep their existing schema-v6 model and
 revision-aware service behavior. The import parser, preview/apply APIs, strict
 `target-v4` import contract, and explicit human-approval boundary are unchanged.
 

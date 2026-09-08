@@ -2,7 +2,7 @@
 
 **Status:** Isolated target implementation
 
-**Persisted model:** unchanged strict `schemaVersion: 5`
+**Persisted model:** strict `schemaVersion: 6`; dependency shape unchanged from schema v5
 
 **API:** existing Work Item triage-detail read
 
@@ -11,7 +11,7 @@
 ## Capability boundary
 
 Work Item Dependency Context exposes dependency links already persisted on a
-schema-v5 Work Item. It adds no entity, field, migration, route, write,
+schema-v6 Work Item. It adds no dependency entity, field, route, write,
 attention level, Source parser, provider, Jira action, or runtime behavior.
 
 The selected Work Item detail shows two exact relationship directions:
@@ -80,11 +80,11 @@ The server resolves the Organization, Workspace, and selected Work Item before
 calculating any relationship. Every listed dependency is re-resolved through
 the exact same-Workspace resolver. Referencing Work Items are selected only
 after exact Organization and Workspace filtering. Cross-Initiative links are
-shown because schema v5 permits them inside one Workspace. Archived links are
+shown because schema v6 permits them inside one Workspace. Archived links are
 retained and labeled rather than hidden.
 
 Unknown and wrong-parent selected IDs retain the same generic response. The
-strict schema-v5 reader already rejects missing, foreign-Workspace, duplicate,
+strict schema-v6 reader already rejects missing, foreign-Workspace, duplicate,
 and self dependency IDs before the projection runs.
 
 Both relationship directions sort independently by Jira key or stable ID,

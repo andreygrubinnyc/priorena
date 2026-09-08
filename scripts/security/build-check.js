@@ -19,7 +19,7 @@ async function run() {
   ];
   for (const file of requiredFiles) assert.equal(fs.existsSync(file), true, `Missing required application file: ${file}`);
 
-  const targetDataFile = path.join(tempRoot, 'target-v5.json');
+  const targetDataFile = path.join(tempRoot, 'target-v6.json');
   const targetSourceFilesRoot = path.join(tempRoot, 'target-source-files');
   const privateLogFile = path.join(tempRoot, 'target.log');
   const { createCleanSeed } = require('../../target-model/clean-seed');

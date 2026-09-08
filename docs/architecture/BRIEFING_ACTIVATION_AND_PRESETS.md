@@ -2,7 +2,7 @@
 
 **Status:** Isolated target implementation
 
-**Persisted model:** strict `schemaVersion: 5`
+**Persisted model:** strict `schemaVersion: 6`; Briefing shape unchanged from schema v5
 
 **API namespace:** existing `/api/v2/organizations/:organizationId/briefings`
 
@@ -29,7 +29,7 @@ communication, startup, release, or runtime behavior changes.
 ## Preset contract
 
 Presets are frozen public client constants. Each preset supplies only fields
-already accepted by the schema-v5 Briefing definition:
+already accepted by the schema-v6 Briefing definition:
 
 - name;
 - audience profile;
@@ -133,7 +133,7 @@ baseline. Priorena sends nothing.
 
 ## Required verification
 
-- Preset catalog is frozen, deterministic, schema-v5 compatible, and free of
+- Preset catalog is frozen, deterministic, schema-v6 compatible, and free of
   private or external-destination data.
 - Unknown preset IDs fail closed.
 - Candidate grouping follows definition section order and preserves candidate

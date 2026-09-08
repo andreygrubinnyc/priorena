@@ -39,7 +39,7 @@ function snapshot(comparison) {
   };
 }
 
-test('Briefing presets are frozen deterministic schema-v5 definition starting points', () => {
+test('Briefing presets are frozen deterministic schema-v6 definition starting points', () => {
   assert.equal(Object.isFrozen(BRIEFING_PRESETS), true);
   assert.deepEqual(BRIEFING_PRESETS.map(item => item.id), [
     'weekly-delivery',

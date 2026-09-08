@@ -1080,7 +1080,7 @@
     return node('section', { className: 'triage-trust-note', attrs: { 'aria-labelledby': 'dependency-context-title' } }, [
       node('h3', { id: 'dependency-context-title', text: 'Explicit dependency context' }),
       node('p', { className: 'warning', text: context.trustLabel }),
-      node('p', { className: 'meta', text: 'Priorena shows only direct schema-v5 links in this Workspace. It does not infer whether a relationship blocks work, is satisfied, creates impact or risk, or should change priority.' }),
+      node('p', { className: 'meta', text: 'Priorena shows only direct persisted links in this Workspace. It does not infer whether a relationship blocks work, is satisfied, creates impact or risk, or should change priority.' }),
       node('div', { className: 'triage-signal-list', attrs: { 'aria-label': 'Listed dependency review cue counts' } },
         cueBadges.length ? cueBadges : [badge('No allowlisted review cues', 'muted-badge')]),
       node('h4', { text: `Listed dependencies (${context.listedDependencies.total})` }),

@@ -4,7 +4,7 @@ const {
   FIXTURE_TIMESTAMP,
   createMultiOrganizationFixture,
   workItem
-} = require('./target-v5-fixtures');
+} = require('./target-v6-fixtures');
 
 const TRIAGE_CONTEXT = Object.freeze({
   organizationId: 'org-fixture-alpha',

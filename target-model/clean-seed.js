@@ -94,6 +94,8 @@ const CLEAN_SEED = {
   findings: [],
   evidence: [],
   proposedChanges: [],
+  decisions: [],
+  risks: [],
   briefings: [],
   briefingVersions: [],
   auditEvents: [],

@@ -2,7 +2,7 @@
 
 **Status:** Isolated target implementation
 
-**Persisted model:** strict `schemaVersion: 5`
+**Persisted model:** strict `schemaVersion: 6`; workflow behavior unchanged from its schema-v5 introduction
 
 **API namespace:** `/api/v2`
 
@@ -12,7 +12,7 @@
 
 Evidence-to-Current-State Review completes the human-reviewed path from one
 explicitly selected existing Source to one supported canonical Work Item field.
-It reuses the schema-v5 Source, Finding, Evidence, Proposed Change, Work Item,
+It reuses the schema-v6 Source, Finding, Evidence, Proposed Change, Work Item,
 and Audit Event records. It adds no schema, migration, compatibility reader,
 dual write, seed, dependency, provider, Jira, communication, or runtime path.
 
@@ -94,7 +94,7 @@ Item and Initiative share the exact Organization and Workspace, and the
 Initiative must exactly equal the Work Item's current nullable Initiative. The
 server fixes the extraction method and version, pending review status, and null
 supersession state. Offsets validate the selection but are not persisted in
-schema v5.
+schema v6.
 
 One revision-aware atomic write creates only the Finding and one hashed Audit
 Event. The Source, Evidence, Proposed Changes, and Work Items remain unchanged.

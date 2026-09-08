@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const test = require('node:test');
 
 const { PUBLIC_ERRORS } = require('../target-server/errors');
-const { createPhase3WorkflowFixture } = require('../test-support/target-v5-fixtures');
+const { createPhase3WorkflowFixture } = require('../test-support/target-v6-fixtures');
 const {
   ALPHA,
   BETA,

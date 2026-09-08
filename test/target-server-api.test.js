@@ -14,7 +14,7 @@ const { PUBLIC_ERRORS } = require('../target-server/errors');
 const { MAX_SOURCE_FILE_BYTES } = require('../target-server/source-files');
 const { EXPECT_TARGET_ABSENT, writeTargetData } = require('../target-model/persistence');
 const { validateTargetData } = require('../target-model/schema');
-const { createMultiOrganizationFixture } = require('../test-support/target-v5-fixtures');
+const { createMultiOrganizationFixture } = require('../test-support/target-v6-fixtures');
 
 const ALPHA = Object.freeze({
   organizationId: 'org-fixture-alpha',
@@ -115,7 +115,7 @@ function prepareInitialFixture() {
 async function createHarness(t, mutate = () => {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-target-api-'));
   const sourceFilesRoot = path.join(root, 'source-files');
-  const targetDataFile = path.join(root, 'target-v5.json');
+  const targetDataFile = path.join(root, 'target-v6.json');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   const document = prepareInitialFixture();
 
@@ -154,8 +154,8 @@ function assertNoSentinel(value, sentinels) {
 }
 
 test('target services require explicit isolated data and Source-file paths', () => {
-  assert.throws(() => createTargetApiApp({}), /explicit schema-v5 data-file path/);
-  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v5.json' }), /explicit safe root/);
+  assert.throws(() => createTargetApiApp({}), /explicit schema-v6 data-file path/);
+  assert.throws(() => createTargetApiApp({ targetDataFile: 'target-v6.json' }), /explicit safe root/);
   const source = require('node:fs').readFileSync(path.join(__dirname, '..', 'target-server', 'services.js'), 'utf8');
   assert.doesNotMatch(source, /PMDS_DATA_FILE|PMDS_UPLOADS_DIR|\.priorena-data|pilot-data\.json/);
   assert.doesNotMatch(source, /require\(['"]\.\.\/server['"]\)/);
@@ -501,7 +501,44 @@ test('Briefing Version detail, archives, and AI context fail closed on nested fo
 });
 
 test('Organization export and ordinary backup share a bounded scoped projection without paths or globals', async t => {
-  const { app } = await createHarness(t);
+  const { app, services } = await createHarness(t, async ({ document }) => {
+    document.decisions.push({
+      id: 'decision-alpha-archive',
+      organizationId: ALPHA.organizationId,
+      workspaceId: ALPHA.workspaceId,
+      initiativeId: null,
+      workItemId: null,
+      title: 'Fictional archived Decision',
+      outcome: null,
+      rationale: null,
+      evidenceIds: [],
+      status: 'draft',
+      supersedesDecisionId: null,
+      createdAt: '2026-08-08T12:00:00.000Z',
+      updatedAt: '2026-08-08T12:00:00.000Z',
+      decidedAt: null,
+      decidedBy: null
+    });
+    document.risks.push({
+      id: 'risk-beta-archive',
+      organizationId: BETA.organizationId,
+      workspaceId: BETA.workspaceId,
+      initiativeId: null,
+      workItemId: null,
+      title: 'BETA RISK SENTINEL',
+      description: 'Fictional foreign Risk',
+      responsePlan: null,
+      owner: null,
+      reviewOn: null,
+      evidenceIds: [],
+      status: 'open',
+      createdAt: '2026-08-08T12:00:00.000Z',
+      updatedAt: '2026-08-08T12:00:00.000Z',
+      closedAt: null,
+      closedBy: null,
+      closureNote: null
+    });
+  });
   for (const kind of ['export', 'backup']) {
     const response = await requestApp(app, { url: `${TARGET_API_NAMESPACE}/organizations/${ALPHA.organizationId}/${kind}` });
     assert.equal(response.status, 200);
@@ -510,10 +547,15 @@ test('Organization export and ordinary backup share a bounded scoped projection 
     assert.deepEqual(archive.organizations.map(item => item.id), [ALPHA.organizationId]);
     assert.ok(archive.workspaces.every(item => item.organizationId === ALPHA.organizationId));
     assert.ok(archive.initiatives.every(item => archive.workspaces.some(workspace => workspace.id === item.workspaceId)));
+    assert.deepEqual(archive.decisions.map(item => item.id), ['decision-alpha-archive']);
+    assert.deepEqual(archive.risks, []);
     assert.equal(archive.globalTechnicalSettings, undefined);
-    assertNoSentinel(archive, ['org-fixture-beta', 'workspace-beta-shared', 'BETA SENTINEL', 'BETA PROMPT', 'relativePath', 'GLOBAL CUSTOMER CONTEXT']);
+    assertNoSentinel(archive, ['org-fixture-beta', 'workspace-beta-shared', 'BETA SENTINEL', 'BETA PROMPT', 'BETA RISK SENTINEL', 'relativePath', 'GLOBAL CUSTOMER CONTEXT']);
     assert.match(response.headers['content-disposition'], new RegExp(`priorena-organization-${kind}-${ALPHA.organizationId}\\.json`));
   }
+  const aiContext = await services.buildAiContext(ALPHA.organizationId, ALPHA.workspaceId);
+  assert.equal(Object.prototype.hasOwnProperty.call(aiContext.value, 'decisions'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(aiContext.value, 'risks'), false);
   const globalExport = await requestApp(app, { url: `${TARGET_API_NAMESPACE}/export` });
   const globalBackup = await requestApp(app, { url: `${TARGET_API_NAMESPACE}/backup` });
   assert.equal(globalExport.status, 404);
@@ -771,7 +813,7 @@ test('target API retains loopback, headers, method, request-size, and revision p
   assert.equal(response.status, 413);
 });
 
-test('all read-only API and service operations leave the schema-v5 target file unchanged', async t => {
+test('all read-only API and service operations leave the schema-v6 target file unchanged', async t => {
   const { app, services, targetDataFile } = await createHarness(t);
   const before = await fs.readFile(targetDataFile);
   await requestApp(app, { url: `${TARGET_API_NAMESPACE}/organizations/${ALPHA.organizationId}/portfolio` });

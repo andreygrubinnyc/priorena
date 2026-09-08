@@ -51,7 +51,7 @@ const PROPOSED_CHANGE_FIELDS = Object.freeze([
 ]);
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target capture services require an explicit schema-v5 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target capture services require an explicit schema-v6 data-file path');
   return path.resolve(filePath);
 }
 

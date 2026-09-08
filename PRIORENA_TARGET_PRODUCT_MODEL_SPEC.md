@@ -1,10 +1,10 @@
 # Priorena Target Product Model Specification
 
 **Status:** Approved target model
-**Version:** 1.5
-**Date:** 2026-08-14
+**Version:** 1.6
+**Date:** 2026-08-27
 **Product owner:** Priorena product owner
-**Purpose:** Canonical product-model, terminology, scope, workflow, clean-cutover, and acceptance specification for implementation by Codex.
+**Purpose:** Canonical product-model, terminology, scope, workflow, controlled-migration, and acceptance specification for implementation by Codex.
 
 ---
 
@@ -12,9 +12,9 @@
 
 This repository copy is the repository-safe canonical target-model specification for Priorena. Customer-specific local bootstrap data is private environment configuration and must not be committed. All named Organizations, Workspaces, Initiatives, Jira records, and IDs in this document are fictional examples; they do not prescribe universal onboarding defaults.
 
-Version 1.5 adopts the strict schema-v5 Initiative and Workstream model. It replaces the schema-v4 Scope and Feature source model without migration, aliases, or dual-schema behavior. Workstreams and Jira Epic mappings are independent optional Initiative children or associations, and all consequential Work Item relationship changes remain human-reviewed. The current local schema-v4 runtime is disposable and remains untouched until a separate post-merge reset authorization.
+Version 1.6 retains the Initiative and Workstream model and adopts strict schema v6 with separate Workspace-owned `Decision` and `Risk` entities. It supersedes the prior assumption that current target data is disposable: schema-v5 target data is preserved only through the bounded one-way offline migration that changes the schema version and adds empty `decisions[]` and `risks[]`. The runtime has no compatibility reader or dual-write path. Source implementation, merge, private-data migration, and release remain separately authorized boundaries.
 
-`docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md` remains authoritative about the current implementation, routes, logic, Organization-isolation and security risks, and tests. Its migration, reconciliation, legacy-preservation, and compatibility recommendations are superseded by this version and `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md`.
+`docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md` remains useful historical implementation context. Its migration, reconciliation, legacy-preservation, and compatibility recommendations, together with the earlier clean-cutover plan, are superseded for schema v6 by this version and `docs/architecture/DECISION_RISK_SCHEMA_V6_FOUNDATION.md`.
 
 It supersedes any current documentation, code comments, UI copy, or architectural decision that treats:
 
@@ -39,7 +39,7 @@ The following existing principles remain in force unless this specification expl
 
 Legacy code may remain temporarily only while its target replacement is being implemented and verified against a separate target-shaped data file. The target implementation must not create a long-lived dual-schema, dual-write, legacy-ID translation, or compatibility architecture. Legacy storage names are not canonical product terms and must not be introduced into new UI, documentation, APIs, tests, or domain logic.
 
-One timestamped byte-for-byte backup of the pre-reset runtime file, with a recorded SHA-256 checksum, is retained as a release rollback safeguard. It is not a migration source and must not be used to repopulate selected legacy records into the target model.
+One timestamped byte-for-byte backup of the pre-migration schema-v5 target file, with a recorded SHA-256 checksum, is retained as a release rollback safeguard. The approved migration source is the exact verified schema-v5 file as a whole; selective record reconstruction, normalization, reconciliation, and legacy translation remain prohibited.
 
 ---
 
@@ -91,27 +91,31 @@ The following decisions are approved and must be treated as requirements.
 13. Briefings become the only current communication workflow after target behavior, automated tests, and release acceptance confirm feature parity.
 14. The committed and staged generic seed uses exactly Organization `org-1` / `Organization 1`, Workspace `workspace-1` / `Workspace 1`, and Initiatives `initiative-1` through `initiative-4` / `Initiative 1` through `Initiative 4`. It contains no Workstreams or operational records.
 15. Data from different Organizations must never be blended in ordinary product views, searches, Briefings, Sources, Evidence, exports, or settings.
-16. The current local runtime records and history are disposable and are not migrated into the schema-v5 target model.
+16. Existing schema-v5 target records and history are preserved exactly by the one-way schema-v6 migration; no private-data action is implied by source changes.
 17. Follow-Up is stored as a nested object on Work Item.
 18. `Milestone.linkedWorkItemIds[]` is the canonical Milestone/Work Item relationship.
 19. Workspace-specific prompt overrides and drafting guidance must be stored in Workspace settings, never in `globalTechnicalSettings`.
 20. The first target release accepts the current target external-feed format only, unless an active producer is verified to require an older version.
 21. Briefings retain Teams-style, email-style, and Confluence-style deterministic outputs from one finalized fact set.
-22. The timestamped pre-reset backup and checksum record are retained for 30 days after successful release acceptance.
+22. The timestamped pre-migration backup and checksum record are retained for 30 days after successful release acceptance.
 23. Privileged all-Organization export is deferred; ordinary exports and backups remain Organization-scoped.
 24. The target implementation must not create a long-lived dual-schema, dual-write, or legacy-ID translation architecture.
 25. Workstream is a Priorena-owned entity under one Initiative and is independent from Jira Epic mappings.
 26. A Work Item has a nullable `workstreamId`; any non-null Workstream must match its Organization, Workspace, and Initiative.
 27. Workstream is not a Work Item type. Allowed Work Item types are Story, Task, Bug, Other, and Unknown.
 28. Organization, Workspace, Initiative, and Workstream display-name changes require revision-bound preview/apply and audit history while preserving stable IDs and frozen Briefing snapshots.
-29. Every schema-v5 Work Item persists a required nullable `jiraEpicMappingId` independently from `workstreamId` and from the Work Item's own `jiraId` and `jiraKey`.
+29. Every schema-v6 Work Item persists a required nullable `jiraEpicMappingId` independently from `workstreamId` and from the Work Item's own `jiraId` and `jiraKey`.
 30. A non-null Work Item Jira Epic mapping must match the Work Item's exact Organization, Workspace, and Initiative.
 31. Changing, clearing, or editing one Work Item relationship must not change the other unless an Initiative change makes that relationship incompatible.
-32. Source-code merge authorization remains separate from authorization to reset the live schema-v4 runtime with a schema-v5 seed.
-33. Active schema-v5 APIs, payloads, exports, imports, UI, and tests have no Scope or Feature compatibility aliases.
+32. Source-code merge authorization remains separate from authorization to migrate private schema-v5 data and release a strict schema-v6 runtime.
+33. Active schema-v6 APIs, payloads, exports, imports, UI, and tests have no Scope or Feature compatibility aliases.
 34. Jira Epic mappings are created and managed locally in Settings under a parent Initiative; this never creates or modifies Jira data.
-35. The strict import contract is `target-v4`, distinct from persisted `schemaVersion: 5`; it does not create a Workstream or Jira Epic mapping and never assigns relationships without explicit review/apply.
+35. The strict import contract is `target-v4`, distinct from persisted `schemaVersion: 6`; it does not create a Workstream or Jira Epic mapping and never assigns relationships without explicit review/apply.
 36. Strategy and Sub-task hierarchy are not part of this model.
+37. Decisions and Risks are separate Workspace-owned entities, not Evidence, Proposed Changes, Audit Events, Briefings, Work Items, or a generic management record.
+38. Decisions use Draft to Decided lifecycle; Decided records are immutable and may be superseded only through an explicit later Decision.
+39. Risks use Open to Closed lifecycle; Closed records are immutable.
+40. The foundation contains no Decision/Risk score, severity, probability, inferred impact, ranking, automatic priority, automatic state transition, API, UI, or external action.
 
 ---
 
@@ -696,7 +700,7 @@ When `Organization 1` is active, the following must contain only that Organizati
 
 There is no normal `All Organizations` operational view in this specification.
 
-Privileged all-Organization export is deferred beyond the first target release. Ordinary exports and product backups must be explicitly Organization-scoped. The one offline, whole-file pre-reset backup is a release rollback safeguard, not a product export and not a Portfolio capability.
+Privileged all-Organization export is deferred beyond the first target release. Ordinary exports and product backups must be explicitly Organization-scoped. The one offline, whole-file pre-migration backup is a release rollback safeguard, not a product export and not a Portfolio capability.
 
 ### 6.3 Selection behavior
 
@@ -967,13 +971,12 @@ BriefingVersion
 
 ### Target storage transition
 
-- The target source model uses strict `schemaVersion: 5`, requires `workstreams[]`, `jiraEpicMappings[]`, and required nullable `workItems[].jiraEpicMappingId`, and uses canonical target identities.
-- Schema version 4 fails closed. There is no v4 compatibility reader, migration path, or dual reader/writer.
-- The current legacy runtime file is not read as a migration input by the target implementation and is not translated record by record.
-- Target development and validation use a separate target-shaped data file until cutover.
-- The old application and legacy schema may remain temporarily available only for implementation sequencing.
-- There is no target dual write, long-lived dual-schema reader, legacy-ID manifest, tombstone system, or name-to-ID compatibility layer.
-- At the gated cutover, the stopped application's runtime file is atomically replaced with the already validated clean environment seed.
+- The target source model uses strict `schemaVersion: 6`, requires `decisions[]`, `risks[]`, `workstreams[]`, `jiraEpicMappings[]`, and required nullable `workItems[].jiraEpicMappingId`, and uses canonical target identities.
+- Schema version 5 fails closed in the runtime. There is no runtime compatibility reader or dual reader/writer.
+- The separate offline v5-to-v6 tool accepts only an exact schema-v5 document, preserves all existing values, changes the version, and adds empty Decision and Risk collections.
+- Target development and validation use fictional files. Any private migration uses a separate non-live candidate until a protected cutover.
+- There is no target dual write, long-lived dual-schema reader, legacy-ID manifest, tombstone system, selective migration, or name-to-ID compatibility layer.
+- A live migration and release require a verified schema-v5 source fingerprint, exclusive schema-v6 candidate, exact backup, bounded no-user-write acceptance window, rollback interlock, and separate authority.
 
 ---
 
@@ -1228,26 +1231,23 @@ Create Briefing
 
 ---
 
-## 11. Clean cutover and local initial seed
+## 11. Controlled migration and local initial seed
 
-### 11.1 Clean-cutover authority
+### 11.1 Whole-document migration authority
 
-The current local runtime data is disposable. The target implementation must not preserve, reconcile, translate, or migrate current runtime records solely because they exist. This includes:
+Current schema-v5 target data is preserved as a complete validated document. The schema-v6 migration must not selectively reconcile, translate, normalize, or reconstruct its records. Preserved values include:
 
-- current Work Items and their assignments;
-- legacy Project and Jira Epic records;
-- `Miscellaneous / No Epic`;
-- Sources, Findings, Evidence, recorded updates, and feed decisions;
-- Follow-Up state;
-- Milestones;
+- Organizations, Workspaces, Initiatives, Workstreams, Jira Epic mappings, Work Items, and Milestones;
+- Sources, Findings, Evidence, Proposed Changes, recorded updates, and feed decisions;
+- nested Follow-Up state;
 - Briefing definitions, versions, facts, outputs, and baselines;
-- record IDs, mutable Workspace-name references, change history, and pending/applied feed state.
+- Audit Events, record IDs, ordering, preferences, and global technical settings.
 
-No item-level reconciliation package, tombstone system, legacy-ID translation manifest, or compatibility layer is required for these records.
+No item-level reconciliation package, tombstone system, legacy-ID translation manifest, or compatibility layer is permitted for these records.
 
 ### 11.2 Fictional repository seed and private bootstrap
 
-The committed schema-v5 generic seed is fictional, deterministic, and target-shaped:
+The committed schema-v6 generic seed is fictional, deterministic, and target-shaped:
 
 ```text
 Organization: org-1 / Organization 1
@@ -1258,13 +1258,13 @@ Organization: org-1 / Organization 1
     └── Initiative: initiative-4 / Initiative 4
 ```
 
-All four Initiatives have `organizationId: org-1` and `workspaceId: workspace-1`. User preferences select `org-1` and `workspace-1`. The seed creates no Workstreams, Work Items, Jira Epic mappings, Sources, Findings, Evidence, Proposed Changes, Follow-Up state, Milestones, Briefings, Briefing Versions, Audit Events, or legacy history. It does not create `Miscellaneous / No Epic` or another catch-all Initiative.
+All four Initiatives have `organizationId: org-1` and `workspaceId: workspace-1`. User preferences select `org-1` and `workspace-1`. The seed creates no Workstreams, Work Items, Jira Epic mappings, Sources, Findings, Evidence, Proposed Changes, Decisions, Risks, Follow-Up state, Milestones, Briefings, Briefing Versions, Audit Events, or legacy history. It does not create `Miscellaneous / No Epic` or another catch-all Initiative.
 
-This committed seed is the exact authorized generic bootstrap shape for a future clean reset. It contains no customer-specific or operational values. Source-code merge authorization for this model remains separate from any later authorization to replace the live schema-v4 runtime with a schema-v5 seed.
+This committed seed is the exact repository-safe bootstrap shape for new empty environments. It contains no customer-specific or operational values and is not a migration candidate for a populated schema-v5 target. Source-code merge authorization remains separate from private-data migration and release authority.
 
-### 11.3 Reset safeguard and retention
+### 11.3 Migration safeguard and retention
 
-Before reset, create one timestamped byte-for-byte backup of the current runtime file and record:
+Before migration cutover, create one timestamped byte-for-byte backup of the exact schema-v5 target file and record:
 
 - original runtime path;
 - backup path;
@@ -1272,22 +1272,22 @@ Before reset, create one timestamped byte-for-byte backup of the current runtime
 - byte count;
 - SHA-256 checksum, reverified from the backup.
 
-The backup is a rollback safeguard, not a migration source. Retain the backup and checksum record for **30 days after successful release acceptance**, then dispose of them according to the applicable local data-handling policy.
+The backup is a rollback safeguard. The migration source is the separately verified unchanged schema-v5 file, never the backup path or selected backup records. Retain the backup and checksum record for **30 days after successful release acceptance**, then dispose of them according to the applicable local data-handling policy.
 
-### 11.4 Reset gate
+### 11.4 Migration gate
 
-The current runtime file must not be deleted or replaced until all of the following are true:
+The current runtime file must not be migrated or replaced until all of the following are true:
 
-1. the schema-v5 seed validates and a schema-v4 document fails closed;
-2. the exact clean environment seed validates and loads from a staged, non-live path;
+1. the exact schema-v5 source validates under the migration boundary and its fingerprint is recorded without disclosing values;
+2. the migration creates a separate strict schema-v6 candidate whose legacy projection equals the schema-v5 source exactly and whose Decision and Risk collections are empty;
 3. all automated tests pass, including two-Organization isolation tests;
-4. the target application starts successfully against the staged seed and passes smoke tests;
+4. the target application starts successfully against the staged schema-v6 candidate and passes smoke tests;
 5. the application is stopped so no write can race with backup or replacement;
-6. the timestamped backup path and reverified checksum are recorded;
-7. atomic reset and checksum-verified rollback have succeeded in rehearsal;
+6. the timestamped schema-v5 backup path and reverified checksum are recorded;
+7. atomic migration cutover and checksum-verified old-release rollback have succeeded in rehearsal;
 8. release go/no-go approval is recorded.
 
-Only then may the stopped application's runtime file be atomically replaced with the already validated clean seed. A failed post-reset startup or smoke test triggers checksum-verified restoration of the backup.
+Only then may the stopped application's runtime file be atomically replaced with the already validated schema-v6 candidate. A failed post-cutover startup or read-only acceptance test triggers checksum-verified restoration of the schema-v5 backup and exact old release. No user write is allowed before that rollback decision.
 
 ### 11.5 Prohibited transition architecture
 
@@ -1296,7 +1296,7 @@ The target implementation must not create:
 - long-lived dual-schema reads;
 - dual writes;
 - an old-ID-to-new-ID translation service;
-- record tombstones solely for disposable local data;
+- record tombstones or item-level migration artifacts;
 - a reconciliation UI or item-level migration manifest;
 - name-based Workspace aliases as permanent identity;
 - compatibility code retained only because superseded tests assert legacy behavior.
@@ -1307,7 +1307,7 @@ Legacy code may coexist temporarily only while target replacements are implement
 
 ## 12. External-feed behavior under the target model
 
-The strict active import contract is `target-v4`. This import-contract version is independent from persisted `schemaVersion: 5`. The prior `target-v3` contract and legacy relationship fields are rejected; there is no general compatibility parser.
+The strict active import contract is `target-v4`. This import-contract version is independent from persisted `schemaVersion: 6`. The prior `target-v3` contract and legacy relationship fields are rejected; there is no general compatibility parser.
 
 Target behavior:
 
@@ -1327,17 +1327,17 @@ Target behavior:
 
 ---
 
-## 13. Clean-cutover rollout
+## 13. Controlled-migration rollout
 
 ### 13.1 Cutover principles
 
-- Build and validate the schema-v5 target model against separate temporary/staged data.
-- Leave the current runtime file untouched until the reset gate in Section 11.4 passes.
+- Build and validate the schema-v6 target model and one-way migrator against separate fictional temporary/staged data.
+- Leave the current runtime file untouched until the migration gate in Section 11.4 passes.
 - Do not expose legacy terminology in new UI, APIs, tests, or domain logic.
-- Do not preserve legacy routes, mutable-name identity, data shapes, IDs, or history solely for the current disposable runtime.
+- Do not introduce legacy routes, mutable-name identity, data-shape aliases, selective record translation, or runtime compatibility solely for migration.
 - Retain legacy code only for bounded implementation sequencing; do not dual write.
 - Remove legacy communication creation flows only after canonical Briefing behavior reaches feature parity.
-- Treat the pre-reset backup as short-lived rollback protection, not target application data.
+- Treat the pre-migration backup as short-lived rollback protection, not target application data.
 
 ### 13.2 Required implementation phases
 
@@ -1347,7 +1347,7 @@ Target behavior:
 4. **Navigation, operational UI, and Briefings**
 5. **Hardening, cleanup, and release**
 
-The detailed phase gates, likely modules, tests, rollback steps, and commit boundaries are defined in `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md`. That plan must remain consistent with this version of the specification.
+The earlier phase plan remains historical context for the original target build. Schema-v6 model, migration, verification, rollback, and authorization boundaries are defined by this specification and `docs/architecture/DECISION_RISK_SCHEMA_V6_FOUNDATION.md`.
 
 ---
 
@@ -1424,17 +1424,16 @@ The detailed phase gates, likely modules, tests, rollback steps, and commit boun
 - Status Summary is available as a Briefing template.
 - Legacy Status Summary and Teams Draft creation are removed from normal UI after parity validation.
 
-### 14.8 Clean reset
+### 14.8 Controlled schema-v6 migration
 
-- The schema-v5 model validates and schema v4 fails closed.
-- The exact generic seed loads from a staged, non-live path.
-- No legacy runtime records are present in the target store.
-- The target application starts successfully against the clean seed.
+- The exact schema-v5 source and separate schema-v6 candidate validate at their respective boundaries; schema v5 fails closed in the runtime.
+- The candidate adds only empty Decision and Risk collections and preserves every prior value.
+- The target application starts successfully against the staged candidate.
 - All automated tests pass.
 - Two-Organization isolation tests pass.
-- The timestamped pre-reset backup path and SHA-256 checksum are recorded and verified.
-- Atomic reset and checksum-verified rollback rehearsal succeed before live replacement.
-- The reset occurs only at the Section 11.4 gate.
+- The timestamped pre-migration backup path and SHA-256 checksum are recorded and verified.
+- Atomic migration cutover and checksum-verified old-release rollback rehearsal succeed before live replacement.
+- The migration occurs only at the Section 11.4 gate.
 
 ---
 
@@ -1463,7 +1462,7 @@ At minimum, implement automated tests for:
 19. Schema-v5 and exact generic-seed validation, including mandatory empty `workstreams[]`, the absence of legacy records, and v4 fail-closed behavior.
 20. Successful application startup and smoke behavior against the clean seed.
 21. At least two Organizations proving isolation across routes, UI, search, exports, backups, Briefings, Sources, Evidence, files, and AI context.
-22. Timestamped backup creation, checksum verification, atomic reset rehearsal, and checksum-verified rollback rehearsal using temporary copies.
+22. Timestamped backup creation, checksum verification, atomic migration-cutover rehearsal, and checksum-verified old-release rollback rehearsal using temporary copies.
 23. No automatic Jira write, Briefing finalization, or communication action.
 24. Workstream parent validation, duplicate display names, nullable Work Item assignment, and foreign-reference rejection.
 25. Initiative-change previews showing Workstream retained, cleared, or replaced for individual, bulk, and imported changes.
@@ -1497,9 +1496,9 @@ This implementation must not introduce:
 - enterprise dependency planning;
 - complex role-based access control in the current local build;
 - a privileged all-Organization product export in the first target release;
-- migration or selective restoration of the current disposable runtime records;
+- selective migration, normalization, reconstruction, or restoration of schema-v5 records instead of the exact whole-document migration;
 - a long-lived dual-schema, dual-write, tombstone, or legacy-ID translation architecture;
-- a redesign of the visual system unrelated to this clean cutover.
+- a redesign of the visual system unrelated to this controlled migration.
 
 ---
 
@@ -1543,12 +1542,12 @@ The target-model implementation is complete only when:
 - Workspace-specific prompt overrides and drafting guidance are not stored globally;
 - Briefings are the canonical current communication workflow and retain Teams-style, email-style, and Confluence-style deterministic outputs;
 - no ordinary screen, search, export, Briefing, or AI context leaks data across Organizations;
-- the schema-v5 model validates, schema v4 fails closed, and the generic seed contains no operational or legacy records;
-- the application starts successfully against the clean seed;
+- the strict schema-v6 model validates, schema v5 fails closed in the runtime, and the generic seed contains no operational or legacy records;
+- the application starts successfully against a separate validated schema-v6 candidate;
 - all tests, including two-Organization isolation tests, pass;
-- the pre-reset backup path and checksum are recorded;
-- atomic reset and checksum-verified rollback rehearsal succeed;
-- the pre-reset backup is retained for 30 days after successful release acceptance;
+- the pre-migration backup path and checksum are recorded;
+- atomic migration cutover and checksum-verified old-release rollback rehearsal succeed;
+- the pre-migration backup is retained for 30 days after successful release acceptance;
 - no long-lived legacy compatibility or translation architecture remains;
 - current APIs, payloads, imports, exports, UI, and active documentation contain no Scope or Feature aliases;
 - Jira Epic mapping management is complete, local-only, and explicitly makes no Jira write;
@@ -1559,20 +1558,20 @@ The target-model implementation is complete only when:
 
 ## 19. Codex implementation contract
 
-Before replacing the current runtime file or deleting legacy implementation paths, Codex must:
+Before replacing a schema-v5 runtime file, Codex must:
 
 1. read this specification in full;
-2. read `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md` and the still-valid implementation findings in `docs/audits/PRIORENA_TARGET_MODEL_GAP_ANALYSIS.md`;
+2. read `docs/architecture/DECISION_RISK_SCHEMA_V6_FOUNDATION.md` and use the earlier clean-cutover plan and gap analysis only as historical implementation context;
 3. inspect current code and schema against them;
 4. implement and validate the target against a separate temporary/staged data file;
-5. validate the schema-v5 model and exact generic clean seed;
+5. validate the strict schema-v6 model, exact generic clean seed, pure migration preservation proof, and separate migration candidate;
 6. pass all automated tests, two-Organization isolation tests, target startup, and smoke tests;
-7. create and verify the timestamped pre-reset backup and SHA-256 checksum;
-8. rehearse atomic reset and checksum-verified rollback using temporary copies;
+7. create and verify the timestamped pre-migration schema-v5 backup and SHA-256 checksum;
+8. rehearse atomic migration cutover and checksum-verified old-release rollback using temporary copies;
 9. identify any implementation fact that makes a requirement unsafe or impossible as written;
-10. stop for product-owner review only when the conflict changes product behavior or exceeds the approved clean-reset risk.
+10. stop for product-owner review only when the conflict changes product behavior or exceeds the approved controlled-migration risk.
 
-The target implementation must not use the current runtime as a migration source, and the current runtime must remain untouched until the Section 11.4 reset gate passes.
+The migration tool may use the exact current schema-v5 target only with separate private-data authority. It must remain untouched until the Section 11.4 migration gate passes, and the tool must write a distinct candidate rather than migrating in place.
 
 Codex must not treat old naming as evidence that the old domain model remains approved.
 

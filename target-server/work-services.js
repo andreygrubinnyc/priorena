@@ -33,7 +33,7 @@ const MAPPING_STATUSES = Object.freeze(['pending', 'verified', 'inactive']);
 const FOLLOW_UP_STATES = Object.freeze(['none', 'open', 'waiting', 'resolved']);
 
 function requireExplicitTargetDataFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target work services require an explicit schema-v5 data-file path');
+  if (typeof filePath !== 'string' || filePath.trim() === '') throw new TypeError('Target work services require an explicit schema-v6 data-file path');
   return path.resolve(filePath);
 }
 

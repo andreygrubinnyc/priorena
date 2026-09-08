@@ -162,7 +162,7 @@ test('explicit normalized Source snapshots produce a deterministic bounded write
   for (const omitted of ['"content"', '"metadata"', '"provenance"', 'A'.repeat(350), 'B'.repeat(351)]) {
     assert.equal(first.body.includes(omitted), false, omitted.slice(0, 40));
   }
-  assert.deepEqual(await fs.readFile(targetDataFile), before, 'comparison reads never mutate persisted schema-v5 data');
+  assert.deepEqual(await fs.readFile(targetDataFile), before, 'comparison reads never mutate persisted schema-v6 data');
 });
 
 test('ambiguous, malformed, and unsupported Sources stop without partial change rows', async t => {
@@ -303,7 +303,7 @@ test('Source Library renders the comparison as inert text with explicit no-write
   assert.match(appSource, /textContent = String\(options\.text\)/);
   assert.doesNotMatch(`${appSource}\n${stateSource}`, /innerHTML|insertAdjacentHTML|document\.write/);
   assert.match(styles, /\.source-change-review/);
-  assert.match(architecture, /schema-v5 read projection/);
+  assert.match(architecture, /schema-v6 read projection/);
   assert.match(architecture, /does not infer chronology/);
   assert.match(architecture, /durable snapshot lineage/);
 });

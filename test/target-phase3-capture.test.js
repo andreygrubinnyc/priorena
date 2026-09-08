@@ -9,7 +9,7 @@ const { PUBLIC_ERRORS } = require('../target-server/errors');
 const {
   createInvalidPhase3ProposedChangeFixture,
   createPhase3WorkflowFixture
-} = require('../test-support/target-v5-fixtures');
+} = require('../test-support/target-v6-fixtures');
 const {
   ALPHA,
   BETA,

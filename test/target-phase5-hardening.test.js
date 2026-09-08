@@ -20,7 +20,7 @@ const { ROLLBACK_REVISION } = require('../scripts/release/rehearse');
 
 async function harness(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'priorena-phase5-hardening-'));
-  const targetDataFile = path.join(root, 'target-v5.json');
+  const targetDataFile = path.join(root, 'target-v6.json');
   const sourceFilesRoot = path.join(root, 'sources');
   await fs.mkdir(sourceFilesRoot, { mode: 0o700 });
   await fs.writeFile(targetDataFile, serializeTargetData(createCleanSeed()), { mode: 0o600 });
@@ -28,7 +28,7 @@ async function harness(t) {
   return { root, sourceFilesRoot, targetDataFile };
 }
 
-test('release startup validates strict schema-v5 bytes before listening', async t => {
+test('release startup validates strict schema-v6 bytes before listening', async t => {
   const context = await harness(t);
   const before = await fs.readFile(context.targetDataFile);
   const validated = await validateTargetStartup(context);
@@ -187,7 +187,7 @@ test('generic private bootstrap is deterministic, strict, and target-only', () =
 test('staged-seed validation rejects operational history and permissive modes', async t => {
   const context = await harness(t);
   const result = await validateSeed(context.targetDataFile);
-  assert.equal(result.schemaVersion, 5);
+  assert.equal(result.schemaVersion, 6);
   assert.equal(result.counts.operationalRecords, 0);
 
   const withHistory = createCleanSeed();
@@ -231,7 +231,7 @@ test('CI fetches the known rollback commit history before running the exact-revi
   assert.doesNotMatch(rollbackSource, new RegExp(`${legacyRoute}|${legacyDataSelector}`));
 });
 
-test('schema-v5 cutover runbook orders backup, primary fast-forward, and atomic replacement', async () => {
+test('historical schema-v5 cutover runbook orders backup, primary fast-forward, and atomic replacement', async () => {
   const runbook = await fs.readFile(path.join(__dirname, '..', 'docs', 'release', 'SCHEMA_V5_INITIATIVE_WORKSTREAM_CUTOVER.md'), 'utf8');
   const backup = runbook.indexOf('Create a timestamped byte-for-byte backup');
   const updatePrimary = runbook.indexOf('fast-forward-only');

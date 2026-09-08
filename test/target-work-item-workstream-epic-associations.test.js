@@ -298,7 +298,7 @@ test('Jira Epic metadata updates preserve references and refresh current project
   const storedAfter = await persisted(targetDataFile);
   assert.deepEqual(storedAfter.document.briefingVersions[0].frozenSnapshot, frozenBefore);
   const archive = (await requestApp(app, { url: `/api/v2/organizations/${ALPHA.organizationId}/export` })).json();
-  assert.equal(archive.schemaVersion, 5);
+  assert.equal(archive.schemaVersion, 6);
   assert.equal(archive.workItems.find(candidate => candidate.id === item.id).jiraEpicMappingId, 'jira-mapping-alpha-one');
   const aiContext = (await services.buildAiContext(ALPHA.organizationId, ALPHA.workspaceId)).value;
   assert.equal(aiContext.workItems.find(candidate => candidate.id === item.id).jiraEpicMappingId, 'jira-mapping-alpha-one');

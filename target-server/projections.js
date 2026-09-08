@@ -277,6 +277,13 @@ function disallowedBriefingReferenceIds(document, version) {
       }
     });
   });
+  for (const collection of ['decisions', 'risks']) {
+    document[collection].forEach(record => {
+      if (record.organizationId !== version.organizationId || !selectedWorkspaceIds.has(record.workspaceId)) {
+        disallowed.add(record.id);
+      }
+    });
+  }
   document.briefings.forEach(briefing => {
     if (briefing.organizationId !== version.organizationId) disallowed.add(briefing.id);
   });
@@ -951,6 +958,8 @@ function buildOrganizationArchive(document, organizationId, kind) {
     findings: clone(recordsForOrganization(document, 'findings', organization.id)),
     evidence: clone(recordsForOrganization(document, 'evidence', organization.id)),
     proposedChanges: clone(recordsForOrganization(document, 'proposedChanges', organization.id)),
+    decisions: clone(recordsForOrganization(document, 'decisions', organization.id)),
+    risks: clone(recordsForOrganization(document, 'risks', organization.id)),
     briefings: clone(recordsForOrganization(document, 'briefings', organization.id)),
     briefingVersions: recordsForOrganization(document, 'briefingVersions', organization.id)
       .map(version => publicBriefingVersion(document, version, { includeFrozenContent: true })),

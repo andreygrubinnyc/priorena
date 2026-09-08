@@ -29,7 +29,7 @@ Every token in angle brackets below is a placeholder, not a default. Resolve eac
 
 - `<RELEASE_ROOT>`: canonical absolute release checkout containing the private `priorena` package and `target-server/start.js`;
 - `<NODE_EXECUTABLE>`: canonical absolute regular executable, normally the resolved executable recorded for the approved release;
-- `<PRIVATE_DATA_FILE>`: canonical absolute regular non-symlink schema-v5 file with mode `0600`, outside the repository;
+- `<PRIVATE_DATA_FILE>`: canonical absolute regular non-symlink schema-v6 file with mode `0600`, outside the repository;
 - `<PRIVATE_SOURCE_ROOT>`: canonical absolute non-symlink directory with no group or world permissions, outside the repository;
 - `<PRIVATE_OPERATIONAL_LOG>`: canonical absolute log destination outside the repository with no symlinked ancestor into it; an existing file must be regular, non-symlink, and mode `0600`;
 - `<CURRENT_USER_HOME>`: canonical absolute home of the current macOS user, owned by that user and not group/world-writable;
@@ -182,7 +182,7 @@ Login, logout, and reboot testing are live operations and require separate autho
 
 4. Require the validated PID to own only `127.0.0.1:3100`. Any wildcard, IPv6-any, LAN, proxy, tunnel, or other listener is unsupported and fails verification.
 5. Perform a read-only application smoke against the loopback origin: root redirect to `/target/`, successful `/target/` load, safe headers, expected local assets, bounded Organization list, and no mutation. Do not bind another process to port `3100` for this check.
-6. Confirm the approved schema-v5 data checksum and mode remain unchanged by startup and smoke. Do not copy data values into the evidence record.
+6. Confirm the approved schema-v6 data checksum and mode remain unchanged by startup and smoke. Do not copy data values into the evidence record.
 7. Confirm no external connection, telemetry, repository update, Source transmission, live-data mutation, or automatic publication occurred.
 
 Persistence succeeds only when the exact service, process identity, loopback listener, application smoke, and unchanged private data all verify after the authorized login or reboot. Registration alone is not sufficient.

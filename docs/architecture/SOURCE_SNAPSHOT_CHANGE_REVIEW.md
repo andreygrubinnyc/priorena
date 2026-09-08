@@ -2,7 +2,7 @@
 
 ## Status and boundary
 
-Source Snapshot Change Review is a repository-only schema-v5 read projection. It compares two Sources that a user explicitly selects in one Organization and Workspace. It does not add a persisted baseline, lineage, or schema-v6 fields.
+Source Snapshot Change Review is a repository-only schema-v6 read projection. It compares two Sources that a user explicitly selects in one Organization and Workspace. It does not add a persisted baseline, lineage, or additional fields.
 
 The comparison is informational only. Its result is labeled **Source comparison — not accepted Evidence or current state**. Running or clearing a comparison does not create, update, or delete Sources, Findings, Evidence, Work Items, current-state fields, or any other target record.
 

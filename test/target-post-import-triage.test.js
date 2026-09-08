@@ -256,7 +256,7 @@ test('detail discloses only exact normalized Source matches and item-scoped Audi
   }
 });
 
-test('explicit type save reuses revision-aware schema-v5 metadata update and preserves unrelated state', async t => {
+test('explicit type save reuses revision-aware schema-v6 metadata update and preserves unrelated state', async t => {
   const { app, targetDataFile } = await triageHarness(t);
   const detailResponse = await requestApp(app, { url: `${workspaceBase(ALPHA)}/work-items/work-item-alpha-unassigned/triage` });
   const before = await persisted(targetDataFile);
@@ -431,5 +431,5 @@ test('75-item repeated triage and Source reads remain bounded and preserve the p
   for (const collection of ['workItems', 'sources', 'findings', 'evidence', 'proposedChanges', 'auditEvents']) {
     assert.equal(after.document[collection].length, before.document[collection].length, collection);
   }
-  assert.equal(after.document.schemaVersion, 5);
+  assert.equal(after.document.schemaVersion, 6);
 });
