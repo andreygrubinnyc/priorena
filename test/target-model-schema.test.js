@@ -790,6 +790,10 @@ test('Decision lifecycle requires explicit final values and exact decision metad
   const premature = clonedFixture();
   premature.decisions.push(decisionRecord({ decidedAt: FIXTURE_TIMESTAMP, decidedBy: 'fictional-owner' }));
   assertInvalid(premature, /Draft Decisions cannot/);
+
+  const prematureOutcome = clonedFixture();
+  prematureOutcome.decisions.push(decisionRecord({ outcome: 'A Draft cannot claim a final outcome.' }));
+  assertInvalid(prematureOutcome, /Draft Decisions cannot/);
 });
 
 test('Risk lifecycle keeps open records free of closure claims and makes closure explicit', () => {

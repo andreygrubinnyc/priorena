@@ -147,6 +147,20 @@ function createTargetApiApp(options = {}) {
   mutationRoute('post', `${workspaceBase}/proposed-changes/:proposedChangeId/review`, req => services.reviewProposedChange(req.params.organizationId, req.params.workspaceId, req.params.proposedChangeId, req.body));
   mutationRoute('post', `${workspaceBase}/proposed-changes/:proposedChangeId/apply`, req => services.applyProposedChange(req.params.organizationId, req.params.workspaceId, req.params.proposedChangeId, req.body));
 
+  jsonRoute(`${workspaceBase}/decisions`, req => services.listDecisions(req.params.organizationId, req.params.workspaceId, req.query));
+  mutationRoute('post', `${workspaceBase}/decisions`, req => services.createDecision(req.params.organizationId, req.params.workspaceId, req.body));
+  jsonRoute(`${workspaceBase}/decisions/:decisionId`, req => services.getDecision(req.params.organizationId, req.params.workspaceId, req.params.decisionId));
+  mutationRoute('patch', `${workspaceBase}/decisions/:decisionId`, req => services.updateDecision(req.params.organizationId, req.params.workspaceId, req.params.decisionId, req.body));
+  mutationRoute('post', `${workspaceBase}/decisions/:decisionId/decide/preview`, req => services.previewDecision(req.params.organizationId, req.params.workspaceId, req.params.decisionId, req.body));
+  mutationRoute('post', `${workspaceBase}/decisions/:decisionId/decide/apply`, req => services.decide(req.params.organizationId, req.params.workspaceId, req.params.decisionId, req.body));
+
+  jsonRoute(`${workspaceBase}/risks`, req => services.listRisks(req.params.organizationId, req.params.workspaceId, req.query));
+  mutationRoute('post', `${workspaceBase}/risks`, req => services.createRisk(req.params.organizationId, req.params.workspaceId, req.body));
+  jsonRoute(`${workspaceBase}/risks/:riskId`, req => services.getRisk(req.params.organizationId, req.params.workspaceId, req.params.riskId));
+  mutationRoute('patch', `${workspaceBase}/risks/:riskId`, req => services.updateRisk(req.params.organizationId, req.params.workspaceId, req.params.riskId, req.body));
+  mutationRoute('post', `${workspaceBase}/risks/:riskId/close/preview`, req => services.previewRiskClosure(req.params.organizationId, req.params.workspaceId, req.params.riskId, req.body));
+  mutationRoute('post', `${workspaceBase}/risks/:riskId/close/apply`, req => services.closeRisk(req.params.organizationId, req.params.workspaceId, req.params.riskId, req.body));
+
   jsonRoute(`${workspaceBase}/sources/change-review`, req => services.compareSources(
     req.params.organizationId,
     req.params.workspaceId,

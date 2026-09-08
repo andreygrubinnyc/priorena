@@ -539,8 +539,8 @@ function validateDecision(record, path) {
     fail(`${path}.updatedAt`, 'must be equal to or later than createdAt');
   }
   if (record.status === 'draft') {
-    if (record.decidedAt !== null || record.decidedBy !== null) {
-      fail(path, 'Draft Decisions cannot have decidedAt or decidedBy');
+    if (record.outcome !== null || record.rationale !== null || record.decidedAt !== null || record.decidedBy !== null) {
+      fail(path, 'Draft Decisions cannot have outcome, rationale, decidedAt, or decidedBy');
     }
   } else {
     if (record.outcome === null || !record.outcome.trim()) fail(`${path}.outcome`, 'is required for a Decided Decision');

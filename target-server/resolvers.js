@@ -12,7 +12,9 @@ const WORKSPACE_COLLECTIONS = Object.freeze([
   'sources',
   'findings',
   'evidence',
-  'proposedChanges'
+  'proposedChanges',
+  'decisions',
+  'risks'
 ]);
 
 function assertStableId(value) {
