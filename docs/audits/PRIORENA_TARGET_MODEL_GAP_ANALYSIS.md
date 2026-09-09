@@ -1,6 +1,6 @@
 # Priorena Target Product Model — Repository-Safe Implementation Gap Analysis
 
-**Status:** Current structural implementation analysis
+**Status:** Historical pre-target implementation analysis; superseded by the current specification and v1 acceptance record
 **Audit date:** 2026-08-07
 **Approved target:** `PRIORENA_TARGET_PRODUCT_MODEL_SPEC.md` version 1.2
 **Implementation plan:** `docs/plans/PRIORENA_CLEAN_CUTOVER_IMPLEMENTATION_PLAN.md`

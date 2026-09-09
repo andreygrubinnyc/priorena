@@ -20,7 +20,9 @@ async function smokeStartedTarget(started) {
   const ui = await fetch(`${origin}/target/`);
   assert.equal(ui.status, 200);
   const markup = await ui.text();
-  for (const label of ['Organization', 'Workspace', 'Portfolio', 'Today', 'Briefings', 'Settings']) assert.match(markup, new RegExp(label));
+  for (const label of ['Organization', 'Workspace', 'Portfolio', 'Today', 'Decisions', 'Risks', 'Briefings', 'Settings']) {
+    assert.match(markup, new RegExp(label));
+  }
   const clientResponse = await fetch(`${origin}/target/app.js`);
   assert.equal(clientResponse.status, 200);
   assert.match(await clientResponse.text(), /Data & Privacy/);
@@ -37,6 +39,8 @@ async function smokeStartedTarget(started) {
     workspaceCount += workspaces.workspaces.length;
     for (const workspace of workspaces.workspaces) {
       await fetchJson(origin, `/api/v2/organizations/${organization.id}/workspaces/${workspace.id}/today`);
+      await fetchJson(origin, `/api/v2/organizations/${organization.id}/workspaces/${workspace.id}/decisions`);
+      await fetchJson(origin, `/api/v2/organizations/${organization.id}/workspaces/${workspace.id}/risks`);
     }
   }
   return Object.freeze({

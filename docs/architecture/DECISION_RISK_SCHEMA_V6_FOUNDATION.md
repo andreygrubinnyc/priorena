@@ -1,6 +1,6 @@
 # Decision and Risk schema-v6 foundation
 
-**Status:** Source-only foundation; no live migration or product workflow authorized
+**Status:** Current schema-v6 foundation; source workflows implemented, live migration and release pending
 
 **Persisted model:** strict `schemaVersion: 6`
 
@@ -119,8 +119,11 @@ rollback, and separate release authority.
 
 ## Explicit exclusions
 
-This foundation adds no Decision or Risk API, mutation service, projection,
-navigation, UI, seed record, Demo record, attention signal, Briefing fact,
-dependency relationship, Source parser, provider, Jira action, AI behavior,
-notification, scoring, ranking, external call, runtime operation, LaunchAgent
-operation, live-data read or mutation, release, merge, or publication action.
+The foundation change itself added no Decision or Risk API, mutation service,
+projection, navigation, UI, seed record, Demo record, attention signal,
+Briefing fact, dependency relationship, Source parser, provider, Jira action,
+AI behavior, notification, scoring, ranking, external call, runtime operation,
+LaunchAgent operation, live-data read or mutation, or release action. The later
+parent-scoped API and browser workflows are documented in
+`docs/architecture/DECISION_RISK_MANAGEMENT_WORKFLOWS.md`; their explicit
+projection and automation exclusions remain unchanged.

@@ -1,5 +1,7 @@
 # Phase 5 legacy-retirement coverage
 
+**Status:** Historical schema-v2 parity record; not current schema-v6 operating guidance
+
 **Release boundary:** Organization → PM Workspace → Scope → Work Item
 
 **Persistence:** strict `schemaVersion: 2` only

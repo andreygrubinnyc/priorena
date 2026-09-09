@@ -1,6 +1,6 @@
 # Work Item Feature and Jira Epic associations
 
-**Status:** schema-v4 source architecture
+**Status:** Historical schema-v4 Feature association model; superseded by the current Initiative/Workstream schema-v6 architecture
 
 **Date:** 2026-08-13
 

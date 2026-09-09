@@ -1,5 +1,10 @@
 # Phase 5 rollback runbook
 
+**Status:** Historical schema-v2 rollback runbook; do not use for schema-v6 migration or release
+
+Use `docs/release/SCHEMA_V6_CONTROLLED_MIGRATION_AND_RELEASE.md` for the current
+whole-document schema-v5 to schema-v6 release and rollback boundary.
+
 Rollback is a one-attempt response to a failed authorized cutover. It restores the complete byte-for-byte pre-cutover runtime. It never migrates, reconciles, or selectively restores records.
 
 ## Preconditions

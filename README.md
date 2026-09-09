@@ -1,12 +1,12 @@
 # Priorena
 
-Priorena is a single-user, local-only delivery-intelligence application. Its released hierarchy is:
+Priorena is a single-user, local-only delivery-intelligence application. Its v1 hierarchy is:
 
 ```text
-Organization → PM Workspace → Scope → Work Item
+Organization → PM Workspace → Initiative → optional Workstream → Work Item
 ```
 
-The target release uses strict version-2 persistence, stable parent IDs, Organization isolation, human-reviewed Evidence and Proposed Changes, and canonical Briefings with deterministic Teams-, Email-, and Confluence-style output. It does not write to Jira, send messages, finalize Briefings, or communicate automatically.
+The v1 source release candidate uses strict `schemaVersion: 6` persistence, stable parent IDs, Organization isolation, human-reviewed Evidence and Proposed Changes, canonical Briefings with deterministic Teams-, Email-, and Confluence-style output, and separate Workspace-owned Decisions and Risks. It never writes to Jira, sends messages, or communicates externally. Briefing finalization and Decision or Risk terminal transitions require explicit user action.
 
 ## Supported boundary
 
@@ -29,25 +29,25 @@ Startup is explicit-path and fail-closed:
 
 ```bash
 npm start -- \
-  --data-file <VERSION_2_DATA_FILE> \
+  --data-file <SCHEMA_V6_DATA_FILE> \
   --source-files-root <PRIVATE_SOURCE_ROOT> \
   --log-file <PRIVATE_LOG_FILE> \
   --port 3100
 ```
 
-The data file must be a regular non-symlink file with mode `0600`. The Source root must be a private regular directory. The operational log must be outside the repository. Malformed, unsupported, or non-version-2 data is rejected without normalization or overwrite.
+The data file must be a regular non-symlink file with mode `0600`. The Source root must be a private regular directory. The operational log must be outside the repository. Malformed, unsupported, or non-schema-v6 data is rejected without normalization or overwrite. Schema v5 is accepted only by the separate one-way offline migration tool; it is never read or upgraded by the runtime.
 
 Open `http://127.0.0.1:3100/`. The release root redirects to the target UI.
 
 ## Release operations
 
-Phase 5 commands are explicit and documented in:
+The current source-freeze status and schema-v6 release procedure are documented in:
 
-- `docs/release/PHASE_5_CUTOVER_RUNBOOK.md`
-- `docs/release/PHASE_5_ROLLBACK_RUNBOOK.md`
-- `docs/release/PHASE_5_LEGACY_RETIREMENT_COVERAGE.md`
+- `docs/release/V1_ACCEPTANCE_STATUS.md`
+- `docs/release/SCHEMA_V6_CONTROLLED_MIGRATION_AND_RELEASE.md`
+- `docs/release/STARTUP_REBOOT_RESILIENCE.md`
 
-Backup, restore, cutover, and rollback rehearsals use fictional temporary copies. A live cutover requires checksum, process, port, path, release-commit, and exact acknowledgement interlocks. The tooling never selects a live path implicitly and never deletes a verified backup.
+The older Phase 2–5, schema-v4, and schema-v5 documents are historical implementation records, not current schema-v6 operating instructions. Backup, restore, migration-cutover, and rollback rehearsals use fictional temporary copies. A live migration requires checksum, process, port, path, release-commit, exact-candidate, and acknowledgement interlocks. The tooling never selects a live path implicitly and never deletes a verified backup.
 
 ## Security and privacy
 

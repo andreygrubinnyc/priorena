@@ -13,14 +13,22 @@ const {
   legacyProjection,
   migrateTargetDataV5ToV6
 } = require('../target-model/migrate-v5-to-v6');
-const { readTargetData, validateTargetTransition } = require('../target-model/persistence');
+const { readTargetData, serializeTargetData, validateTargetTransition } = require('../target-model/persistence');
 const { ROOT_COLLECTIONS, TARGET_SCHEMA_VERSION, TargetValidationError, validateTargetData } = require('../target-model/schema');
 const {
   SchemaMigrationFileError,
   migrateFile,
-  run,
+  revisionForBytes,
+  run: runFileMigration,
   writeExclusiveCandidate
 } = require('../scripts/release/migrate-schema-v5-to-v6');
+const {
+  performMigrationCutover
+} = require('../scripts/release/cutover-migration-v5-to-v6');
+const {
+  run: runMigrationValidation,
+  validateMigrationPair
+} = require('../scripts/release/validate-migration-v5-to-v6');
 const { createMultiOrganizationFixture } = require('../test-support/target-v6-fixtures');
 
 function schemaV5Document(document = createMultiOrganizationFixture()) {
@@ -169,10 +177,119 @@ test('migration output is a normal strict-v6 state for subsequent transitions', 
   assert.equal(validateTargetTransition(migrated, candidate), candidate);
 });
 
+test('migration-pair validation accepts only the exact preserved v5-to-v6 candidate', async t => {
+  const directory = await temporaryDirectory(t);
+  const sourcePath = path.join(directory, 'source-v5.json');
+  const candidatePath = path.join(directory, 'candidate-v6.json');
+  const wrongCandidatePath = path.join(directory, 'wrong-candidate-v6.json');
+  const sourceBytes = Buffer.from(`${JSON.stringify(schemaV5Document(), null, 2)}\n`, 'utf8');
+  await writePrivateFile(sourcePath, sourceBytes);
+  const migrated = await migrateFile(sourcePath, candidatePath);
+
+  const validated = await validateMigrationPair({
+    sourcePath,
+    candidatePath,
+    expectedSourceRevision: migrated.sourceRevision,
+    expectedCandidateRevision: migrated.candidateRevision
+  });
+  assert.equal(validated.exactMigration, true);
+  assert.equal(validated.existingCollectionsPreserved, true);
+  assert.deepEqual(validated.addedCollections, { decisions: 0, risks: 0 });
+
+  const wrongCandidateBytes = Buffer.from(serializeTargetData(createCleanSeed()), 'utf8');
+  await writePrivateFile(wrongCandidatePath, wrongCandidateBytes);
+  await assert.rejects(validateMigrationPair({
+    sourcePath,
+    candidatePath: wrongCandidatePath,
+    expectedSourceRevision: migrated.sourceRevision,
+    expectedCandidateRevision: revisionForBytes(wrongCandidateBytes)
+  }), error => error.code === 'MIGRATION_CANDIDATE_NOT_EXACT');
+  assert.deepEqual(await fs.readFile(sourcePath), sourceBytes);
+});
+
+test('migration cutover backs up schema v5 and atomically installs its exact schema-v6 candidate', async t => {
+  const directory = await temporaryDirectory(t);
+  const sourcePath = path.join(directory, 'live-v5.json');
+  const candidatePath = path.join(directory, 'candidate-v6.json');
+  const backupDirectory = path.join(directory, 'backups');
+  const repositoryRoot = path.join(directory, 'repository');
+  await Promise.all([
+    fs.mkdir(backupDirectory, { mode: 0o700 }),
+    fs.mkdir(repositoryRoot, { mode: 0o700 })
+  ]);
+  const sourceBytes = Buffer.from(`${JSON.stringify(schemaV5Document(), null, 2)}\n`, 'utf8');
+  await writePrivateFile(sourcePath, sourceBytes);
+  const migrated = await migrateFile(sourcePath, candidatePath);
+
+  const result = await performMigrationCutover({
+    livePath: sourcePath,
+    candidatePath,
+    expectedLiveChecksum: migrated.sourceRevision,
+    expectedCandidateChecksum: migrated.candidateRevision,
+    backupDirectory,
+    releaseCommit: 'a'.repeat(40),
+    timestamp: new Date('2026-09-09T12:00:00.000Z'),
+    repositoryRoot
+  });
+
+  assert.equal(result.operation, 'schema-v5-to-v6-cutover');
+  assert.equal(result.status, 'replaced-and-verified');
+  assert.equal(result.exactMigration, true);
+  assert.equal(revisionForBytes(await fs.readFile(sourcePath)), migrated.candidateRevision);
+  assert.deepEqual(await fs.readFile(result.backupPath), sourceBytes);
+  assert.equal((await fs.stat(result.backupPath)).mode & 0o777, 0o600);
+  assert.equal((await fs.stat(result.recordPath)).mode & 0o777, 0o600);
+});
+
+test('migration cutover performs one verified rollback after a post-replacement failure', async t => {
+  const directory = await temporaryDirectory(t);
+  const sourcePath = path.join(directory, 'live-v5.json');
+  const candidatePath = path.join(directory, 'candidate-v6.json');
+  const backupDirectory = path.join(directory, 'backups');
+  const repositoryRoot = path.join(directory, 'repository');
+  await Promise.all([
+    fs.mkdir(backupDirectory, { mode: 0o700 }),
+    fs.mkdir(repositoryRoot, { mode: 0o700 })
+  ]);
+  const sourceBytes = Buffer.from(`${JSON.stringify(schemaV5Document(), null, 2)}\n`, 'utf8');
+  await writePrivateFile(sourcePath, sourceBytes);
+  const migrated = await migrateFile(sourcePath, candidatePath);
+  let error;
+
+  try {
+    await performMigrationCutover({
+      livePath: sourcePath,
+      candidatePath,
+      expectedLiveChecksum: migrated.sourceRevision,
+      expectedCandidateChecksum: migrated.candidateRevision,
+      backupDirectory,
+      releaseCommit: 'a'.repeat(40),
+      timestamp: new Date('2026-09-09T12:00:00.000Z'),
+      repositoryRoot,
+      hooks: {
+        syncDirectory: async () => {
+          throw new Error('simulated post-replacement sync failure');
+        }
+      }
+    });
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.ok(error);
+  assert.equal(error.rollbackAttempted, true);
+  assert.equal(error.rollbackError, undefined);
+  assert.deepEqual(await fs.readFile(sourcePath), sourceBytes);
+  const backups = (await fs.readdir(backupDirectory)).filter(name => name.endsWith('.backup'));
+  assert.equal(backups.length, 1);
+  assert.deepEqual(await fs.readFile(path.join(backupDirectory, backups[0])), sourceBytes);
+});
+
 test('CLI requires explicit outside-repository source and destination paths', async () => {
-  await assert.rejects(run([], process.cwd()), /Missing required release command flag/);
+  await assert.rejects(runFileMigration([], process.cwd()), /Missing required release command flag/);
   await assert.rejects(
-    run(['--source', 'package.json', '--destination', 'candidate-v6.json'], process.cwd()),
+    runFileMigration(['--source', 'package.json', '--destination', 'candidate-v6.json'], process.cwd()),
     /must remain outside the repository/
   );
+  await assert.rejects(runMigrationValidation([], process.cwd()), /Missing required release command flag/);
 });

@@ -1,6 +1,6 @@
 # Evidence-to-Current-State Review
 
-**Status:** Isolated target implementation
+**Status:** Current merged source capability; schema-v6 production release pending
 
 **Persisted model:** strict `schemaVersion: 6`; workflow behavior unchanged from its schema-v5 introduction
 

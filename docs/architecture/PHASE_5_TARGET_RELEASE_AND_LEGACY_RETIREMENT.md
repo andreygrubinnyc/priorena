@@ -1,6 +1,6 @@
 # Phase 5 target release and legacy retirement
 
-**Status:** source-controlled release candidate
+**Status:** Historical schema-v2 release record; do not use for schema-v6 migration or release
 
 **Application boundary:** single-user, local-only, `127.0.0.1`
 

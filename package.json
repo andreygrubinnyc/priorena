@@ -12,6 +12,8 @@
     "workflow:check": "node scripts/security/workflow-policy-check.js",
     "release:legacy-scan": "node scripts/release/legacy-scan.js",
     "schema:migrate-v5-to-v6": "node scripts/release/migrate-schema-v5-to-v6.js",
+    "release:validate-migration": "node scripts/release/validate-migration-v5-to-v6.js",
+    "release:migrate-cutover-live": "node scripts/release/cutover-migration-v5-to-v6.js",
     "release:bootstrap": "node scripts/release/bootstrap-seed.js",
     "release:validate-seed": "node scripts/release/validate-seed.js",
     "release:smoke": "node scripts/release/smoke.js",

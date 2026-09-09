@@ -1,6 +1,6 @@
 # Schema-v4 source release and controlled-cutover boundary
 
-**Status:** source-release procedure; no live cutover authorization
+**Status:** Historical schema-v4 source-release procedure; do not use for schema-v6 migration or release
 
 **Date:** 2026-08-13
 

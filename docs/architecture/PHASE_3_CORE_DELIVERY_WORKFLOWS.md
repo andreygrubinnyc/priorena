@@ -1,6 +1,6 @@
 # Phase 3 core delivery workflows
 
-**Status:** Isolated target implementation
+**Status:** Historical schema-v2 implementation record; not current schema-v6 operating guidance
 
 **Namespace:** `/api/v2`
 

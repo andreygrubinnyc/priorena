@@ -1,6 +1,6 @@
 # Phase 2 target server and API architecture
 
-**Status:** Isolated development foundation
+**Status:** Historical schema-v2 implementation record; not current schema-v6 operating guidance
 
 **Namespace:** `/api/v2`
 
