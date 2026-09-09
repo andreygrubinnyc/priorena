@@ -1,6 +1,6 @@
 # Generic Seed and Feature Hierarchy
 
-**Status:** Implemented source model; live runtime reset not authorized
+**Status:** Historical schema-v3 Feature model; superseded by the current Initiative/Workstream schema-v6 architecture
 **Schema:** strict `schemaVersion: 3`
 **API namespace:** existing `/api/v2`
 **Runtime boundary:** single-user, local-only, loopback `127.0.0.1`

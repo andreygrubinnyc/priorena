@@ -1,6 +1,6 @@
 # Phase 4 target UI and canonical Briefings
 
-**Status:** Isolated target implementation
+**Status:** Historical schema-v2 implementation record; not current schema-v6 operating guidance
 
 **Target entry:** `/target/`
 

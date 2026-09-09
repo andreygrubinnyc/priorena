@@ -1,5 +1,10 @@
 # Phase 5 controlled cutover runbook
 
+**Status:** Historical schema-v2 clean-cutover runbook; do not use for schema-v6 migration or release
+
+Use `docs/release/SCHEMA_V6_CONTROLLED_MIGRATION_AND_RELEASE.md` for the current
+whole-document schema-v5 to schema-v6 release boundary.
+
 This runbook is repository-safe. Replace every placeholder with values from the private release-readiness manifest. Never copy those values into Git, issues, pull-request comments, or public logs.
 
 ## Gates

@@ -1,6 +1,6 @@
 # Structure setup and empty-state UX source release
 
-**Status:** source change awaiting review and merge authorization
+**Status:** Current merged source capability; schema-v6 production release pending
 
 **Persistence:** strict `schemaVersion: 6`; hierarchy behavior unchanged from schema v5
 

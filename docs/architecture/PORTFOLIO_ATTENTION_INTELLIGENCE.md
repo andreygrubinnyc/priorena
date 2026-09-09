@@ -1,6 +1,6 @@
 # Portfolio and Attention Intelligence
 
-**Status:** Isolated target implementation
+**Status:** Current merged source capability; schema-v6 production release pending
 
 **Persisted model:** strict `schemaVersion: 6`; projection behavior unchanged from its schema-v5 introduction
 

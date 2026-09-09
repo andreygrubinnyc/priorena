@@ -1,6 +1,6 @@
 # External Feed Import and Review UI source release
 
-**Status:** source change awaiting review and merge authorization
+**Status:** Current merged source capability; schema-v6 production release pending
 
 **Persistence:** strict `schemaVersion: 6`; import-review behavior unchanged from schema v5
 

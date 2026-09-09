@@ -1,6 +1,6 @@
 # Briefing Activation and Presets
 
-**Status:** Isolated target implementation
+**Status:** Current merged source capability; schema-v6 production release pending
 
 **Persisted model:** strict `schemaVersion: 6`; Briefing shape unchanged from schema v5
 
